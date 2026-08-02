@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.core.deps import CurrentContext, DbSession, ProductionContext
 from app.models import (
     Design,
+    Machine,
     Order,
     OrderEvent,
     OrderItem,
@@ -211,6 +212,7 @@ def production_board(context: ProductionContext, db: DbSession) -> dict:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_order(payload: OrderIn, context: ProductionContext, db: DbSession) -> dict:
+    _validate_machine(db, context, payload.assigned_machine_id)
     order = Order(
         organization_id=context.org_id,
         customer_id=payload.customer_id,
@@ -253,6 +255,7 @@ def update_order(
     order_id: uuid.UUID, payload: OrderIn, context: ProductionContext, db: DbSession
 ) -> dict:
     order = _get(db, context, order_id)
+    _validate_machine(db, context, payload.assigned_machine_id)
     data = payload.model_dump(exclude={"items"})
     for field, value in data.items():
         setattr(order, field, value)
@@ -306,6 +309,16 @@ def change_status(
 def delete_order(order_id: uuid.UUID, context: ProductionContext, db: DbSession) -> Message:
     db.delete(_get(db, context, order_id))
     return Message(detail="Order deleted.")
+
+
+def _validate_machine(db: DbSession, context: CurrentContext, machine_id) -> None:
+    """A machine id from the client must belong to the caller's workspace,
+    otherwise an order can hold a cross-tenant reference."""
+    if machine_id is None:
+        return
+    machine = db.get(Machine, machine_id)
+    if machine is None or machine.organization_id != context.org_id:
+        raise HTTPException(status_code=404, detail="Machine not found.")
 
 
 def _validate_refs(

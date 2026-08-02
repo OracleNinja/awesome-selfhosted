@@ -377,7 +377,22 @@ def _analyze_with_anthropic(image_bytes: bytes, content_type: str) -> dict | Non
 
 
 def semantic_analysis(image_bytes: bytes, content_type: str = "image/png") -> dict | None:
-    """Ask a vision model what the artwork is. Returns None if unavailable."""
+    """Ask a vision model what the artwork is. Returns None if unavailable.
+
+    This is a belt-and-braces wrapper: the per-provider helpers already swallow
+    their own errors, but the deterministic analysis must survive *any* failure
+    in this layer — a bad key, a network partition, an SDK that changed shape
+    under us — because the compatibility score is what the customer is quoted
+    against.
+    """
+    try:
+        return _semantic_analysis(image_bytes, content_type)
+    except Exception as exc:  # noqa: BLE001 - deliberately total
+        log.warning("Semantic analysis layer failed, continuing without it: %s", exc)
+        return None
+
+
+def _semantic_analysis(image_bytes: bytes, content_type: str) -> dict | None:
     if not settings.ai_enabled():
         return None
     provider = settings.ai_provider

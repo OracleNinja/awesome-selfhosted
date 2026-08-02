@@ -316,21 +316,6 @@ def test_production_module_is_business_only(app_client):
         assert "Business" in response.json()["detail"]
 
 
-@pytest.fixture(scope="module")
-def business_plan(app_client):
-    """Upgrade the test workspace so the production endpoints unlock."""
-    from sqlalchemy import select
-
-    from app.db.session import SessionLocal
-    from app.models import PlanTier, Subscription
-
-    with SessionLocal() as db:
-        subscription = db.scalar(select(Subscription))
-        subscription.tier = PlanTier.business
-        db.commit()
-    yield
-
-
 # ------------------------------------------------------------------- orders
 def test_order_lifecycle(app_client, business_plan, customer, uploaded_design):
     created = app_client.post(

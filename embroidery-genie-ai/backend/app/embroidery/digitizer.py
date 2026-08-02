@@ -34,7 +34,13 @@ from .geometry import (
     to_polygons,
     union_polygons,
 )
-from .optimizer import AssemblyParams, StitchRun, assemble, validate_pattern
+from .optimizer import (
+    AssemblyParams,
+    StitchBudgetExceeded,
+    StitchRun,
+    assemble,
+    validate_pattern,
+)
 from .pattern import EmbroideryPattern, Thread
 from .running import RunParams, close_path, generate_running
 from .satin import SatinParams, generate_satin, satin_from_ring, split_ring_into_rails

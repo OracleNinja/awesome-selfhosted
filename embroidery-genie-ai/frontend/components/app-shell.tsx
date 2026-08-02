@@ -37,7 +37,7 @@ const NAV = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { me, loading, error } = useSession();
+  const { me, loading, error, unauthenticated } = useSession();
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   React.useEffect(() => setMobileOpen(false), [pathname]);
@@ -216,7 +216,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ) : null}
         </header>
 
-        {error ? (
+        {unauthenticated ? (
+          <div className="border-b border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.1)] px-4 py-2 text-sm">
+            Your session has expired.{" "}
+            <Link href="/login" className="font-medium underline">
+              Sign in again
+            </Link>
+            .
+          </div>
+        ) : error ? (
           <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
             {error}
           </div>

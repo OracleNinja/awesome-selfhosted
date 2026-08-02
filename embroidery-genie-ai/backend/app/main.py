@@ -93,6 +93,9 @@ async def request_context(request: Request, call_next):
     request that was is the difference between tuning and guessing.
     """
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    # Stash on state so handlers and the exception handlers can log the same id
+    # the client sees in the response header.
+    request.state.request_id = request_id
     start = time.perf_counter()
     response = await call_next(request)
     elapsed = (time.perf_counter() - start) * 1000
@@ -122,13 +125,20 @@ async def validation_handler(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(Exception)
 async def unhandled_handler(request: Request, exc: Exception):
-    log.exception("Unhandled error on %s %s", request.method, request.url.path)
+    request_id = getattr(request.state, "request_id", "-")
+    log.exception(
+        "Unhandled error on %s %s [%s]", request.method, request.url.path, request_id
+    )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "detail": "Something went wrong on our side. The error has been logged."
-            if settings.is_production
-            else f"{type(exc).__name__}: {exc}"
+            "detail": (
+                f"Something went wrong on our side. Quote reference {request_id} "
+                "if you contact support."
+                if settings.is_production
+                else f"{type(exc).__name__}: {exc}"
+            ),
+            "request_id": request_id,
         },
     )
 

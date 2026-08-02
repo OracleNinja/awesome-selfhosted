@@ -188,3 +188,36 @@ that is wrong 5% of the time is worse than no parser. Anything ambiguous returns
 | `GET /health` | Liveness |
 | `GET /ready` | Readiness — verifies the database; 503 when not ready |
 | `GET /docs` | Swagger UI |
+
+---
+
+## Limits and abuse protection
+
+Expensive endpoints are rate limited per **workspace** (the cost lands on the
+workspace's plan, and a team shares one budget):
+
+| Bucket | Endpoints | Limit |
+|---|---|---|
+| `upload` | `POST /designs/upload` | 20 / min |
+| `digitize` | `/vectorize`, `/digitize`, `/designs/text` | 30 / min |
+| `export` | `POST /designs/{id}/export` | 20 / min |
+| `mockup` | `POST /designs/{id}/mockup` | 30 / min |
+| `ai_analysis` | `POST /designs/{id}/analyze` | 15 / min |
+| `preview` | `/studio/text/preview`, `/studio/text/render.png` | 60 / min |
+
+Exceeding one returns **429** with a `Retry-After` header and a message naming
+the limit.
+
+> The limiter keeps its counters in process memory. That is correct for a
+> single instance and deliberately simple; behind multiple replicas each
+> process counts separately. Swap the store in `app/core/ratelimit.py` for
+> Redis before scaling horizontally — the call sites do not change.
+
+Other enforced limits:
+
+- **Upload size** — 25 MB. Rejected on `Content-Length` before the body is
+  buffered, then again while streaming. Returns 413.
+- **Image dimensions** — 40 megapixels, checked on the header before any pixel
+  is decoded, so a decompression bomb costs nothing.
+- **Stitch budget** — 1,500,000 stitches, enforced *during* generation. A design
+  past it fails with a 422 explaining how to reduce it, not an OOM.

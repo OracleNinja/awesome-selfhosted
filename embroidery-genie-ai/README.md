@@ -147,20 +147,39 @@ apt-get install potrace fonts-dejavu-core
 ```bash
 cd backend
 
-# Engine tests — no database needed
-pytest tests/test_engine.py
+# Engine + hardening tests — no database needed
+pytest tests/test_engine.py tests/test_hardening.py
 
 # Full suite including API integration
 createdb embroidery_genie_test
 TEST_DATABASE_URL=postgresql+psycopg://localhost/embroidery_genie_test pytest
 ```
 
-81 tests: stitch geometry and density, format writers, an independent DST
+106 tests: stitch geometry and density, format writers, an independent DST
 round-trip, the full upload → analyze → digitize → export path, tenancy, plan
-quotas, the order state machine, stock consumption, invoicing and voice parsing.
+quotas, the order state machine, stock consumption, invoicing, voice parsing,
+plus a hardening suite covering decompression bombs, XXE and entity expansion,
+determinism of scoring/pricing/digitizing, rate limiting, path traversal,
+cross-workspace access and AI-layer failure.
 
 API tests skip cleanly when `TEST_DATABASE_URL` is unset, so `pytest` stays
 useful on a laptop with no database running.
+
+## Operational limits
+
+Enforced, and worth knowing before you tune them:
+
+| Limit | Value | Where |
+|---|---|---|
+| Upload size | 25 MB, checked on Content-Length then streamed | `MAX_UPLOAD_MB` |
+| Decoded image | 40 megapixels, checked on the header before decoding | `raster.MAX_DECODED_PIXELS` |
+| Stitches per design | 1,500,000, enforced during generation | `AssemblyParams.stitch_budget` |
+| Digitize / upload | 30 / 20 per minute per workspace | `core/ratelimit.py` |
+| Export / mockup | 20 / 30 per minute per workspace | `core/ratelimit.py` |
+| AI vision call | 45 s timeout, failure degrades to CV-only | `AI_TIMEOUT_SECONDS` |
+
+The rate limiter is **in-process**. It protects one worker; behind N replicas
+the effective limit is N x the value. Point it at Redis before scaling out.
 
 ---
 

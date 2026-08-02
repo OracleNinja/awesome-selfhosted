@@ -42,6 +42,20 @@ log = logging.getLogger(__name__)
 MAX_WORKING_EDGE = 1400          # px; larger inputs are downscaled for tracing
 MIN_CONTOUR_AREA_PX = 24         # drop specks smaller than this
 
+# Decompression-bomb guard. A PNG of a solid colour compresses ~1000:1, so an
+# 80 KB upload can decode to 84 megapixels and ~1 GB of RAM — comfortably past
+# any sane upload size limit. Pillow's own default only warns at 89 Mpx and
+# raises at 178 Mpx, both far above what this service should ever decode.
+# 40 Mpx is roughly a 7000x5700 image: larger than any artwork worth tracing.
+MAX_DECODED_PIXELS = 40_000_000
+
+# k-means seeds its centres randomly. Two runs over the same artwork must
+# produce the same palette, the same colour count and therefore the same
+# compatibility score and quote — so the seed is pinned explicitly instead of
+# relying on whatever the OpenCV build happens to default to.
+KMEANS_SEED = 20240101
+cv2.setRNGSeed(KMEANS_SEED)
+
 
 @dataclass
 class TraceOptions:
@@ -95,11 +109,33 @@ class TraceResult:
 
 
 # ------------------------------------------------------------------- loading
+class ImageTooLargeError(ValueError):
+    """The image decodes to more pixels than we are willing to hold in memory."""
+
+
 def load_image(data: bytes) -> np.ndarray:
-    """Decode to an RGBA numpy array, EXIF-oriented."""
+    """Decode to an RGBA numpy array, EXIF-oriented.
+
+    The dimension check happens on the header, *before* any pixel data is
+    decoded, so a decompression bomb is rejected without allocating for it.
+    """
+    try:
+        probe = Image.open(io.BytesIO(data))
+        width, height = probe.size
+    except Exception as exc:
+        raise ValueError(f"Could not read the image file: {exc}") from exc
+
+    pixels = width * height
+    if pixels > MAX_DECODED_PIXELS:
+        raise ImageTooLargeError(
+            f"Image is {width}x{height} ({pixels / 1_000_000:.0f} megapixels), over the "
+            f"{MAX_DECODED_PIXELS // 1_000_000} megapixel limit. Resize it before uploading — "
+            "tracing downsamples to 1400 px anyway, so nothing is gained by a larger file."
+        )
+
     try:
         image = Image.open(io.BytesIO(data))
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - the probe above already opened it
         raise ValueError(f"Could not read the image file: {exc}") from exc
     image = ImageOps.exif_transpose(image)
     if image.mode not in ("RGBA", "RGB"):
@@ -174,6 +210,7 @@ def quantize(
     k = int(max(1, min(max_colors, len(unique_colors))))
 
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.6)
+    cv2.setRNGSeed(KMEANS_SEED)   # reproducible clustering, see KMEANS_SEED
     _compactness, labels, centers = cv2.kmeans(
         samples, k, None, criteria, 4, cv2.KMEANS_PP_CENTERS
     )

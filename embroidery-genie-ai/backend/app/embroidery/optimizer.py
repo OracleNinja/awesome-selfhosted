@@ -26,6 +26,24 @@ class StitchRun:
     order_hint: int = 0
 
 
+class StitchBudgetExceeded(Exception):
+    """Generation produced more stitches than the budget allows.
+
+    Raised while assembling rather than after, so a pathological input (a
+    hairline traced from noise, a design scaled to a metre wide) fails fast
+    with a clear message instead of exhausting memory first.
+    """
+
+    def __init__(self, produced: int, budget: int):
+        self.produced = produced
+        self.budget = budget
+        super().__init__(
+            f"This design generated over {budget:,} stitches, which is past the safe "
+            "limit for a single file. Reduce the finished size, open up the density, "
+            "or simplify the artwork."
+        )
+
+
 @dataclass(slots=True)
 class AssemblyParams:
     max_stitch: float = 120.0
@@ -37,6 +55,9 @@ class AssemblyParams:
     tie_stitch_length: float = 8.0   # 0.8 mm
     tie_stitch_count: int = 3
     merge_colors: bool = True
+    # Roughly 3x the largest commercial machine's capacity: high enough that no
+    # legitimate design hits it, low enough to stop a runaway before it OOMs.
+    stitch_budget: int = 1_500_000
 
 
 # --------------------------------------------------------------------- ties
@@ -167,6 +188,7 @@ def assemble(
     current_block: StitchBlock | None = None
     cursor: Point | None = None
     cursor_prev: Point | None = None
+    produced = 0
 
     for run in ordered:
         points = clamp_stitch_lengths(run.points, params.max_stitch, params.min_stitch)
@@ -207,6 +229,10 @@ def assemble(
             current_block.add(p[0], p[1])
         cursor = points[-1]
         cursor_prev = points[-2]
+
+        produced += len(points)
+        if params.stitch_budget and produced > params.stitch_budget:
+            raise StitchBudgetExceeded(produced, params.stitch_budget)
 
     # Final tie-off so the last block cannot unravel on the trimmer.
     if params.tie_off and pattern.blocks:

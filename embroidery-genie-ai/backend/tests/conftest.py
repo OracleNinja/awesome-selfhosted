@@ -82,3 +82,30 @@ def sample_png() -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+@pytest.fixture(scope="session")
+def business_plan(app_client):
+    """Upgrade the test workspace so the production-module endpoints unlock."""
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models import PlanTier, Subscription
+
+    with SessionLocal() as db:
+        subscription = db.scalar(select(Subscription))
+        if subscription is not None:
+            subscription.tier = PlanTier.business
+            db.commit()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """The limiter is process-global; without a reset one test's requests
+    would exhaust the budget for the next."""
+    from app.core import ratelimit
+
+    ratelimit.reset()
+    yield
+    ratelimit.reset()

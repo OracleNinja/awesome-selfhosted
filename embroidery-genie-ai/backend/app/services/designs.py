@@ -33,6 +33,7 @@ from app.embroidery import (
     text_to_shapes,
     trace_image,
 )
+from app.embroidery.optimizer import StitchBudgetExceeded
 from app.embroidery.pattern import EmbroideryPattern
 from app.embroidery.raster import thumbnail
 from app.embroidery.svg_parse import parse_svg
@@ -426,6 +427,10 @@ def digitize_design(
     except PipelineError:
         design.status = DesignStatus.failed
         raise
+    except StitchBudgetExceeded as exc:
+        design.status = DesignStatus.failed
+        design.error_message = str(exc)
+        raise PipelineError(str(exc)) from exc
     except Exception as exc:
         design.status = DesignStatus.failed
         design.error_message = str(exc)

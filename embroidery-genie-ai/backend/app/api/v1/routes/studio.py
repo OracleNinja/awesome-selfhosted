@@ -8,7 +8,9 @@ immediate rather than like a job queue.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
+
+from app.core.ratelimit import rate_limit
 
 from app.embroidery import (
     DigitizeOptions,
@@ -81,7 +83,7 @@ def fonts() -> dict:
     return {"fonts": available_fonts(), "healthy": healthy}
 
 
-@router.post("/text/preview")
+@router.post("/text/preview", dependencies=[Depends(rate_limit("preview"))])
 def text_preview(payload: TextDesignRequest) -> dict:
     """Digitize lettering without saving anything — used by the live editor."""
     color = payload.color.lstrip("#")
@@ -118,7 +120,7 @@ def text_preview(payload: TextDesignRequest) -> dict:
     }
 
 
-@router.post("/text/render.png")
+@router.post("/text/render.png", dependencies=[Depends(rate_limit("preview"))])
 def text_render(payload: TextDesignRequest) -> Response:
     """PNG of the lettering as it will stitch."""
     color = payload.color.lstrip("#")

@@ -97,6 +97,16 @@ class Settings(BaseSettings):
     def validate_runtime(self) -> list[str]:
         """Return a list of configuration problems (empty means healthy)."""
         problems: list[str] = []
+
+        # The app sends credentials, so a wildcard origin would let any site
+        # read authenticated responses. Browsers reject this pairing anyway;
+        # failing loudly here beats a confusing CORS error at runtime.
+        if "*" in self.cors_origins:
+            problems.append(
+                "CORS_ORIGINS cannot be '*' because the API allows credentials. "
+                "List the exact origins that serve the app."
+            )
+
         if self.is_production:
             if not self.supabase_jwt_secret and not self.supabase_url:
                 problems.append(

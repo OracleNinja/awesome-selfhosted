@@ -7,11 +7,24 @@ import unicodedata
 import uuid
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.deps import CurrentContext, DbSession
+from app.core.ratelimit import rate_limit
 from app.embroidery import TextOptions, TraceOptions
 from app.models import Design, DesignStatus, FileKind, Machine, Order
 from app.schemas import (
@@ -43,6 +56,43 @@ def _get(db: DbSession, context: CurrentContext, design_id: uuid.UUID) -> Design
     if design is None:
         raise HTTPException(status_code=404, detail="Design not found.")
     return design
+
+
+UPLOAD_CHUNK = 1024 * 1024
+
+
+async def _read_limited(file: UploadFile, request: Request) -> bytes:
+    """Read an upload without letting it size the process.
+
+    ``await file.read()`` with no argument buffers the entire body first, so a
+    multi-gigabyte POST exhausts memory before any size check can run. Reject
+    on the declared Content-Length when we have one, then read in chunks and
+    stop the moment the real body exceeds the limit.
+    """
+    limit = settings.max_upload_bytes
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(
+            status_code=413,  # Content Too Large
+            detail=f"Upload is {int(declared) / 1_048_576:.1f} MB; the limit is "
+                   f"{settings.max_upload_mb} MB.",
+        )
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                status_code=413,  # Content Too Large
+                detail=f"Upload exceeds the {settings.max_upload_mb} MB limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _quota_guard(db: DbSession, context: CurrentContext) -> None:
@@ -135,8 +185,10 @@ def delete_design(design_id: uuid.UUID, context: CurrentContext, db: DbSession) 
 
 
 # ------------------------------------------------------------------ creation
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/upload", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(rate_limit("upload"))])
 async def upload_design(
+    request: Request,
     context: CurrentContext,
     db: DbSession,
     file: UploadFile = File(...),
@@ -147,7 +199,7 @@ async def upload_design(
 ) -> dict:
     """Upload artwork (PNG/JPG/HEIC/BMP/WEBP/SVG) and run the analyzer."""
     _quota_guard(db, context)
-    data = await file.read()
+    data = await _read_limited(file, request)
     if not data:
         raise HTTPException(status_code=422, detail="The uploaded file is empty.")
 
@@ -171,7 +223,8 @@ async def upload_design(
     return pipeline.summarize(design)
 
 
-@router.post("/text", status_code=status.HTTP_201_CREATED)
+@router.post("/text", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(rate_limit("digitize"))])
 def create_text_design(
     payload: TextDesignRequest, context: CurrentContext, db: DbSession
 ) -> dict:
@@ -228,7 +281,7 @@ def create_blank(payload: DesignCreate, context: CurrentContext, db: DbSession) 
 
 
 # ------------------------------------------------------------------ pipeline
-@router.post("/{design_id}/analyze")
+@router.post("/{design_id}/analyze", dependencies=[Depends(rate_limit("ai_analysis"))])
 def analyze(
     design_id: uuid.UUID,
     context: CurrentContext,
@@ -254,7 +307,7 @@ def analyze(
     return design.analysis
 
 
-@router.post("/{design_id}/vectorize")
+@router.post("/{design_id}/vectorize", dependencies=[Depends(rate_limit("digitize"))])
 def vectorize(
     design_id: uuid.UUID, payload: VectorizeRequest, context: CurrentContext, db: DbSession
 ) -> dict:
@@ -277,7 +330,7 @@ def vectorize(
     return result
 
 
-@router.post("/{design_id}/digitize")
+@router.post("/{design_id}/digitize", dependencies=[Depends(rate_limit("digitize"))])
 def digitize(
     design_id: uuid.UUID, payload: DigitizeRequest, context: CurrentContext, db: DbSession
 ) -> dict:
@@ -307,7 +360,7 @@ def digitize(
     return result
 
 
-@router.post("/{design_id}/export")
+@router.post("/{design_id}/export", dependencies=[Depends(rate_limit("export"))])
 def export(
     design_id: uuid.UUID, payload: ExportRequest, context: CurrentContext, db: DbSession
 ) -> Response:
@@ -381,7 +434,7 @@ def _download_headers(filename: str, warnings: list[str]) -> dict[str, str]:
     return headers
 
 
-@router.post("/{design_id}/mockup")
+@router.post("/{design_id}/mockup", dependencies=[Depends(rate_limit("mockup"))])
 def mockup(
     design_id: uuid.UUID, payload: MockupRequest, context: CurrentContext, db: DbSession
 ) -> Response:

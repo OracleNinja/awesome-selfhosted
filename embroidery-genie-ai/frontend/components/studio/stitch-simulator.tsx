@@ -427,6 +427,11 @@ export function StitchSimulator({
           onPointerCancel={onPointerUp}
           onWheel={onWheel}
           className="absolute inset-0 cursor-grab touch-none active:cursor-grabbing"
+          role="img"
+          aria-label={
+            `Stitch preview: ${stitchTotal.toLocaleString()} stitches in ` +
+            `${stream.blocks.length} colours. Drag to pan, scroll to zoom.`
+          }
         />
 
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
