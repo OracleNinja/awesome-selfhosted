@@ -156,6 +156,25 @@ def test_digitize_then_export(app_client, uploaded_design):
     assert any(n.endswith(".pes") for n in names)
 
 
+def test_export_handles_non_ascii_design_names(app_client, uploaded_design):
+    """Design names routinely contain em dashes and accents; HTTP headers are
+    latin-1, so the filename has to be encoded per RFC 5987."""
+    app_client.patch(
+        f"/api/v1/designs/{uploaded_design['id']}",
+        json={"name": "Northside Athletics — Café Crest"},
+    )
+    response = app_client.post(
+        f"/api/v1/designs/{uploaded_design['id']}/export", json={"formats": ["dst"]}
+    )
+    assert response.status_code == 200, response.text
+    disposition = response.headers["content-disposition"]
+    assert "filename*=UTF-8''" in disposition
+    disposition.encode("latin-1")  # must not raise
+    app_client.patch(
+        f"/api/v1/designs/{uploaded_design['id']}", json={"name": "Test Logo"}
+    )
+
+
 def test_export_format_is_gated_by_plan(app_client, uploaded_design):
     """The free plan covers DST and PES only."""
     response = app_client.post(

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, or_, select
@@ -24,6 +27,7 @@ from app.schemas import (
 from app.services import designs as pipeline
 from app.services import plans
 from app.services.analyzer import analyze_design
+from app.embroidery.package import safe_name
 from app.services.mockup import render_mockup
 from app.services.storage import get_storage
 
@@ -349,15 +353,32 @@ def export(
     )
     db.flush()
 
-    filename = f"{design.name[:40].strip().replace(' ', '_') or 'design'}_package.zip"
     return Response(
         content=data,
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "X-Export-Warnings": "; ".join(manifest.get("warnings", []))[:400],
-        },
+        headers=_download_headers(
+            f"{safe_name(design.name)}_package.zip", manifest.get("warnings", [])
+        ),
     )
+
+
+def _download_headers(filename: str, warnings: list[str]) -> dict[str, str]:
+    """Build download headers that survive non-ASCII design names.
+
+    HTTP headers are latin-1; real design names routinely contain em dashes,
+    accents and CJK. RFC 5987 gives the UTF-8 name, with an ASCII fallback for
+    clients that ignore it.
+    """
+    ascii_name = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode()
+    ascii_name = re.sub(r'[^A-Za-z0-9._-]+', "_", ascii_name).strip("._") or "design_package.zip"
+    quoted = quote(filename, safe="")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted}',
+    }
+    if warnings:
+        text = "; ".join(warnings)[:400]
+        headers["X-Export-Warnings"] = text.encode("ascii", "replace").decode()
+    return headers
 
 
 @router.post("/{design_id}/mockup")

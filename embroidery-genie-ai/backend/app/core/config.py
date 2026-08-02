@@ -8,10 +8,10 @@ missing rather than silently running insecurely.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -27,7 +27,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------- http
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # NoDecode: pydantic-settings would otherwise try to JSON-parse the env
+    # value before the validator below can split a plain comma-separated list.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
     max_upload_mb: int = 25
 
     # --------------------------------------------------------------- database
