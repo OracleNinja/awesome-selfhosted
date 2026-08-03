@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writePes } from '../src/infra/pes/pes-writer';
@@ -246,5 +246,62 @@ describe('PES export verified by pyembroidery (independent implementation)', () 
     expect(info.color_count).toBe(4);
     expect(info.stitch_count).toBe(countStitches(stitches));
     expect(info.thread_colors).toEqual(['#000000', '#ED171F', '#FFFF00', '#0A55A3']);
+  });
+});
+
+describe('PES import of files written by other software', () => {
+  /** Ask pyembroidery to write a PES file, then read it with our reader. */
+  function pyembroideryPes(version: string): { bytes: Uint8Array; stitches: number; colors: number } {
+    const dir = mkdtempSync(join(tmpdir(), 'norton-foreign-'));
+    const file = join(dir, `foreign-v${version}.pes`);
+    const script = `
+import sys, json, pyembroidery
+p = pyembroidery.EmbPattern()
+p.add_block([(0,0),(100,0),(100,100),(0,100),(0,0)], "red")
+p.add_block([(200,200),(300,200),(300,300),(200,300)], "blue")
+pyembroidery.write(p, sys.argv[1], {"version": sys.argv[2]})
+q = pyembroidery.read(sys.argv[1])
+from pyembroidery.EmbConstant import STITCH, COMMAND_MASK
+n = sum(1 for s in q.stitches if (s[2] & COMMAND_MASK) == STITCH)
+print(json.dumps({"stitches": n, "colors": len(q.threadlist)}))
+`;
+    const scriptFile = join(dir, 'w.py');
+    writeFileSync(scriptFile, script);
+    const out = execFileSync('python3', [scriptFile, file, version], { encoding: 'utf8' });
+    const info = JSON.parse(out);
+    return { bytes: new Uint8Array(readFileSync(file)), ...info };
+  }
+
+  for (const version of ['1', '6']) {
+    it(`reads a PES version ${version} file produced by pyembroidery`, () => {
+      const { bytes, stitches, colors } = pyembroideryPes(version);
+      const design = readPes(bytes);
+
+      expect(design.format).toBe('PES');
+      expect(countStitches(design.stitches)).toBe(stitches);
+      expect(design.threads.length).toBe(colors);
+      // Every imported thread must be a real chart entry, not a placeholder.
+      for (const t of design.threads) expect(t.manufacturer).toBe('Brother');
+      // The reader must be explicit that shapes were not recovered.
+      expect(design.limitations.join(' ')).toMatch(/not recovered/i);
+    });
+  }
+
+  it('reads a bare PEC file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'norton-pec-'));
+    const file = join(dir, 'design.pec');
+    const script = `
+import sys, pyembroidery
+p = pyembroidery.EmbPattern()
+p.add_block([(0,0),(150,0),(150,150),(0,150),(0,0)], "green")
+p.write(sys.argv[1])
+`;
+    const scriptFile = join(dir, 'w.py');
+    writeFileSync(scriptFile, script);
+    execFileSync('python3', [scriptFile, file]);
+
+    const design = readPes(new Uint8Array(readFileSync(file)));
+    expect(design.format).toBe('PEC');
+    expect(countStitches(design.stitches)).toBeGreaterThan(0);
   });
 });

@@ -50,6 +50,29 @@ function makeArtwork() {
   return PNG.sync.write(png);
 }
 
+
+/** Encode a small three-colour logo as a baseline JPEG using the browser. */
+async function makeJpegInPage(page) {
+  return Buffer.from(
+    await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 200;
+      c.height = 200;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 200, 200);
+      ctx.fillStyle = '#1440b4';
+      ctx.beginPath();
+      ctx.arc(100, 100, 70, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#d81e28';
+      ctx.fillRect(40, 90, 120, 20);
+      return c.toDataURL('image/jpeg', 0.95).split(',')[1];
+    }),
+    'base64',
+  );
+}
+
 const log = (...args) => console.log('•', ...args);
 const fail = (msg) => {
   console.error('✗', msg);
@@ -223,6 +246,67 @@ try {
     fail(`re-import gave ${imported.stitches} stitches, expected ~${stats.stitches}`);
   }
   await page.screenshot({ path: join(OUT_DIR, '08-imported.png') });
+
+  // --- 14. other artwork formats ----------------------------------------
+  for (const [label, fileName, contents] of [
+    ['SVG', 'logo.svg', Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">` +
+      `<rect width="200" height="200" fill="#ffffff"/>` +
+      `<circle cx="100" cy="100" r="70" fill="#1440b4"/>` +
+      `<rect x="40" y="90" width="120" height="20" fill="#d81e28"/>` +
+      `</svg>`,
+    )],
+    ['JPEG', 'logo.jpg', await makeJpegInPage(page)],
+  ]) {
+    const p = join(OUT_DIR, fileName);
+    writeFileSync(p, contents);
+
+    await page.click('.topbar button:has-text("New")');
+    await page.waitForSelector('.modal h2');
+    await page.fill('#np-name', `${label} test`);
+    await page.click('.modal .footer button.primary');
+    await page.waitForSelector('.canvas-area canvas');
+
+    await page.setInputFiles('.panel.left input[type=file]', p);
+    await page.waitForSelector('.suitability', { timeout: 30000 });
+    await page.click('button:has-text("Digitize artwork")');
+    await page.waitForFunction(
+      () => document.querySelectorAll('.object-list li').length > 0 &&
+        !document.querySelector('.object-list li')?.textContent?.includes('No objects'),
+      { timeout: 60000 },
+    );
+    const s = await readStats();
+    log(`${label} upload digitized:`, JSON.stringify({ stitches: s.stitches, colors: s.colors }));
+    if (s.stitches < 200) fail(`${label} artwork produced only ${s.stitches} stitches`);
+  }
+  await page.screenshot({ path: join(OUT_DIR, '10-formats.png') });
+
+  // --- 16. oversized design must block export ----------------------------
+  await page.click('.tabs button:has-text("Object")');
+  for (let i = 0; i < 12; i++) await page.click('button:has-text("Scale +10%")');
+  await page.waitForTimeout(800);
+  await page.click('.tabs button:has-text("Validate")');
+  await page.waitForSelector('.issue.ERROR', { timeout: 10000 });
+  const hoopError = (await page.locator('.issue.ERROR').allTextContents()).join(' ');
+  if (!/exceeds the .* hoop by [\d.]+ inches/.test(hoopError)) {
+    fail(`oversize error did not quote the overage: ${hoopError.slice(0, 160)}`);
+  }
+  if (!(await page.locator('button:has-text("Export .pes")').isDisabled())) {
+    fail('export is still enabled on a design that does not fit the hoop');
+  }
+  log('oversized design blocked:', hoopError.replace(/\s+/g, ' ').slice(0, 110));
+  await page.screenshot({ path: join(OUT_DIR, '09-blocked.png') });
+
+  // --- 15. rejects an unsupported file ----------------------------------
+  const badPath = join(OUT_DIR, 'notes.txt');
+  writeFileSync(badPath, 'this is not artwork');
+  await page.setInputFiles('.panel.left input[type=file]', badPath);
+  await page.waitForSelector('.error-banner', { timeout: 10000 });
+  const bannerText = await page.textContent('.error-banner');
+  if (!/not a supported artwork file|could not be decoded/i.test(bannerText)) {
+    fail(`unsupported file gave an unhelpful message: ${bannerText}`);
+  }
+  log('unsupported file rejected with:', bannerText.replace(/\s+/g, ' ').slice(0, 90));
 
   if (consoleErrors.length) {
     console.error('✗ console errors:', consoleErrors.slice(0, 10));
