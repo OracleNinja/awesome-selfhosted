@@ -181,6 +181,36 @@ that is wrong 5% of the time is worse than no parser. Anything ambiguous returns
 
 ---
 
+## AI cost
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/ai/costs` | `period=day\|week\|month`, `scope=tenant\|global` |
+| `GET` | `/ai/inventory` | Every AI operation, the routing table, and what is deliberately deterministic |
+
+`/ai/costs` requires the admin or owner role. `scope=global` additionally
+requires the caller's email in `AI_ADMIN_EMAILS`.
+
+The response separates **`recorded`** (sums straight out of the usage ledger)
+from **`calculated`** (ratios derived from them, each carrying its own
+`formula` and `denominator`). A ratio with a zero denominator returns `null`,
+not `0.00` — no design analysed yet is not the same as a cost of nothing.
+
+Money is always an estimate computed from operator-configured rates in
+`backend/config/ai_pricing.json`, never an amount billed by a provider. Calls
+against a model with no configured rate record tokens with a null cost and are
+counted separately as `unpriced_calls`.
+
+There is exactly one AI call in the product: a vision model describing what
+artwork depicts. It cannot move the compatibility score, the stitch count, the
+price or the export — those are deterministic. With `AI_ENABLED=false` every
+endpoint above still works and only the description goes away.
+
+See [AI cost controls](AI_COST_CONTROLS.md) for the full audit, budgets, cache
+design and kill switches.
+
+---
+
 ## System
 
 | Path | Purpose |
@@ -212,6 +242,12 @@ the limit.
 > single instance and deliberately simple; behind multiple replicas each
 > process counts separately. Swap the store in `app/core/ratelimit.py` for
 > Redis before scaling horizontally — the call sites do not change.
+
+AI spend is budgeted separately, at five scopes (per request, per user per day,
+per workspace per day, per workspace per month, and globally per month), in both
+tokens and dollars. Exhausting one stops the AI description and nothing else —
+analysis, digitizing, pricing and export continue. See
+[AI cost controls](AI_COST_CONTROLS.md).
 
 Other enforced limits:
 

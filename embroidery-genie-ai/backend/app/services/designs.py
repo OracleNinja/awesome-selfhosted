@@ -16,6 +16,7 @@ from dataclasses import asdict
 
 from sqlalchemy.orm import Session
 
+from app.ai import AIContext
 from app.core.config import settings
 from app.embroidery import (
     DigitizeOptions,
@@ -187,7 +188,14 @@ def create_design_from_upload(
     if run_analysis:
         try:
             if kind == "raster":
-                report = analyze_design(data, content_type, use_ai=use_ai)
+                report = analyze_design(
+                    data,
+                    content_type,
+                    use_ai=use_ai,
+                    ai_context=AIContext(
+                        db=db, organization_id=organization_id, user_id=user_id
+                    ),
+                )
             else:
                 report = _analyze_vector(data)
             design.analysis = report.to_dict()

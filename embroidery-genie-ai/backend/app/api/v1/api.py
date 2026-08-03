@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.routes import (
+    ai_costs,
     auth,
     customers,
     dashboard,
@@ -30,3 +31,4 @@ api_router.include_router(invoices.router)
 api_router.include_router(pricing.router)
 api_router.include_router(voice.router)
 api_router.include_router(files.router)
+api_router.include_router(ai_costs.router)

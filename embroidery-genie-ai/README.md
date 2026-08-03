@@ -59,6 +59,13 @@ Nothing the model says can move the score. Models are good at description and
 bad at metrology, and a quote that changes because a language model felt
 different today is not a product.
 
+That semantic layer is the **only** AI call in the whole product, and it runs
+through a single gateway that meters it, budgets it and caches it per workspace.
+Set `AI_ENABLED=false` and everything else — scoring, vectorizing, digitizing,
+pricing, mockups, exports, production — works identically; only the description
+goes away. A worked cost audit, the budgets and the kill switches are in
+[docs/AI_COST_CONTROLS.md](docs/AI_COST_CONTROLS.md).
+
 ### A note on export formats
 
 Embroidery formats are undocumented binary blobs reverse-engineered by the
@@ -177,9 +184,19 @@ Enforced, and worth knowing before you tune them:
 | Digitize / upload | 30 / 20 per minute per workspace | `core/ratelimit.py` |
 | Export / mockup | 20 / 30 per minute per workspace | `core/ratelimit.py` |
 | AI vision call | 45 s timeout, failure degrades to CV-only | `AI_TIMEOUT_SECONDS` |
+| AI output tokens | 700 per call, never unbounded | `AI_MAX_OUTPUT_TOKENS` |
+| AI input tokens | 4,000 per call; artwork downscaled to 1024 px first | `AI_MAX_INPUT_TOKENS` |
+| AI spend per workspace | 4M tokens / $25 per month | `AI_MONTHLY_TOKENS_PER_TENANT` |
+| AI spend service-wide | 60M tokens / $400 per month, hard stop | `AI_MONTHLY_TOKENS_GLOBAL` |
+| AI retries | 2 attempts, exponential backoff, each one billed and logged | `AI_MAX_ATTEMPTS` |
 
 The rate limiter is **in-process**. It protects one worker; behind N replicas
 the effective limit is N x the value. Point it at Redis before scaling out.
+
+The AI budgets are enforced against a database ledger, so they hold across
+replicas — but the read-then-spend is not atomic, so concurrent workers can each
+overshoot by one request (~$0.005). See
+[docs/AI_COST_CONTROLS.md](docs/AI_COST_CONTROLS.md) §15.
 
 ---
 

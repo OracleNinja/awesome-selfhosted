@@ -158,6 +158,20 @@ export type Analysis = {
   suggested_fabric: string;
   suggested_colors: number;
   ai: Record<string, unknown> | null;
+  /**
+   * Why the AI layer did or did not produce a description — `cached`,
+   * `blocked` by a cost budget, `skipped` because it is switched off. When it
+   * carries a message the backend has already appended it to
+   * `recommendations`, so the panel explains itself without extra wiring.
+   */
+  ai_status: {
+    status: "ok" | "cached" | "skipped" | "blocked" | "failed";
+    reason: string | null;
+    message: string;
+    model: string | null;
+    cached: boolean;
+    estimated_cost_usd: number | null;
+  } | null;
 };
 
 export type Design = {

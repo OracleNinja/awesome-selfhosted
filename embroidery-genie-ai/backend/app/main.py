@@ -54,8 +54,40 @@ async def lifespan(app: FastAPI):
             "No TrueType font found; text designs will fail. "
             "Install fonts-dejavu-core."
         )
-    if not settings.ai_enabled():
-        log.info("No AI provider configured — analysis runs on computer vision only.")
+    if settings.ai_available():
+        from app.ai import pricing
+        from app.ai.operations import inventory
+        from app.ai.routing import resolve_provider
+
+        provider = resolve_provider()
+        log.info(
+            "AI enabled via %s; operations: %s",
+            provider.value,
+            ", ".join(f"{op['operation']}→{op['tier']}" for op in inventory()),
+        )
+        # A configured key with no SDK installed looks enabled and fails on the
+        # first request. Say so at startup rather than once per upload.
+        try:
+            __import__(provider.value)
+        except ImportError:
+            log.warning(
+                "AI_PROVIDER is '%s' but the '%s' package is not installed — every "
+                "AI call will degrade to computer vision only. Install it, or set "
+                "AI_ENABLED=false to stop advertising the feature.",
+                provider.value, provider.value,
+            )
+        if not pricing.table().loaded:
+            log.warning(
+                "No AI pricing file at %s — usage will be metered in tokens with "
+                "no cost estimate, and dollar-denominated budgets will not bind.",
+                settings.ai_pricing_file,
+            )
+    else:
+        log.info(
+            "AI is off (AI_ENABLED=%s, provider=%s) — analysis, pricing, "
+            "digitizing and export all run on deterministic code.",
+            settings.ai_enabled, settings.ai_provider,
+        )
 
     yield
     log.info("Shutting down.")

@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -209,6 +210,114 @@ class UsageEvent(UUIDMixin, Base):
         DateTime(timezone=True), server_default="now()", nullable=False
     )
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+# ------------------------------------------------------------------- ai cost
+class AICallEvent(UUIDMixin, Base):
+    """One row per *attempt* to call an external model, plus one per cache hit.
+
+    Append-only, and deliberately per-attempt: a retry is a second request that
+    a provider bills for, so it is a second row. Summing this table is the only
+    supported way to answer "what did AI cost", which means the answer can never
+    drift from what actually happened.
+
+    ``organization_id`` is nullable so an unattributed call (a script, a
+    management command) is still recorded and still counts against the global
+    budget rather than escaping the meter.
+
+    No prompt text and no model output is stored here. The ledger holds counts,
+    money and outcomes — the things you need to control spend — not customer
+    artwork or the descriptions generated from it.
+    """
+
+    __tablename__ = "ai_call_events"
+    __table_args__ = (
+        Index("ix_ai_calls_org_time", "organization_id", "occurred_at"),
+        Index("ix_ai_calls_user_time", "user_id", "occurred_at"),
+        Index("ix_ai_calls_time", "occurred_at"),
+        Index("ix_ai_calls_operation", "operation", "occurred_at"),
+    )
+
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    operation: Mapped[str] = mapped_column(String(60), nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(30))
+    model: Mapped[str | None] = mapped_column(String(120))
+    tier: Mapped[str | None] = mapped_column(String(20))
+    attempt: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    # served_from_cache | success | failure | blocked | skipped
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    #: Machine-readable reason for a non-success outcome (budget_exceeded,
+    #: rate_limited, timeout, invalid_request, ...). Never free-form user text.
+    reason: Mapped[str | None] = mapped_column(String(60))
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: True when the counts above came from the provider's usage report; false
+    #: when they are our pre-flight estimate (a failed call still consumed input).
+    tokens_measured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    #: Dollars, computed from config/ai_pricing.json. NULL means the model has
+    #: no configured rate — never zero, which would understate the real bill.
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 8))
+    #: Reserved for a provider-reported figure where one is available.
+    actual_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 8))
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    artwork_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    request_id: Mapped[str | None] = mapped_column(String(120))
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+
+class AIResultCache(UUIDMixin, Base):
+    """Tenant-scoped cache of model answers.
+
+    The unique key is (organization_id, cache_key) and every read filters on
+    organization_id, so a cache entry is unreachable from any workspace but the
+    one that paid for it. Artwork is customer property; two shops that happen to
+    upload the same file must not be able to learn that from each other.
+
+    ``cache_key`` already mixes in the artwork hash, the operation, the prompt
+    version, the model and the request shape, so a prompt edit or a model change
+    misses rather than serving a stale answer under new settings.
+    """
+
+    __tablename__ = "ai_result_cache"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "cache_key", name="uq_ai_cache_tenant_key"),
+        Index("ix_ai_cache_org_artwork", "organization_id", "artwork_hash"),
+        Index("ix_ai_cache_expiry", "expires_at"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    cache_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation: Mapped[str] = mapped_column(String(60), nullable=False)
+    artwork_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    result: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hit_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 # -------------------------------------------------------------------- design

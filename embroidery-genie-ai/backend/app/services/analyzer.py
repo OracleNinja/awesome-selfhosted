@@ -19,12 +19,10 @@ felt different today is not a product.
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
 from dataclasses import dataclass, field
 
-from app.core.config import settings
+from app.ai import AIContext, AIOutcome, run_vision_analysis
 from app.embroidery.fabrics import get_fabric, list_fabrics
 from app.embroidery.raster import (
     dominant_colors,
@@ -54,6 +52,9 @@ class AnalysisReport:
     suggested_fabric: str = "cotton_shirt"
     suggested_colors: int = 4
     ai: dict | None = None
+    #: Why the AI layer did or did not produce something — cached, blocked by a
+    #: budget, switched off, failed. Carries no prompt or artwork content.
+    ai_status: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +69,7 @@ class AnalysisReport:
             "suggested_fabric": self.suggested_fabric,
             "suggested_colors": self.suggested_colors,
             "ai": self.ai,
+            "ai_status": self.ai_status,
         }
 
 
@@ -264,147 +266,26 @@ def verdict_for(score: int) -> str:
 
 
 # ------------------------------------------------------------- semantic pass
-VISION_PROMPT = """You are assisting an embroidery digitizer. Look at this artwork and \
-answer ONLY with a JSON object, no prose, using exactly these keys:
+# The prompt, the provider adapters, the token budget, the cache and the meter
+# all live in ``app/ai``. This module asks a question and gets an answer or a
+# reason; it does not know what a model costs, and it must not.
+def semantic_analysis(
+    image_bytes: bytes,
+    content_type: str = "image/png",
+    context: AIContext | None = None,
+) -> AIOutcome:
+    """Ask a vision model what the artwork is. Never raises.
 
-{
-  "subject": "one short phrase describing what the artwork shows",
-  "artwork_type": "logo" | "lettering" | "illustration" | "photograph" | "pattern" | "mixed",
-  "contains_text": true/false,
-  "text_content": "the exact text you can read, or empty string",
-  "smallest_text_words": ["words that appear notably smaller than the rest"],
-  "has_gradients": true/false,
-  "has_fine_lines": true/false,
-  "has_outline_stroke": true/false,
-  "dominant_shapes": ["circle", "shield", ...],
-  "style_notes": "one sentence on the visual style",
-  "embroidery_concerns": ["specific things that will be hard to stitch"]
-}
-
-Judge only what you can see. Do not estimate sizes in millimetres - you cannot \
-know the finished size."""
-
-
-def _encode_image(image_bytes: bytes, content_type: str = "image/png") -> str:
-    return f"data:{content_type};base64,{base64.b64encode(image_bytes).decode()}"
-
-
-def _parse_json_response(text: str) -> dict | None:
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = text.split("```")[1] if "```" in text[3:] else text.strip("`")
-        text = text.removeprefix("json").strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-
-
-def _analyze_with_openai(image_bytes: bytes, content_type: str) -> dict | None:
-    try:
-        from openai import OpenAI
-    except ImportError:  # pragma: no cover
-        return None
-    try:
-        client = OpenAI(api_key=settings.openai_api_key, timeout=settings.ai_timeout_seconds)
-        response = client.chat.completions.create(
-            model=settings.openai_vision_model,
-            max_tokens=700,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": VISION_PROMPT},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _encode_image(image_bytes, content_type)},
-                        },
-                    ],
-                }
-            ],
-        )
-        parsed = _parse_json_response(response.choices[0].message.content or "")
-        if parsed is not None:
-            parsed["_provider"] = "openai"
-            parsed["_model"] = settings.openai_vision_model
-        return parsed
-    except Exception as exc:
-        log.warning("OpenAI vision analysis failed: %s", exc)
-        return None
-
-
-def _analyze_with_anthropic(image_bytes: bytes, content_type: str) -> dict | None:
-    try:
-        import anthropic
-    except ImportError:  # pragma: no cover
-        return None
-    try:
-        client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key, timeout=settings.ai_timeout_seconds
-        )
-        response = client.messages.create(
-            model=settings.anthropic_vision_model,
-            max_tokens=700,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": content_type,
-                                "data": base64.b64encode(image_bytes).decode(),
-                            },
-                        },
-                        {"type": "text", "text": VISION_PROMPT},
-                    ],
-                }
-            ],
-        )
-        text = "".join(block.text for block in response.content if block.type == "text")
-        parsed = _parse_json_response(text)
-        if parsed is not None:
-            parsed["_provider"] = "anthropic"
-            parsed["_model"] = settings.anthropic_vision_model
-        return parsed
-    except Exception as exc:
-        log.warning("Claude vision analysis failed: %s", exc)
-        return None
-
-
-def semantic_analysis(image_bytes: bytes, content_type: str = "image/png") -> dict | None:
-    """Ask a vision model what the artwork is. Returns None if unavailable.
-
-    This is a belt-and-braces wrapper: the per-provider helpers already swallow
-    their own errors, but the deterministic analysis must survive *any* failure
-    in this layer — a bad key, a network partition, an SDK that changed shape
-    under us — because the compatibility score is what the customer is quoted
-    against.
+    Belt and braces: the gateway already turns every failure into an outcome,
+    but the deterministic analysis must survive *any* fault in this layer — a
+    bad key, a network partition, an SDK that changed shape under us — because
+    the compatibility score is what the customer is quoted against.
     """
     try:
-        return _semantic_analysis(image_bytes, content_type)
+        return run_vision_analysis(image_bytes, content_type, context)
     except Exception as exc:  # noqa: BLE001 - deliberately total
         log.warning("Semantic analysis layer failed, continuing without it: %s", exc)
-        return None
-
-
-def _semantic_analysis(image_bytes: bytes, content_type: str) -> dict | None:
-    if not settings.ai_enabled():
-        return None
-    provider = settings.ai_provider
-    if provider == "openai" or (provider == "auto" and settings.openai_api_key):
-        result = _analyze_with_openai(image_bytes, content_type)
-        if result is not None:
-            return result
-    if provider in ("anthropic", "auto") and settings.anthropic_api_key:
-        return _analyze_with_anthropic(image_bytes, content_type)
-    if provider == "auto" and settings.openai_api_key:
-        return _analyze_with_openai(image_bytes, content_type)
-    return None
+        return AIOutcome(status="failed", reason="layer_error")
 
 
 # -------------------------------------------------------------------- entry
@@ -413,9 +294,16 @@ def analyze_design(
     content_type: str = "image/png",
     use_ai: bool = True,
     max_colors: int = 8,
+    ai_context: AIContext | None = None,
 ) -> AnalysisReport:
     """Full analyzer pass. Never raises for AI failures — the deterministic
-    result stands on its own."""
+    result stands on its own.
+
+    ``ai_context`` carries the workspace and user the AI call is billed and
+    cached against. Without it the gateway still runs, but the call cannot be
+    attributed to a tenant, so it is neither cached nor counted against a tenant
+    budget — only the global one.
+    """
     metrics, palette = analyze_metrics(image_bytes, max_colors)
     score, issues, recommendations = score_design(metrics, palette)
 
@@ -423,7 +311,12 @@ def analyze_design(
         thread = suggest_thread(tuple(entry["rgb"]))
         entry["thread"] = {"name": thread.name, "code": thread.code, "hex": thread.hex}
 
-    ai_result = semantic_analysis(image_bytes, content_type) if use_ai else None
+    outcome = (
+        semantic_analysis(image_bytes, content_type, ai_context)
+        if use_ai
+        else AIOutcome(status="skipped", reason="not_requested")
+    )
+    ai_result = outcome.result
 
     detected = {
         "colors": len(palette),
@@ -458,6 +351,11 @@ def analyze_design(
                 })
         for concern in ai_result.get("embroidery_concerns", [])[:4]:
             recommendations.append(str(concern))
+    elif outcome.message:
+        # A budget stop or a provider outage is a fact about the service, not a
+        # fact about the artwork. Say so plainly instead of leaving a blank
+        # panel that looks like the analysis failed.
+        recommendations.append(outcome.message)
 
     has_fine_detail = metrics.get("min_feature_at_100mm_mm", 2.0) < MIN_FEATURE_MM
     placements = _placement_fit(metrics, len(palette), has_fine_detail)
@@ -476,6 +374,7 @@ def analyze_design(
         suggested_fabric=suggested_fabric,
         suggested_colors=min(len(palette), 6) or 3,
         ai=ai_result,
+        ai_status=outcome.to_dict(),
     )
 
 

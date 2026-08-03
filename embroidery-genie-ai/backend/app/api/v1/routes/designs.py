@@ -22,6 +22,7 @@ from fastapi import (
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.ai import AIContext
 from app.core.config import settings
 from app.core.deps import CurrentContext, DbSession
 from app.core.ratelimit import rate_limit
@@ -298,7 +299,14 @@ def analyze(
     if pipeline.guess_kind(original.content_type, original.filename) == "vector":
         report = pipeline._analyze_vector(data)
     else:
-        report = analyze_design(data, original.content_type, use_ai=use_ai)
+        report = analyze_design(
+            data,
+            original.content_type,
+            use_ai=use_ai,
+            ai_context=AIContext(
+                db=db, organization_id=context.org_id, user_id=context.user_id
+            ),
+        )
 
     design.analysis = report.to_dict()
     design.compatibility_score = report.compatibility_score

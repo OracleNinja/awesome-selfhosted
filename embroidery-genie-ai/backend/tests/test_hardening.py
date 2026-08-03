@@ -298,32 +298,43 @@ def test_error_responses_do_not_leak_internals_in_production(app_client, monkeyp
 
 def test_ai_layer_failure_never_breaks_analysis(monkeypatch, sample_png):
     """The compatibility score is what customers are quoted against, so no
-    failure in the optional vision layer may propagate."""
+    failure in the optional vision layer may propagate.
+
+    The gateway already converts every provider fault into an outcome, so this
+    aims one level higher: it breaks the gateway itself, which is the failure
+    mode the wrapper in ``semantic_analysis`` exists for.
+    """
     from app.services import analyzer
 
     def explode(*args, **kwargs):
-        raise RuntimeError("provider exploded")
+        raise RuntimeError("the AI layer exploded")
 
-    monkeypatch.setattr(analyzer.settings, "ai_provider", "openai")
-    monkeypatch.setattr(analyzer.settings, "openai_api_key", "sk-invalid")
-    monkeypatch.setattr(analyzer, "_analyze_with_openai", explode)
-    monkeypatch.setattr(analyzer, "_analyze_with_anthropic", explode)
+    monkeypatch.setattr(analyzer, "run_vision_analysis", explode)
 
     report = analyzer.analyze_design(sample_png, "image/png", use_ai=True)
     assert report.ai is None
+    assert report.ai_status["reason"] == "layer_error"
     assert 0 <= report.compatibility_score <= 100
     assert report.verdict
     assert report.colors
 
 
 def test_ai_clients_receive_a_timeout():
-    """A hung provider must not hold a worker open indefinitely."""
+    """A hung provider must not hold a worker open indefinitely.
+
+    The timeout is now per-operation (see app/ai/operations.py) rather than one
+    global setting, so the adapters take it as an argument.
+    """
     import inspect
 
-    from app.services import analyzer
+    from app.ai import providers
+    from app.ai.operations import inventory
 
-    for fn in (analyzer._analyze_with_openai, analyzer._analyze_with_anthropic):
-        assert "timeout=settings.ai_timeout_seconds" in inspect.getsource(fn)
+    for fn in (providers.call_openai, providers.call_anthropic):
+        assert "timeout=timeout_seconds" in inspect.getsource(fn)
+
+    for op in inventory():
+        assert op["timeout_seconds"] > 0
 
 
 def test_export_writers_leak_no_temp_files(sample_svg):
