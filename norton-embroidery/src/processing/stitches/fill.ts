@@ -48,7 +48,6 @@ interface Span {
   x0: number;
   x1: number;
   y: number;
-  component: number;
 }
 
 /**
@@ -88,60 +87,63 @@ export function generateFill(poly: Polygon, options: FillOptions): Point[][] {
       const x0 = xs[i];
       const x1 = xs[i + 1];
       if (x1 - x0 < 1e-6) continue;
-      spans.push({ row, x0, x1, y, component: -1 });
+      spans.push({ row, x0, x1, y });
     }
   }
   if (spans.length === 0) return [];
 
-  assignComponents(spans);
-
-  // --- serpentine per component ----------------------------------------
-  const byComponent = new Map<number, Span[]>();
-  for (const s of spans) {
-    const list = byComponent.get(s.component);
-    if (list) list.push(s);
-    else byComponent.set(s.component, [s]);
-  }
+  // --- boustrophedon decomposition -------------------------------------
+  // Spans are grouped into cells: maximal stacks of rows that hold exactly one
+  // span each. A cell can always be sewn as a clean serpentine, because no row
+  // inside it is split by a hole. Cells break apart and merge again where a
+  // hole starts and ends, which is precisely where the needle genuinely has to
+  // travel somewhere else.
+  const cells = decomposeIntoCells(spans);
 
   const insetOuter = insetRing(poly.outer, Math.min(8, options.density * 2)).map(toLocal);
-  const runs: Point[][] = [];
 
-  for (const group of byComponent.values()) {
-    group.sort((a, b) => a.row - b.row || a.x0 - b.x0);
-    let current: Point[] = [];
-    let leftToRight = true;
-    let lastRow = -1;
-
-    for (const span of group) {
-      if (span.row !== lastRow) {
-        leftToRight = !leftToRight;
-        lastRow = span.row;
-      }
+  // Turn each cell into a serpentine path.
+  const cellPaths: Point[][] = [];
+  for (const cell of cells) {
+    cell.sort((a, b) => a.row - b.row);
+    let leftToRight = cell[0].row % 2 === 0;
+    const path: Point[] = [];
+    for (const span of cell) {
       const rowPoints = rowStitches(span, options, leftToRight);
+      leftToRight = !leftToRight;
       if (rowPoints.length === 0) continue;
-
-      if (current.length === 0) {
-        current = rowPoints;
-        continue;
-      }
-      const from = current[current.length - 1];
-      const to = rowPoints[0];
-      const gap = distance(from, to);
-
-      if (gap <= options.maxTravelStitch && segmentInside(from, to, rings)) {
-        current.push(...rowPoints);
-      } else {
-        const detour = travelAlongRing(insetOuter, from, to, options);
-        if (detour && pathLength(detour) <= options.maxTravelStitch * 6) {
-          current.push(...detour, ...rowPoints);
-        } else {
-          runs.push(current);
-          current = rowPoints;
-        }
-      }
+      path.push(...rowPoints);
     }
-    if (current.length) runs.push(current);
+    if (path.length >= 2) cellPaths.push(path);
   }
+  if (cellPaths.length === 0) return [];
+
+  // Sew cells nearest-first so the needle does not criss-cross the shape.
+  const ordered = orderCells(cellPaths);
+
+  // Join cells that can be reached without leaving the shape; start a new run
+  // (which becomes a trim) only when there is no hidden path.
+  const runs: Point[][] = [];
+  let current: Point[] = ordered[0];
+  for (let i = 1; i < ordered.length; i++) {
+    const next = ordered[i];
+    const from = current[current.length - 1];
+    const to = next[0];
+    const gap = distance(from, to);
+
+    if (gap <= options.maxTravelStitch && segmentInside(from, to, rings)) {
+      current.push(...next);
+      continue;
+    }
+    const detour = travelAlongRing(insetOuter, from, to, options);
+    if (detour && pathLength([from, ...detour, to]) <= options.maxTravelStitch * 12) {
+      current.push(...detour, ...next);
+      continue;
+    }
+    runs.push(current);
+    current = next;
+  }
+  runs.push(current);
 
   return runs
     .map((run) => dropShortSegments(run.map(toWorld), options.minStitchLength))
@@ -185,22 +187,14 @@ function scanlineIntersections(rings: Point[][], y: number): number[] {
   return xs;
 }
 
-/** Union spans that overlap horizontally on adjacent rows. */
-function assignComponents(spans: Span[]): void {
-  const parent = spans.map((_, i) => i);
-  const find = (i: number): number => {
-    while (parent[i] !== i) {
-      parent[i] = parent[parent[i]];
-      i = parent[i];
-    }
-    return i;
-  };
-  const union = (a: number, b: number): void => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent[rb] = ra;
-  };
-
+/**
+ * Boustrophedon cell decomposition.
+ *
+ * Two spans on adjacent rows are linked when they overlap horizontally. A span
+ * continues its predecessor's cell only when the link is one-to-one; anywhere a
+ * region splits around a hole or two lobes merge, a new cell begins.
+ */
+function decomposeIntoCells(spans: Span[]): Span[][] {
   const byRow = new Map<number, number[]>();
   spans.forEach((s, i) => {
     const list = byRow.get(s.row);
@@ -208,19 +202,84 @@ function assignComponents(spans: Span[]): void {
     else byRow.set(s.row, [i]);
   });
 
-  for (const [rowIndex, indices] of byRow) {
-    const next = byRow.get(rowIndex + 1);
+  const overlaps = (a: Span, b: Span): boolean => a.x0 < b.x1 && b.x0 < a.x1;
+  const successors = spans.map(() => [] as number[]);
+  const predecessors = spans.map(() => [] as number[]);
+
+  for (const [row, indices] of byRow) {
+    const next = byRow.get(row + 1);
     if (!next) continue;
     for (const i of indices) {
       for (const j of next) {
-        if (spans[i].x0 < spans[j].x1 && spans[j].x0 < spans[i].x1) union(i, j);
+        if (overlaps(spans[i], spans[j])) {
+          successors[i].push(j);
+          predecessors[j].push(i);
+        }
       }
     }
   }
 
-  spans.forEach((s, i) => {
-    s.component = find(i);
-  });
+  const cellOf = new Int32Array(spans.length).fill(-1);
+  let nextCell = 0;
+  const rows = [...byRow.keys()].sort((a, b) => a - b);
+  for (const row of rows) {
+    for (const i of byRow.get(row)!) {
+      const preds = predecessors[i];
+      if (preds.length === 1 && successors[preds[0]].length === 1) {
+        cellOf[i] = cellOf[preds[0]];
+      } else {
+        cellOf[i] = nextCell++;
+      }
+    }
+  }
+
+  const cells: Span[][] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const c = cellOf[i];
+    if (!cells[c]) cells[c] = [];
+    cells[c].push(spans[i]);
+  }
+  return cells.filter((c) => c && c.length > 0);
+}
+
+/** Greedy nearest-neighbour ordering of cell paths, reversing where it helps. */
+function orderCells(paths: Point[][]): Point[][] {
+  const remaining = paths.map((p) => p);
+  const out: Point[][] = [];
+  // Start with the cell whose first point is highest, which keeps the sew
+  // sequence readable when the operator watches the simulation.
+  let bestStart = 0;
+  for (let i = 1; i < remaining.length; i++) {
+    if (remaining[i][0].y < remaining[bestStart][0].y) bestStart = i;
+  }
+  let currentPath = remaining.splice(bestStart, 1)[0];
+  out.push(currentPath);
+
+  while (remaining.length) {
+    let bestIndex = 0;
+    let bestDist = Infinity;
+    let bestReversed = false;
+    const from = currentPath[currentPath.length - 1];
+    for (let i = 0; i < remaining.length; i++) {
+      const p = remaining[i];
+      const dHead = distance(from, p[0]);
+      const dTail = distance(from, p[p.length - 1]);
+      if (dHead < bestDist) {
+        bestDist = dHead;
+        bestIndex = i;
+        bestReversed = false;
+      }
+      if (dTail < bestDist) {
+        bestDist = dTail;
+        bestIndex = i;
+        bestReversed = true;
+      }
+    }
+    const [chosen] = remaining.splice(bestIndex, 1);
+    currentPath = bestReversed ? [...chosen].reverse() : chosen;
+    out.push(currentPath);
+  }
+  return out;
 }
 
 /** True when the straight segment a->b stays inside the shape. */

@@ -136,7 +136,7 @@ export function verifyPesBytes(
     detail: `File starts with "${String.fromCharCode(...bytes.subarray(0, 8)).replace(/[^\x20-\x7e]/g, '?')}".`,
   });
 
-  let reread: ReturnType<typeof readPes> | null = null;
+  let reread: ReturnType<typeof readPes>;
   try {
     reread = readPes(bytes);
     checks.push({ name: 'Re-read', passed: true, detail: 'The written file parses back as a PES file.' });

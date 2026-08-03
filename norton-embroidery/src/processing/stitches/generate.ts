@@ -228,21 +228,31 @@ export function assembleStitches(
         (firstRunOfObject && obj.forceTrimBefore) ||
         distance(current, start) > options.trimThreshold;
 
+      let firstIndex: number;
       if (needsJump) {
         out.push(jump(start.x, start.y));
+        // The jump positions the needle; the start point still gets stitched.
+        firstIndex = 0;
+      } else if (current && distance(current, start) < options.minStitchLength) {
+        // The needle is already effectively at the run's start. Stitching to it
+        // would emit a needle-damaging sub-millimetre stitch, so skip it.
+        firstIndex = 1;
       } else if (current) {
         // Short hop: sew across rather than cut the thread.
         const bridge = enforceMaxStitchLength([current, start], options.maxStitchLength);
         for (let i = 1; i < bridge.length; i++) out.push(stitch(bridge[i].x, bridge[i].y));
+        firstIndex = 1;
+      } else {
+        firstIndex = 0;
       }
 
-      for (let i = needsJump ? 0 : 1; i < run.length; i++) {
+      for (let i = firstIndex; i < run.length; i++) {
         out.push(stitch(run[i].x, run[i].y));
       }
-      // A jump lands the needle at the run start, and that first point still
-      // has to be stitched, which the loop above covers by starting at 0.
-      current = run[run.length - 1];
-      anyStitches = true;
+      if (run.length > firstIndex) {
+        current = run[run.length - 1];
+        anyStitches = true;
+      }
       firstRunOfObject = false;
     }
   }

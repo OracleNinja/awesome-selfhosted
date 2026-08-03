@@ -6,7 +6,8 @@
  */
 
 import { emptyDesign, type DesignCanvas, type DesignMetadata, type EmbroideryDesign } from '../domain/design';
-import type { EmbroideryObject } from '../domain/embroidery-object';
+import { mapGeometry, objectPoints, type EmbroideryObject } from '../domain/embroidery-object';
+import { boundsOf } from '../domain/geometry';
 import { defaultHoop, getHoop, getMachine, type MachineProfile } from '../domain/machine';
 import { PEC_THREADS, type Thread } from '../domain/thread';
 import { mmToUnits } from '../domain/units';
@@ -113,10 +114,17 @@ export function digitizeAndGenerate(
   };
 
   const result = digitize(analysis, digitizeOptions);
+
+  // Place the result in the middle of the hoop. Digitizing works in a box
+  // anchored at the origin, which would otherwise leave every design pinned to
+  // the top-left corner of the hoop preview.
+  const hoop = getHoop(machine, design.canvas.hoopId) ?? defaultHoop(machine);
+  const centred = centerObjectsInHoop(result.objects, hoop.width, hoop.height);
+
   const next: EmbroideryDesign = {
     ...design,
     threadPalette: result.threadPalette,
-    objects: result.objects,
+    objects: centred,
   };
 
   const regenerated = regenerateWithNotes(next, machine, options.generate);
@@ -155,6 +163,24 @@ export function regenerate(
   generateOverrides: Partial<GenerateOptions> = {},
 ): EmbroideryDesign {
   return regenerateWithNotes(design, machine, generateOverrides).design;
+}
+
+/** Shift every object so the group is centred in the hoop field. */
+function centerObjectsInHoop(
+  objects: readonly EmbroideryObject[],
+  hoopWidth: number,
+  hoopHeight: number,
+): EmbroideryObject[] {
+  const all = objects.flatMap(objectPoints);
+  if (all.length === 0) return [...objects];
+  const b = boundsOf(all);
+  const dx = hoopWidth / 2 - (b.minX + b.maxX) / 2;
+  const dy = hoopHeight / 2 - (b.minY + b.maxY) / 2;
+  if (dx === 0 && dy === 0) return [...objects];
+  return objects.map((o) => ({
+    ...o,
+    geometry: mapGeometry(o.geometry, (p) => ({ x: p.x + dx, y: p.y + dy })),
+  }));
 }
 
 /** Re-run the order optimiser and regenerate. */

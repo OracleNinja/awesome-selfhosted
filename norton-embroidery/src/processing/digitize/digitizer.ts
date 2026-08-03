@@ -151,10 +151,15 @@ export function digitize(analysis: ArtworkAnalysis, options: DigitizeOptions): D
     const stat = mappingStats.get(region.colorIndex);
 
     for (const raw of rawPolys) {
-      // Simplify in pixel space (tolerance in pixels), then map to design units.
+      // Simplify in pixel space (tolerance in pixels), smooth away the
+      // staircase left by the bitmap trace, then simplify again. The second
+      // pass collapses the points Chaikin adds along straight edges, so a
+      // rectangle stays a rectangle instead of relaxing into a blob while
+      // genuinely curved outlines stay smooth.
       const simplified = simplifyPolygon(raw, 0.8);
       const smoothed = smoothPolygon(simplified, 2);
-      const poly = transformPolygon(smoothed, toDesign);
+      const cleaned = simplifyPolygon(smoothed, 0.35);
+      const poly = transformPolygon(cleaned, toDesign);
       if (poly.outer.length < 3) continue;
 
       const area = polygonArea(poly);

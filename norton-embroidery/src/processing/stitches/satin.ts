@@ -72,17 +72,106 @@ function pushCrossing(out: Point[], from: Point, to: Point, maxLength: number): 
 /**
  * Derive a satin column from the outline of a long narrow shape.
  *
- * The two ends of the shape are found as the pair of outline points that are
- * farthest apart; splitting the ring there gives the two rails. This is
- * reliable for the strokes, bars and lettering that satin is used for, and
- * returns null when the shape is not elongated enough for the split to be
- * meaningful.
+ * The outline is projected onto the shape's principal axis. The small caps at
+ * each end of that axis are dropped, and the two arcs left between them become
+ * the rails. Dropping the caps is what keeps a bar's ends square: if the caps
+ * were folded into the rails, the column would taper to a point at each end and
+ * a rectangular bar would sew as a lens.
+ *
+ * Falls back to splitting at the two most distant outline points when the
+ * projection does not produce exactly two arcs, and returns null when the shape
+ * cannot be read as a column at all.
  */
 export function columnFromRing(ring: Ring): SatinColumn | null {
   if (ring.length < 4) return null;
+  return columnFromPrincipalAxis(ring) ?? columnFromFarthestPair(ring);
+}
 
-  // Farthest-pair search. Rings from tracing are already simplified, so the
-  // quadratic scan is bounded and cheap.
+/** Fraction of the principal-axis extent treated as an end cap. */
+const END_CAP_FRACTION = 0.06;
+
+function columnFromPrincipalAxis(ring: Ring): SatinColumn | null {
+  const n = ring.length;
+  let mx = 0;
+  let my = 0;
+  for (const p of ring) {
+    mx += p.x;
+    my += p.y;
+  }
+  mx /= n;
+  my /= n;
+
+  // Principal axis of the outline points.
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (const p of ring) {
+    const dx = p.x - mx;
+    const dy = p.y - my;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const ux = Math.cos(theta);
+  const uy = Math.sin(theta);
+
+  const t = ring.map((p) => (p.x - mx) * ux + (p.y - my) * uy);
+  const tMin = Math.min(...t);
+  const tMax = Math.max(...t);
+  const range = tMax - tMin;
+  if (range <= 0) return null;
+
+  const lowCut = tMin + range * END_CAP_FRACTION;
+  const highCut = tMax - range * END_CAP_FRACTION;
+  const isCap = t.map((v) => v <= lowCut || v >= highCut);
+
+  if (isCap.every((c) => !c) || isCap.every((c) => c)) return null;
+
+  // Walk the ring once and collect the maximal runs of non-cap points.
+  const start = isCap.findIndex((c) => c);
+  if (start < 0) return null;
+  const arcs: Point[][] = [];
+  let currentArc: Point[] | null = null;
+  for (let k = 0; k < n; k++) {
+    const i = (start + k) % n;
+    if (isCap[i]) {
+      if (currentArc && currentArc.length >= 2) arcs.push(currentArc);
+      currentArc = null;
+    } else {
+      if (!currentArc) currentArc = [];
+      currentArc.push(ring[i]);
+    }
+  }
+  if (currentArc && currentArc.length >= 2) arcs.push(currentArc);
+
+  if (arcs.length !== 2) return null;
+
+  // Both rails must run the same way along the axis, or the zigzag twists.
+  const project = (p: Point): number => (p.x - mx) * ux + (p.y - my) * uy;
+  const orient = (arc: Point[]): Point[] =>
+    project(arc[0]) <= project(arc[arc.length - 1]) ? arc : [...arc].reverse();
+
+  /**
+   * Slide each rail end along the axis until it reaches the shape's true
+   * extent. Without this the column would stop short of the caps that were
+   * dropped, leaving an unstitched sliver at each end of the shape.
+   */
+  const extend = (arc: Point[]): Point[] => {
+    const out = [...arc];
+    const head = out[0];
+    const headShift = tMin - project(head);
+    if (headShift < 0) out.unshift({ x: head.x + ux * headShift, y: head.y + uy * headShift });
+    const tail = out[out.length - 1];
+    const tailShift = tMax - project(tail);
+    if (tailShift > 0) out.push({ x: tail.x + ux * tailShift, y: tail.y + uy * tailShift });
+    return out;
+  };
+
+  return { left: extend(orient(arcs[0])), right: extend(orient(arcs[1])) };
+}
+
+function columnFromFarthestPair(ring: Ring): SatinColumn | null {
   let bestA = 0;
   let bestB = 0;
   let bestD = -1;
@@ -107,8 +196,6 @@ export function columnFromRing(ring: Ring): SatinColumn | null {
   second.push(ring[bestA]);
 
   if (first.length < 2 || second.length < 2) return null;
-
-  // Walk both rails in the same direction so the zigzag does not twist.
   return { left: first, right: second.reverse() };
 }
 

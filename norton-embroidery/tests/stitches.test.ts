@@ -193,6 +193,26 @@ describe('satin stitch generation', () => {
     expect(Math.max(...widths)).toBeLessThan(4);
     expect(Math.min(...widths)).toBeGreaterThan(0.5);
   });
+
+  it('keeps a rectangular bar at constant width instead of tapering it', () => {
+    // A bar traced from artwork has points along its edges, not just corners.
+    const length = mmToUnits(40);
+    const width = mmToUnits(3);
+    const steps = 20;
+    const top: Point[] = [];
+    const bottom: Point[] = [];
+    for (let i = 0; i <= steps; i++) {
+      top.push({ x: (length * i) / steps, y: 0 });
+      bottom.push({ x: (length * i) / steps, y: width });
+    }
+    const ring = [...top, ...bottom.reverse()];
+
+    const column = columnFromRing(ring);
+    expect(column).not.toBeNull();
+    const widths = columnWidths(column!, 30);
+    // Every sample should be the bar's real width, not a taper towards zero.
+    for (const w of widths) expect(unitsToMm(w)).toBeCloseTo(3, 1);
+  });
 });
 
 describe('running and bean stitch', () => {
