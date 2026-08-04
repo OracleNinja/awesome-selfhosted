@@ -6,7 +6,7 @@ import { formatRuntime } from '../domain/design';
 
 export interface TimelineProps {
   stitches: readonly Stitch[];
-  threads: readonly Thread[];
+  blockThreads: readonly Thread[];
   position: number;
   playing: boolean;
   speed: number;
@@ -33,12 +33,13 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const progress = props.stitches.length ? props.position / props.stitches.length : 0;
-    renderTimeline(ctx, props.stitches, props.threads, progress);
-  }, [props.stitches, props.threads, props.position]);
+    renderTimeline(ctx, props.stitches, props.blockThreads, progress);
+  }, [props.stitches, props.blockThreads, props.position]);
 
   const blocks = colorBlocks(props.stitches);
   const currentBlock = blocks.find((b) => props.position >= b.start && props.position <= b.endExclusive) ?? blocks[0];
-  const currentThread = currentBlock ? props.threads[currentBlock.threadIndex] : undefined;
+  const currentBlockIndex = currentBlock ? blocks.indexOf(currentBlock) : -1;
+  const currentThread = currentBlockIndex >= 0 ? props.blockThreads[currentBlockIndex] : undefined;
 
   const stitchesSoFar = props.stitches
     .slice(0, props.position)
@@ -91,7 +92,7 @@ export function Timeline(props: TimelineProps): React.JSX.Element {
         {currentThread ? (
           <span className="status" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span className="swatch" style={{ background: threadHex(currentThread) }} />
-            colour {(currentBlock?.threadIndex ?? 0) + 1}/{blocks.length} · {currentThread.name}
+            colour {currentBlockIndex + 1}/{blocks.length} · {currentThread.name}
           </span>
         ) : null}
         <span className="status">est. run {formatRuntime(props.estimatedRuntimeSeconds)}</span>

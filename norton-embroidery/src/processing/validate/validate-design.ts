@@ -13,6 +13,7 @@ import { boundsHeight, boundsWidth, distance } from '../../domain/geometry';
 import { computeStats, type EmbroideryDesign } from '../../domain/design';
 import { getHoop, type Hoop, type MachineProfile } from '../../domain/machine';
 import { StitchCommand } from '../../domain/stitch';
+import { buildStitchSequence } from '../../domain/stitch-sequence';
 import { buildReport, sortIssues, type ValidationIssue, type ValidationReport } from '../../domain/validation';
 import { unitsToInches, unitsToMm } from '../../domain/units';
 import { objectPoints, DEFAULTS } from '../../domain/embroidery-object';
@@ -164,12 +165,28 @@ export function validateDesign(
     issues.push(issue('ERROR', 'thread.empty-palette', 'The design has no thread palette, so colours cannot be written to the file.'));
   }
 
-  const blocks = stats.colorCount;
-  if (blocks > design.threadPalette.length) {
+  // A design may leave a colour and come back to it, so there can legitimately
+  // be more colour blocks than palette entries. What must hold is that every
+  // block resolves to a real thread.
+  const sequence = buildStitchSequence(design);
+  if (sequence.blockThreads.length !== sequence.blocks.length) {
+    const unresolved = sequence.blocks.length - sequence.blockThreads.length;
     issues.push(
-      issue('ERROR', 'thread.sequence-mismatch', `The stitch stream needs ${blocks} thread(s) but the palette only defines ${design.threadPalette.length}. The colour sequence is inconsistent.`, {
+      issue('ERROR', 'thread.sequence-mismatch', `${unresolved} of ${sequence.blocks.length} colour block(s) do not resolve to a thread in the palette. The colour sequence is inconsistent.`, {
         remedy: 'Re-generate stitches so the palette and the colour blocks match.',
       }),
+    );
+  }
+
+  if (design.colorSequence && design.colorSequence.length !== sequence.blocks.length) {
+    issues.push(
+      issue('ERROR', 'thread.sequence-length', `The design records ${design.colorSequence.length} colour assignment(s) but the stitch stream has ${sequence.blocks.length} colour block(s). Re-generate the stitches.`),
+    );
+  }
+
+  if (sequence.hasRepeatedColors) {
+    issues.push(
+      issue('INFO', 'thread.repeated-colors', `${sequence.blocks.length} colour stop(s) use ${sequence.distinctThreads.length} thread cone(s): at least one colour is used, left, and returned to. Follow the colour list in sew order, not the thread list.`),
     );
   }
 

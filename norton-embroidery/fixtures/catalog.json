@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "note": "Controlled test designs. Each entry names the artwork file, the physical size to digitize it at, and what a clean stitch-out of it proves. Both the regression suite and the browser fixture runner read this file.",
+  "designs": [
+    {
+      "id": "01-single-color-square",
+      "name": "Single colour square",
+      "artwork": "artwork/01-single-color-square.png",
+      "widthMm": 60,
+      "heightMm": 60,
+      "hoopId": "se700-4x4",
+      "colorCount": 3,
+      "proves": "Basic fill in one colour with no colour change. Establishes the density and registration baseline everything else is compared against."
+    },
+    {
+      "id": "02-two-color-logo",
+      "name": "Two colour logo",
+      "artwork": "artwork/02-two-color-logo.png",
+      "widthMm": 80,
+      "heightMm": 58,
+      "hoopId": "se700-5x7",
+      "colorCount": 4,
+      "proves": "Exactly one colour change: the machine stops, the operator re-threads, and stitching resumes in register."
+    },
+    {
+      "id": "03-multi-color-logo",
+      "name": "Multi colour logo",
+      "artwork": "artwork/03-multi-color-logo.png",
+      "widthMm": 90,
+      "heightMm": 66,
+      "hoopId": "se700-5x7",
+      "colorCount": 6,
+      "proves": "Several colour changes and colour grouping across separated areas."
+    },
+    {
+      "id": "04-holes-and-cutouts",
+      "name": "Holes and cut-outs",
+      "artwork": "artwork/04-holes-and-cutouts.png",
+      "widthMm": 85,
+      "heightMm": 85,
+      "hoopId": "se700-5x7",
+      "colorCount": 4,
+      "proves": "Fills with holes. The needle must travel around openings rather than stitching across them."
+    },
+    {
+      "id": "05-narrow-satin",
+      "name": "Narrow satin bars",
+      "artwork": "artwork/05-narrow-satin.png",
+      "widthMm": 100,
+      "heightMm": 63,
+      "hoopId": "se700-5x7",
+      "colorCount": 6,
+      "proves": "Narrow shapes become satin columns with square ends and constant width, and hold at width on fabric."
+    },
+    {
+      "id": "06-detailed-logo",
+      "name": "Detailed badge",
+      "artwork": "artwork/06-detailed-logo.png",
+      "widthMm": 95,
+      "heightMm": 95,
+      "hoopId": "se700-5x7",
+      "colorCount": 6,
+      "proves": "The realistic worst case: layered areas, small counters, a colour used then returned to, and a higher stitch count with more trims."
+    }
+  ]
+}

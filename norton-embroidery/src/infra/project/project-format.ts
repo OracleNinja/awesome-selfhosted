@@ -17,7 +17,7 @@ import type { Thread } from '../../domain/thread';
 import type { Stitch } from '../../domain/stitch';
 import type { ValidationReport } from '../../domain/validation';
 
-export const PROJECT_FORMAT_VERSION = 2;
+export const PROJECT_FORMAT_VERSION = 3;
 export const PROJECT_FILE_EXTENSION = '.norton-embroidery-project';
 
 export interface StoredArtwork {
@@ -56,6 +56,12 @@ export interface ProjectFile {
   threadPalette: Thread[];
   objects: EmbroideryObject[];
   stitches: Stitch[];
+  /**
+   * Palette index per colour block, in sew order. Added in format 3; older
+   * files are migrated by assuming the one-to-one mapping that was implicit
+   * before a design could return to a colour.
+   */
+  colorSequence: number[] | null;
   validation: ValidationReport | null;
 }
 
@@ -88,6 +94,7 @@ export function serializeProject(state: ProjectState): ProjectFile {
     threadPalette: design.threadPalette,
     objects: design.objects,
     stitches: design.stitches,
+    colorSequence: design.colorSequence,
     validation: design.validation,
   };
 }
@@ -136,6 +143,7 @@ export function deserializeProject(raw: unknown): ProjectState {
       threadPalette: migrated.threadPalette,
       objects: migrated.objects,
       stitches: migrated.stitches,
+      colorSequence: migrated.colorSequence,
       validation: migrated.validation,
     },
   };
@@ -163,6 +171,7 @@ function migrate(file: Partial<ProjectFile>, version: number): ProjectFile {
     threadPalette: file.threadPalette ?? [],
     objects: file.objects ?? [],
     stitches: file.stitches ?? [],
+    colorSequence: file.colorSequence ?? null,
     validation: file.validation ?? null,
   };
 
@@ -183,6 +192,17 @@ function migrate(file: Partial<ProjectFile>, version: number): ProjectFile {
       }
       return obj;
     });
+  }
+
+  if (version < 3 && out.colorSequence === null) {
+    // Before format 3 the colour sequence was implicit: block n used palette
+    // entry n. That was only ever true for designs where no colour repeats,
+    // which is exactly what those files contained.
+    const blockCount = out.stitches.filter((s) => s.command === 'COLOR_CHANGE').length + 1;
+    out.colorSequence =
+      out.stitches.length === 0
+        ? []
+        : Array.from({ length: blockCount }, (_, i) => Math.min(i, Math.max(0, out.threadPalette.length - 1)));
   }
 
   return out;

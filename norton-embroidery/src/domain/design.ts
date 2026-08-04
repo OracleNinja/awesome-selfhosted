@@ -66,11 +66,19 @@ export interface DesignStats {
 export interface EmbroideryDesign {
   metadata: DesignMetadata;
   canvas: DesignCanvas;
-  /** Ordered thread sequence: entry i is used by colour block i. */
+  /** Distinct threads the design uses. One entry per physical cone. */
   threadPalette: Thread[];
   objects: EmbroideryObject[];
   /** Generated stitch stream. Always ends with an End command when non-empty. */
   stitches: Stitch[];
+  /**
+   * Palette index used by each colour block, in sew order. A design that
+   * leaves a colour and returns to it has more blocks than palette entries, so
+   * this is NOT the identity mapping and must not be assumed to be.
+   * Null on designs imported from a stitch file, which have no objects to
+   * generate from and carry one palette entry per block already.
+   */
+  colorSequence: number[] | null;
   validation: ValidationReport | null;
 }
 
@@ -90,6 +98,7 @@ export function emptyDesign(metadata: DesignMetadata, canvas: DesignCanvas): Emb
     threadPalette: [],
     objects: [],
     stitches: [],
+    colorSequence: [],
     validation: null,
   };
 }

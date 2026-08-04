@@ -13,7 +13,7 @@ import {
 
 export interface DesignCanvasProps {
   stitches: readonly Stitch[];
-  threads: readonly Thread[];
+  blockThreads: readonly Thread[];
   hoop: Hoop | null;
   /** -1 renders everything; otherwise renders the first N stitches. */
   upTo: number;
@@ -83,7 +83,7 @@ export function DesignCanvas(props: DesignCanvasProps): React.JSX.Element {
     if (!ctx) return;
     render(ctx, props.stitches, {
       viewport,
-      threads: props.threads,
+      blockThreads: props.blockThreads,
       hoop: props.hoop,
       upTo: props.upTo,
       showJumps,
@@ -94,7 +94,7 @@ export function DesignCanvas(props: DesignCanvasProps): React.JSX.Element {
       highlightRange: props.highlightRange,
       darkBackground: dark,
     });
-  }, [props.stitches, props.threads, props.hoop, props.upTo, props.highlightRange, viewport, showJumps, showGrid, dark]);
+  }, [props.stitches, props.blockThreads, props.hoop, props.upTo, props.highlightRange, viewport, showJumps, showGrid, dark]);
 
   useEffect(() => {
     sizeCanvas();

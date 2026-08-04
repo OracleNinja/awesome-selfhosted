@@ -147,11 +147,14 @@ export function regenerateWithNotes(
     ...generateOverrides,
   };
 
-  const { stitches, notes } = assembleStitches(design.objects, options);
+  const { stitches, notes, threadSequence } = assembleStitches(design.objects, options);
 
   const withStitches: EmbroideryDesign = {
     ...design,
     stitches,
+    // Which cone each colour block uses. Recorded rather than inferred, because
+    // block ordinal and palette index diverge as soon as a colour repeats.
+    colorSequence: threadSequence,
     metadata: { ...design.metadata, modifiedAt: new Date().toISOString() },
   };
   return { design: { ...withStitches, validation: validateDesign(withStitches, machine) }, notes };

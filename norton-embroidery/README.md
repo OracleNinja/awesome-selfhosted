@@ -23,7 +23,7 @@ Verification:
 ```bash
 npm run typecheck
 npm run lint
-npm test         # 78 tests, including PES round-trips against pyembroidery
+npm test         # 146 tests, including PES round-trips against pyembroidery
 ```
 
 The PES tests shell out to Python and need `pyembroidery` installed
@@ -42,6 +42,58 @@ an object, undoes the edit, validates, exports a `.pes`, saves the project,
 reloads the page, reopens the project and re-imports the exported file. It
 fails if the downloaded file is not a real PES file or if any post-export check
 fails.
+
+## Physical machine validation
+
+**The engine is frozen.** The pipeline below is treated as a working foundation
+and is not rewritten except to fix a demonstrated defect.
+
+The current objective is proving it in the real world. Read
+[`docs/PHYSICAL-VALIDATION.md`](docs/PHYSICAL-VALIDATION.md) — it is the
+step-by-step Brother SE700 procedure, the six-design test set, and the table of
+what each failure mode points at.
+
+Three tiers are reported separately and never merged into one "ready" claim:
+
+| Tier | Established by | Status |
+|---|---|---|
+| Software validated | The validator, on every edit | per design |
+| PES format validated | Post-export decode + `pyembroidery` cross-check | per design |
+| **Machine validated** | A physical stitch-out recorded by an operator | **NOT PERFORMED** |
+
+The application shows `HARDWARE NOT VERIFIED` in the title bar and reports the
+machine tier as `not-performed`. No code path can set it to passed — a test
+asserts that for all six fixtures.
+
+### Controlled test designs
+
+Six designs of increasing difficulty live in `fixtures/`, ordered so a physical
+failure points at a specific part of the engine rather than "it did not work":
+
+| # | Fixture | Proves |
+|---|---|---|
+| 1 | single colour square | fill baseline, no colour change |
+| 2 | two colour logo | exactly one colour change, in register |
+| 3 | multi colour logo | colour grouping across several changes |
+| 4 | holes and cut-outs | the needle travels around openings |
+| 5 | narrow satin bars | satin columns hold width and square ends |
+| 6 | detailed badge | small counters, a colour used then returned to |
+
+```bash
+npm run fixtures:artwork   # regenerate the artwork PNGs (they are committed)
+npm run fixtures:golden    # re-record fixtures/golden.json after a reviewed change
+npm run preview &          # then, against the built app:
+npm run fixtures:build     # write fixtures/out/<id>/{artwork,preview,design.pes,worksheet}
+```
+
+`fixtures:build` drives the real application in a browser, so `preview.png` is
+captured from the application's own canvas rather than re-rendered. That gives
+the four things to compare per design: **artwork → preview → PES → physical
+stitch-out**, the last recorded on the worksheet the app exports.
+
+`fixtures/golden.json` records what the engine does today. The regression suite
+asserts every fixture still matches it exactly, so any change in digitizing
+behaviour shows up as a test failure and can be tied to a stitch-out result.
 
 ## What the application does
 
@@ -64,6 +116,13 @@ of others sew later, and objects sharing a thread sew together.
 - running and bean stitch;
 - edge-run, centre-run and zigzag underlay.
 
+**One stitch sequence.** The preview, the timeline, the statistics, the status
+panel and the PES encoder all consume a single `StitchSequence`, built once by
+`buildStitchSequence()`. It carries a content digest of the exact stitches and
+threads; the app shows that digest next to both the preview and the exported
+file, so the two can be proven to come from the same data rather than assumed
+to. A design that has changed since its last export says so.
+
 **Preview and simulation.** The canvas draws the generated stitches, in sew
 order, in their thread colours — never the source image. Zoom, pan, fit to
 hoop, actual size, hoop boundary, safe area, jump display. The simulator plays,
@@ -80,6 +139,12 @@ message quotes the measured value:
 
 > ERROR — Design width exceeds the 5" x 7" (130 x 180 mm) hoop by 0.42 inches
 > (10.7 mm). Design is 140.7 mm wide; the hoop field is 130.0 mm.
+
+**Status and readiness.** A Status tab reports digitization state, stitch count,
+dimensions, thread cones vs colour stops, colour changes, validation status and
+export status, plus the colour-stop list in sew order. A design that leaves a
+colour and returns to it is labelled as such, because the operator's stop list
+is then longer than their thread list.
 
 **Export.** A real PES version 1 file: `#PES0001` header, a CEmbOne/CSewSeg
 vector section and a PEC stitch block. After encoding, the bytes are decoded
@@ -117,6 +182,8 @@ These are real gaps, not things the UI pretends to do:
   publish one. A production warning is raised at high counts instead of
   inventing a hard threshold.
 - **Desktop only.** Mobile layout is out of scope for this version.
+- **Never sewn on hardware.** This is the big one. Every claim the application
+  makes is about bytes, not thread. See the physical validation section above.
 
 ## Architecture
 

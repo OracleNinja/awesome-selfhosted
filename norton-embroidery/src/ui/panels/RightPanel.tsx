@@ -5,12 +5,21 @@ import { PEC_THREADS, searchThreads, threadHex, unbundledCharts, type Thread } f
 import type { MachineProfile, Hoop } from '../../domain/machine';
 import { unitsToInches, unitsToMm } from '../../domain/units';
 import type { ExportResult } from '../../app/export-pes';
+import type { ExportSnapshot } from '../../domain/readiness';
+import type { StitchSequence } from '../../domain/stitch-sequence';
+import { shortId } from '../../domain/stitch-sequence';
+import { StatusPanel } from './StatusPanel';
 
 export interface RightPanelProps {
   design: EmbroideryDesign;
   machine: MachineProfile;
   hoop: Hoop | null;
   selected: EmbroideryObject | null;
+  sequence: StitchSequence | null;
+  artworkLoaded: boolean;
+  lastExport: ExportSnapshot | null;
+  onDownloadReport: () => void;
+  onDownloadWorksheet: () => void;
   exportResult: ExportResult | null;
   warningsAcknowledged: boolean;
   onAcknowledgeWarnings: (v: boolean) => void;
@@ -29,10 +38,10 @@ export interface RightPanelProps {
   onScaleDesign: (factor: number) => void;
 }
 
-type Tab = 'properties' | 'threads' | 'validate';
+type Tab = 'status' | 'properties' | 'threads' | 'validate';
 
 export function RightPanel(props: RightPanelProps): React.JSX.Element {
-  const [tab, setTab] = useState<Tab>('properties');
+  const [tab, setTab] = useState<Tab>('status');
   const stats = useMemo(() => computeStats(props.design), [props.design]);
   const report = props.design.validation;
 
@@ -84,6 +93,9 @@ export function RightPanel(props: RightPanelProps): React.JSX.Element {
       </section>
 
       <div className="tabs">
+        <button className={tab === 'status' ? 'active' : ''} onClick={() => setTab('status')}>
+          Status
+        </button>
         <button className={tab === 'properties' ? 'active' : ''} onClick={() => setTab('properties')}>
           Object
         </button>
@@ -95,6 +107,17 @@ export function RightPanel(props: RightPanelProps): React.JSX.Element {
         </button>
       </div>
 
+      {tab === 'status' ? (
+        <StatusPanel
+          design={props.design}
+          machine={props.machine}
+          sequence={props.sequence}
+          artworkLoaded={props.artworkLoaded}
+          lastExport={props.lastExport}
+          onDownloadReport={props.onDownloadReport}
+          onDownloadWorksheet={props.onDownloadWorksheet}
+        />
+      ) : null}
       {tab === 'properties' ? <ObjectProperties {...props} /> : null}
       {tab === 'threads' ? <ThreadPanel {...props} /> : null}
       {tab === 'validate' ? <ValidatePanel {...props} /> : null}
@@ -430,6 +453,11 @@ function ValidatePanel(props: RightPanelProps): React.JSX.Element {
             <>
               <div className="ok-banner" style={{ marginTop: 9 }}>
                 Wrote {result.fileName} ({(result.bytes!.length / 1024).toFixed(1)} kB) and verified it.
+                <br />
+                Stitch sequence <code>{shortId(result.sequenceId)}</code>
+                {props.sequence && props.sequence.id === result.sequenceId
+                  ? ' — identical to the preview on screen.'
+                  : ' — the design has changed since; export again before sewing.'}
               </div>
               <ul className="check-list">
                 {result.verification.map((c) => (
@@ -444,6 +472,10 @@ function ValidatePanel(props: RightPanelProps): React.JSX.Element {
           <p className="note">
             The exported file is a PES version 1 file containing a PEC stitch block. After encoding, the bytes are
             read back and compared with the design; if any check above fails the file is not offered for download.
+          </p>
+          <p className="note">
+            <strong>These checks are software and file-format checks only.</strong> They do not establish that the
+            file sews correctly on a physical {props.machine.name}. See the Status tab.
           </p>
         </div>
       </section>

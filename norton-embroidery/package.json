@@ -12,7 +12,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "fixtures:golden": "node scripts/write-golden.mjs",
+    "fixtures:artwork": "node scripts/make-fixture-artwork.mjs",
+    "fixtures:build": "node scripts/run-fixtures.mjs",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

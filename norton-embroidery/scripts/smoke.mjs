@@ -169,6 +169,7 @@ try {
 
   // --- 8. edit an object -------------------------------------------------
   await page.click('.object-list li:first-child');
+  await page.click('.tabs button:has-text("Object")');
   await page.waitForSelector('.panel.right #density');
   const beforeEdit = (await readStats()).stitches;
   await page.fill('.panel.right #density', '0.80');

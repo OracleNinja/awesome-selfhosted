@@ -3,3 +3,6 @@ dist/
 coverage/
 *.local
 .DS_Store
+
+# Generated validation packets; rebuild with: npm run fixtures:build
+fixtures/out/

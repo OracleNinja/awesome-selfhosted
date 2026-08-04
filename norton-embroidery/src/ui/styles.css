@@ -641,3 +641,70 @@ label {
   border-radius: 3px;
   border: 1px solid rgba(0, 0, 0, 0.25);
 }
+
+/* --- readiness tiers ---------------------------------------------------- */
+
+.tier {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.tier.ok {
+  background: #e0f2e9;
+  color: var(--ok);
+}
+
+.tier.bad {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.tier.partial {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.tier.pending {
+  background: #e8e6e2;
+  color: var(--muted);
+}
+
+.tier-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 3px;
+  vertical-align: baseline;
+}
+
+.tier-dot.ok {
+  background: var(--ok);
+}
+
+.tier-dot.bad {
+  background: var(--error);
+}
+
+.tier-dot.partial {
+  background: var(--warning);
+}
+
+.tier-dot.pending {
+  background: #b9b5ae;
+}
+
+.hardware-banner {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}

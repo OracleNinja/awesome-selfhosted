@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { computeStats, type EmbroideryDesign } from '../domain/design';
 import { getHoop, getMachine, type MachineProfile } from '../domain/machine';
 import { colorBlocks } from '../domain/stitch';
+import { buildStitchSequence, colorStops } from '../domain/stitch-sequence';
+import { buildReadinessReport, readinessReportText, type ExportSnapshot } from '../domain/readiness';
+import { stitchOutWorksheetText } from '../app/worksheet';
 import { PEC_THREADS, type Thread } from '../domain/thread';
 import { mmToUnits, unitsToMm } from '../domain/units';
 import type { EmbroideryObject, StitchType } from '../domain/embroidery-object';
@@ -92,6 +95,10 @@ export function App(): React.JSX.Element {
     [design],
   );
 
+  // One artifact, built once, consumed by the preview, the timeline, the
+  // status panel and the exporter.
+  const sequence = useMemo(() => (design ? buildStitchSequence(design) : null), [design]);
+
   const selectedObject = useMemo(
     () => design?.objects.find((o) => o.id === selectedObjectId) ?? null,
     [design, selectedObjectId],
@@ -178,6 +185,39 @@ export function App(): React.JSX.Element {
     } finally {
       setBusy(null);
     }
+  };
+
+  // A compact record of the last export, used by the readiness report so it can
+  // say whether the file on disk still matches what is on screen.
+  const lastExport: ExportSnapshot | null = exportResult
+    ? {
+        ok: exportResult.ok,
+        sequenceId: exportResult.sequenceId,
+        fileName: exportResult.fileName,
+        byteLength: exportResult.bytes?.length ?? 0,
+        checks: exportResult.verification.map((c) => ({ name: c.name, passed: c.passed, detail: c.detail })),
+        blockedReason: exportResult.blockedReason,
+      }
+    : null;
+
+  const handleDownloadReport = (): void => {
+    if (!design || !machine) return;
+    const report = buildReadinessReport({ design, machine, artworkLoaded: artwork !== null, lastExport });
+    const text = readinessReportText(report, design, machine);
+    download(new TextEncoder().encode(text), `${sanitize(design.metadata.name)}-readiness.txt`, 'text/plain');
+  };
+
+  const handleDownloadWorksheet = (): void => {
+    if (!design || !machine || !sequence) return;
+    const text = stitchOutWorksheetText({
+      design,
+      machine,
+      hoop,
+      sequence,
+      stops: colorStops(sequence),
+      exportedFileName: exportResult?.ok ? exportResult.fileName : null,
+    });
+    download(new TextEncoder().encode(text), `${sanitize(design.metadata.name)}-stitchout.txt`, 'text/plain');
   };
 
   const handleExport = (): void => {
@@ -304,6 +344,8 @@ export function App(): React.JSX.Element {
         objects: [],
         threadPalette: threads,
         stitches: imported.stitches,
+        // Imported files carry one palette entry per colour block already.
+        colorSequence: null,
         validation: null,
       };
       // Validate without regenerating: there are no objects to generate from.
@@ -476,6 +518,9 @@ export function App(): React.JSX.Element {
         </button>
 
         <span className="spacer" />
+        <span className="hardware-banner" title="No design from this application has been confirmed on physical hardware yet.">
+          HARDWARE NOT VERIFIED
+        </span>
         <span className="project-name">
           {design.metadata.name}
           {design.metadata.customer ? ` · ${design.metadata.customer}` : ''} · {machine.name}
@@ -513,7 +558,7 @@ export function App(): React.JSX.Element {
 
       <DesignCanvas
         stitches={design.stitches}
-        threads={design.threadPalette}
+        blockThreads={sequence?.blockThreads ?? []}
         hoop={hoop}
         upTo={position < 0 ? -1 : Math.floor(position)}
         highlightRange={highlightRange}
@@ -524,7 +569,7 @@ export function App(): React.JSX.Element {
 
       <Timeline
         stitches={design.stitches}
-        threads={design.threadPalette}
+        blockThreads={sequence?.blockThreads ?? []}
         position={position < 0 ? design.stitches.length : Math.floor(position)}
         playing={playing}
         speed={speed}
@@ -561,6 +606,11 @@ export function App(): React.JSX.Element {
         machine={machine}
         hoop={hoop}
         selected={selectedObject}
+        sequence={sequence}
+        artworkLoaded={artwork !== null}
+        lastExport={lastExport}
+        onDownloadReport={handleDownloadReport}
+        onDownloadWorksheet={handleDownloadWorksheet}
         exportResult={exportResult}
         warningsAcknowledged={warningsAcknowledged}
         onAcknowledgeWarnings={setWarningsAcknowledged}
@@ -732,6 +782,11 @@ function download(bytes: Uint8Array, fileName: string, mimeType: string): void {
 function stripHeavyFields(a: ArtworkAnalysis): Omit<ArtworkAnalysis, 'quantized' | 'regions'> {
   const { quantized: _q, regions: _r, ...rest } = a;
   return rest;
+}
+
+function sanitize(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9-_ ]/g, '').trim().replace(/\s+/g, '-');
+  return cleaned || 'design';
 }
 
 function message(err: unknown): string {

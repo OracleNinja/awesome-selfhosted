@@ -21,7 +21,12 @@ export interface Viewport {
 
 export interface RenderOptions {
   viewport: Viewport;
-  threads: readonly Thread[];
+  /**
+   * Thread for each colour block, in sew order — NOT the design palette. A
+   * design that returns to a colour has more blocks than palette entries, so
+   * indexing a palette by block ordinal draws the wrong thread.
+   */
+  blockThreads: readonly Thread[];
   hoop: Hoop | null;
   /** Draw only the first N stitches. -1 draws everything. */
   upTo: number;
@@ -68,7 +73,7 @@ export function render(
   stitches: readonly Stitch[],
   options: RenderOptions,
 ): void {
-  const { viewport: v, threads } = options;
+  const { viewport: v, blockThreads } = options;
   const canvas = ctx.canvas;
   const width = canvas.width / (window.devicePixelRatio || 1);
   const height = canvas.height / (window.devicePixelRatio || 1);
@@ -109,9 +114,10 @@ export function render(
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  for (const block of blocks) {
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+    const block = blocks[blockIndex];
     if (block.start >= limit) break;
-    const thread = threads[block.threadIndex];
+    const thread = blockThreads[blockIndex];
     const color = thread ? threadHex(thread) : '#888888';
     const end = Math.min(block.endExclusive, limit);
 
@@ -274,7 +280,7 @@ function drawGrid(
 export function renderTimeline(
   ctx: CanvasRenderingContext2D,
   stitches: readonly Stitch[],
-  threads: readonly Thread[],
+  blockThreads: readonly Thread[],
   progress: number,
 ): void {
   const canvas = ctx.canvas;
@@ -285,13 +291,13 @@ export function renderTimeline(
   if (stitches.length === 0) return;
 
   const blocks = colorBlocks(stitches);
-  for (const block of blocks) {
+  blocks.forEach((block, blockIndex) => {
     const x0 = (block.start / stitches.length) * width;
     const x1 = (block.endExclusive / stitches.length) * width;
-    const thread = threads[block.threadIndex];
+    const thread = blockThreads[blockIndex];
     ctx.fillStyle = thread ? threadHex(thread) : '#888';
     ctx.fillRect(x0, 0, Math.max(1, x1 - x0), height);
-  }
+  });
 
   const px = progress * width;
   ctx.fillStyle = 'rgba(0,0,0,0.35)';

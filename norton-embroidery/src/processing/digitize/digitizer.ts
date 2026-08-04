@@ -140,10 +140,19 @@ export function digitize(analysis: ArtworkAnalysis, options: DigitizeOptions): D
 
   for (const region of regions) {
     const summary = analysis.foregroundRegions.find((r) => r.id === region.id)!;
-    const mask = cleanMask(region.mask, region.width, region.height, 1);
-    const rawPolys = maskToPolygons(mask, region.width, region.height);
+    // Speckle removal erodes before it dilates, which annihilates a region only
+    // a pixel or two wide. Those are exactly the thin strokes that should
+    // become running stitches, so fall back to the untouched mask rather than
+    // dropping the shape.
+    const cleaned = cleanMask(region.mask, region.width, region.height, 1);
+    let rawPolys = maskToPolygons(cleaned, region.width, region.height);
     if (rawPolys.length === 0) {
-      warnings.push(`A region of colour ${analysis.detectedColors[region.colorIndex]?.hex ?? '?'} could not be traced and was skipped.`);
+      rawPolys = maskToPolygons(region.mask, region.width, region.height);
+    }
+    if (rawPolys.length === 0) {
+      warnings.push(
+        `A ${region.pixelCount}-pixel region of colour ${analysis.detectedColors[region.colorIndex]?.hex ?? '?'} could not be traced and was skipped.`,
+      );
       continue;
     }
 
