@@ -24,6 +24,16 @@
   box-sizing: border-box;
 }
 
+/*
+ * The `hidden` attribute is how progressive disclosure is expressed in the
+ * markup. A UA stylesheet sets display:none for it, but any author rule that
+ * sets display — .stat-grid uses grid, .row uses flex — outranks the UA rule
+ * and the element stays visible. This makes `hidden` mean hidden everywhere.
+ */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #root {

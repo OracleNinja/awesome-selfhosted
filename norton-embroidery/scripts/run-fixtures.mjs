@@ -101,8 +101,7 @@ try {
     await page.setInputFiles('.panel.left input[type=file]', artworkSrc);
     await page.waitForSelector('.suitability', { timeout: 40000 });
 
-    // 4. digitize
-    await page.click('button:has-text("Digitize artwork")');
+    // 4. digitize happens automatically on upload
     await page.waitForFunction(
       () =>
         document.querySelectorAll('.object-list li').length > 0 &&

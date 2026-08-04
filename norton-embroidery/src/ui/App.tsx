@@ -5,6 +5,7 @@ import { colorBlocks } from '../domain/stitch';
 import { buildStitchSequence, colorStops } from '../domain/stitch-sequence';
 import { buildReadinessReport, readinessReportText, type ExportSnapshot } from '../domain/readiness';
 import { stitchOutWorksheetText } from '../app/worksheet';
+import { suggestAutoFixes, type AutoFix } from '../app/auto-fix';
 import { PEC_THREADS, type Thread } from '../domain/thread';
 import { mmToUnits, unitsToMm } from '../domain/units';
 import type { EmbroideryObject, StitchType } from '../domain/embroidery-object';
@@ -75,6 +76,9 @@ export function App(): React.JSX.Element {
   const [showProjects, setShowProjects] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [previewMode, setPreviewMode] = useState<'stitch' | 'artwork'>('stitch');
+  // Simple hides embroidery terminology; advanced exposes every parameter.
+  // The engine is identical either way — this only gates what is on screen.
+  const [advanced, setAdvanced] = useState(false);
 
   // Digitizing settings.
   const [colorCount, setColorCount] = useState(6);
@@ -155,6 +159,10 @@ export function App(): React.JSX.Element {
       await tick();
       const result = analyze(decoded.image, design.canvas, { colorCount });
       setAnalysis(result);
+      // Go straight on to a first-pass design. Upload -> stitches is the whole
+      // product promise; making the person press a second button to get there
+      // is friction with nothing behind it.
+      if (machine) await runDigitize(design, machine, decoded, 'Digitize artwork');
     } catch (err) {
       setError(message(err));
       setArtwork(null);
@@ -164,26 +172,42 @@ export function App(): React.JSX.Element {
     }
   };
 
-  const handleDigitize = async (): Promise<void> => {
-    if (!design || !machine || !artwork) return;
+  /**
+   * Digitize `image` into `base`. Kept separate from the click handler so the
+   * upload path can run it immediately: a person who drops a logo in should see
+   * stitches without having to know that "digitize" is the next step.
+   */
+  const runDigitize = async (
+    base: EmbroideryDesign,
+    m: MachineProfile,
+    image: DecodedArtwork,
+    label: string,
+  ): Promise<void> => {
     setBusy('Digitizing…');
-    setError(null);
     try {
       await tick();
-      const fresh = analyze(artwork.image, design.canvas, { colorCount });
+      const fresh = analyze(image.image, base.canvas, { colorCount });
       setAnalysis(fresh);
-      const result = digitizeAndGenerate(design, fresh, machine, {
+      const result = digitizeAndGenerate(base, fresh, m, {
         threads: PEC_THREADS,
         digitize: { fillDensity: mmToUnits(fillDensityMm), underlay: useUnderlay },
       });
-      commit(result.design, 'Digitize artwork');
+      commit(result.design, label);
       setSelectedObjectId(null);
       setPosition(-1);
       if (result.digitize.warnings.length) setError(result.digitize.warnings.join(' '));
-    } catch (err) {
-      setError(message(err));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const handleDigitize = async (): Promise<void> => {
+    if (!design || !machine || !artwork) return;
+    setError(null);
+    try {
+      await runDigitize(design, machine, artwork, 'Digitize artwork');
+    } catch (err) {
+      setError(message(err));
     }
   };
 
@@ -218,6 +242,20 @@ export function App(): React.JSX.Element {
       exportedFileName: exportResult?.ok ? exportResult.fileName : null,
     });
     download(new TextEncoder().encode(text), `${sanitize(design.metadata.name)}-stitchout.txt`, 'text/plain');
+  };
+
+  const autoFixes: AutoFix[] = useMemo(
+    () => (design && machine ? suggestAutoFixes(design, machine) : []),
+    [design, machine],
+  );
+
+  const handleAutoFix = (fix: AutoFix): void => {
+    if (!design || !machine) return;
+    try {
+      commit(fix.apply(design, machine), fix.label);
+    } catch (err) {
+      setError(message(err));
+    }
   };
 
   const handleExport = (): void => {
@@ -518,6 +556,24 @@ export function App(): React.JSX.Element {
         </button>
 
         <span className="spacer" />
+        <button
+          className="primary"
+          onClick={handleExport}
+          disabled={!design.validation?.passed || busy !== null}
+          title={
+            design.validation?.passed
+              ? 'Validate and download a PES file'
+              : 'Fix the errors listed under Validate first'
+          }
+        >
+          Export PES
+        </button>
+        <button
+          onClick={() => setAdvanced((a) => !a)}
+          title="Show or hide stitch-level settings"
+        >
+          {advanced ? 'Simple view' : 'Advanced view'}
+        </button>
         <span className="hardware-banner" title="No design from this application has been confirmed on physical hardware yet.">
           HARDWARE NOT VERIFIED
         </span>
@@ -540,6 +596,7 @@ export function App(): React.JSX.Element {
         onColorCount={setColorCount}
         onFillDensity={setFillDensityMm}
         onUseUnderlay={setUseUnderlay}
+        advanced={advanced}
         onUpload={(file) => void handleUpload(file)}
         onDigitize={() => void handleDigitize()}
         onSelectObject={setSelectedObjectId}
@@ -611,6 +668,9 @@ export function App(): React.JSX.Element {
         lastExport={lastExport}
         onDownloadReport={handleDownloadReport}
         onDownloadWorksheet={handleDownloadWorksheet}
+        advanced={advanced}
+        autoFixes={autoFixes}
+        onAutoFix={handleAutoFix}
         exportResult={exportResult}
         warningsAcknowledged={warningsAcknowledged}
         onAcknowledgeWarnings={setWarningsAcknowledged}

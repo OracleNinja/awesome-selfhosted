@@ -73,6 +73,14 @@ async function makeJpegInPage(page) {
   );
 }
 
+
+/** Switch into advanced view if we are not already there (state resets on reload). */
+async function ensureAdvanced(page) {
+  const toggle = page.locator('.topbar button:has-text("Advanced view")');
+  if (await toggle.count()) await toggle.click();
+  await page.waitForSelector('.tabs button:has-text("Object"):visible');
+}
+
 const log = (...args) => console.log('•', ...args);
 const fail = (msg) => {
   console.error('✗', msg);
@@ -116,7 +124,12 @@ try {
   await page.screenshot({ path: join(OUT_DIR, '02-analysed.png') });
 
   // --- 4. digitize -------------------------------------------------------
-  await page.click('button:has-text("Digitize artwork")');
+  // Upload alone should already have produced stitches.
+  await page.waitForFunction(
+    () => /[1-9][\d,]* stitches/.test(document.querySelector('.canvas-readout')?.textContent || ''),
+    { timeout: 90000 },
+  );
+  log('auto-digitized on upload (no button press)');
   await page.waitForFunction(
     () => document.querySelectorAll('.object-list li').length > 0 &&
       !document.querySelector('.object-list li')?.textContent?.includes('No objects'),
@@ -168,6 +181,9 @@ try {
   await page.click('button:has-text("Restart")');
 
   // --- 8. edit an object -------------------------------------------------
+  // Stitch-level controls live in advanced view; switch into it first.
+  await ensureAdvanced(page);
+  await page.waitForSelector('.object-list li');
   await page.click('.object-list li:first-child');
   await page.click('.tabs button:has-text("Object")');
   await page.waitForSelector('.panel.right #density');
@@ -283,6 +299,7 @@ try {
   await page.screenshot({ path: join(OUT_DIR, '10-formats.png') });
 
   // --- 16. oversized design must block export ----------------------------
+  await ensureAdvanced(page);
   await page.click('.tabs button:has-text("Object")');
   for (let i = 0; i < 12; i++) await page.click('button:has-text("Scale +10%")');
   await page.waitForTimeout(800);

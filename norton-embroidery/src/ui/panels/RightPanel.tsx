@@ -6,6 +6,7 @@ import type { MachineProfile, Hoop } from '../../domain/machine';
 import { unitsToInches, unitsToMm } from '../../domain/units';
 import type { ExportResult } from '../../app/export-pes';
 import type { ExportSnapshot } from '../../domain/readiness';
+import type { AutoFix } from '../../app/auto-fix';
 import type { StitchSequence } from '../../domain/stitch-sequence';
 import { shortId } from '../../domain/stitch-sequence';
 import { StatusPanel } from './StatusPanel';
@@ -20,6 +21,9 @@ export interface RightPanelProps {
   lastExport: ExportSnapshot | null;
   onDownloadReport: () => void;
   onDownloadWorksheet: () => void;
+  advanced: boolean;
+  autoFixes: AutoFix[];
+  onAutoFix: (fix: AutoFix) => void;
   exportResult: ExportResult | null;
   warningsAcknowledged: boolean;
   onAcknowledgeWarnings: (v: boolean) => void;
@@ -42,12 +46,15 @@ type Tab = 'status' | 'properties' | 'threads' | 'validate';
 
 export function RightPanel(props: RightPanelProps): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('status');
+  // Object and Threads only exist in advanced view; falling back to Status
+  // stops someone getting stranded on a panel whose tab has just vanished.
+  const activeTab: Tab = !props.advanced && (tab === 'properties' || tab === 'threads') ? 'status' : tab;
   const stats = useMemo(() => computeStats(props.design), [props.design]);
   const report = props.design.validation;
 
   return (
     <aside className="panel right">
-      <section className="section">
+      <section className="section" hidden={!props.advanced}>
         <h3>Design</h3>
         <div className="body">
           <dl className="stat-grid">
@@ -93,21 +100,29 @@ export function RightPanel(props: RightPanelProps): React.JSX.Element {
       </section>
 
       <div className="tabs">
-        <button className={tab === 'status' ? 'active' : ''} onClick={() => setTab('status')}>
+        <button className={activeTab === 'status' ? 'active' : ''} onClick={() => setTab('status')}>
           Status
         </button>
-        <button className={tab === 'properties' ? 'active' : ''} onClick={() => setTab('properties')}>
+        <button
+          className={activeTab === 'properties' ? 'active' : ''}
+          onClick={() => setTab('properties')}
+          hidden={!props.advanced}
+        >
           Object
         </button>
-        <button className={tab === 'threads' ? 'active' : ''} onClick={() => setTab('threads')}>
+        <button
+          className={activeTab === 'threads' ? 'active' : ''}
+          onClick={() => setTab('threads')}
+          hidden={!props.advanced}
+        >
           Threads
         </button>
-        <button className={tab === 'validate' ? 'active' : ''} onClick={() => setTab('validate')}>
+        <button className={activeTab === 'validate' ? 'active' : ''} onClick={() => setTab('validate')}>
           Validate{report && report.errorCount + report.warningCount > 0 ? ` (${report.errorCount + report.warningCount})` : ''}
         </button>
       </div>
 
-      {tab === 'status' ? (
+      {activeTab === 'status' ? (
         <StatusPanel
           design={props.design}
           machine={props.machine}
@@ -118,9 +133,9 @@ export function RightPanel(props: RightPanelProps): React.JSX.Element {
           onDownloadWorksheet={props.onDownloadWorksheet}
         />
       ) : null}
-      {tab === 'properties' ? <ObjectProperties {...props} /> : null}
-      {tab === 'threads' ? <ThreadPanel {...props} /> : null}
-      {tab === 'validate' ? <ValidatePanel {...props} /> : null}
+      {activeTab === 'properties' ? <ObjectProperties {...props} /> : null}
+      {activeTab === 'threads' ? <ThreadPanel {...props} /> : null}
+      {activeTab === 'validate' ? <ValidatePanel {...props} /> : null}
     </aside>
   );
 }
@@ -392,6 +407,25 @@ function ValidatePanel(props: RightPanelProps): React.JSX.Element {
 
   return (
     <>
+      {props.autoFixes.length > 0 ? (
+        <section className="section">
+          <h3>Fix automatically</h3>
+          <div className="body">
+            <p className="note" style={{ marginTop: 0 }}>
+              These problems have one obviously-correct answer, so the application can apply it for you.
+            </p>
+            {props.autoFixes.map((fix) => (
+              <div key={fix.code} style={{ marginBottom: 8 }}>
+                <button className="primary" style={{ width: '100%' }} onClick={() => props.onAutoFix(fix)}>
+                  {fix.label}
+                </button>
+                <p className="note">{fix.detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="section">
         <h3>Validation</h3>
         <div className="body">

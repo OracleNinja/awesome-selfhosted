@@ -100,6 +100,10 @@ export function NewProjectDialog(props: {
             </div>
           ) : null}
 
+          <p className="note">
+            The defaults suit most logos — you can accept them and change the size later once you can see the
+            stitches.
+          </p>
           <p className="note">{machine.notes}</p>
         </div>
         <div className="footer">

@@ -21,6 +21,7 @@ export interface LeftPanelProps {
   onUseUnderlay: (v: boolean) => void;
   onUpload: (file: File) => void;
   onDigitize: () => void;
+  advanced: boolean;
   onSelectObject: (id: string | null) => void;
   onToggleVisible: (id: string) => void;
   onReorder: (id: string, delta: number) => void;
@@ -36,7 +37,7 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
   return (
     <aside className="panel left">
       <section className="section">
-        <h3>1 · Artwork</h3>
+        <h3>{props.advanced ? '1 · Artwork' : 'Your artwork'}</h3>
         <div className="body">
           {props.artworkUrl ? (
             <img className="artwork-preview" src={props.artworkUrl} alt="Uploaded artwork" />
@@ -94,7 +95,7 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
 
       {analysis ? (
         <section className="section">
-          <h3>2 · Analysis</h3>
+          <h3>{props.advanced ? '2 · Analysis' : 'How this artwork looks'}</h3>
           <div className="body">
             <div style={{ marginBottom: 8 }}>
               <span className={`suitability ${analysis.suitability}`}>
@@ -103,7 +104,13 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
               <strong>{analysis.embroiderySuitabilityScore}/100</strong>
             </div>
 
-            <dl className="stat-grid">
+            {!props.advanced ? (
+              <p className="note" style={{ marginTop: 0 }}>
+                {SUITABILITY_PLAIN[analysis.suitability]}
+              </p>
+            ) : null}
+
+            <dl className="stat-grid" hidden={!props.advanced}>
               <dt>Colours found</dt>
               <dd>{analysis.detectedColors.length}</dd>
               <dt>Est. source colours</dt>
@@ -144,15 +151,17 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
               </div>
             ))}
 
-            <p className="note">{analysis.textRegions.note}</p>
+            <p className="note" hidden={!props.advanced}>
+              {analysis.textRegions.note}
+            </p>
           </div>
         </section>
       ) : null}
 
       <section className="section">
-        <h3>3 · Digitize</h3>
+        <h3>{props.advanced ? '3 · Digitize' : 'Design'}</h3>
         <div className="body">
-          <div className="field">
+          <div className="field" hidden={!props.advanced}>
             <label htmlFor="colorCount">Colours to use ({props.colorCount})</label>
             <input
               id="colorCount"
@@ -163,7 +172,7 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
               onChange={(e) => props.onColorCount(Number(e.target.value))}
             />
           </div>
-          <div className="field">
+          <div className="field" hidden={!props.advanced}>
             <label htmlFor="digitize-density">Fill row spacing ({props.fillDensityMm.toFixed(2)} mm)</label>
             <input
               id="digitize-density"
@@ -175,7 +184,7 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
               onChange={(e) => props.onFillDensity(Number(e.target.value))}
             />
           </div>
-          <div className="field">
+          <div className="field" hidden={!props.advanced}>
             <label style={{ textTransform: 'none', fontSize: 12 }}>
               <input
                 type="checkbox"
@@ -192,13 +201,19 @@ export function LeftPanel(props: LeftPanelProps): React.JSX.Element {
             onClick={props.onDigitize}
             disabled={!artwork || props.busy !== null}
           >
-            {props.busy ?? 'Digitize artwork'}
+            {props.busy ?? (artwork ? 'Digitize artwork again' : 'Digitize artwork')}
           </button>
-          {!artwork ? <p className="note">Upload artwork first.</p> : null}
+          {!artwork ? (
+            <p className="note">Upload artwork above. It is turned into stitches automatically.</p>
+          ) : (
+            <p className="note">
+              Stitches are generated automatically when you upload. Use this to redo it after changing a setting.
+            </p>
+          )}
         </div>
       </section>
 
-      <section className="section">
+      <section className="section" hidden={!props.advanced}>
         <h3>Objects ({objects.length})</h3>
         <ul className="object-list">
           {objects.map((obj, index) => (
@@ -280,6 +295,20 @@ function ObjectRow(props: {
     </li>
   );
 }
+
+/**
+ * What the suitability rating means, without embroidery vocabulary. The score
+ * itself stays visible — this explains what to do about it.
+ */
+const SUITABILITY_PLAIN: Record<string, string> = {
+  good: 'This artwork should turn into a good design automatically. Check the preview, then export.',
+  workable:
+    'This should work. Look over the preview for anything that has come out thinner or smaller than you expect.',
+  'manual-cleanup-likely':
+    'This will need some tidying up. Simplify the artwork — fewer colours, no fine detail, no soft edges — and upload it again for a better result.',
+  'not-suitable':
+    'This artwork is not a good fit for automatic digitizing. Photographs and images with soft shading cannot be stitched directly; redraw it as flat blocks of colour first.',
+};
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
