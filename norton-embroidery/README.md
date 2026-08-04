@@ -3,11 +3,36 @@
 Turn customer artwork into a validated, machine-ready PES embroidery file.
 
 ```
-IMAGE → ANALYZE → DIGITIZE → PREVIEW → VALIDATE → EDIT → EXPORT PES
+UPLOAD IMAGE → DIGITIZE AUTOMATICALLY → REVIEW → EXPORT PES → SEW
 ```
 
 Everything runs locally in the browser. There is no server, no upload of
 customer artwork to a third party, and no external service in the export path.
+
+## The two views
+
+Digitizing starts on its own as soon as artwork finishes decoding, so the
+shortest path through the app is: name the project, drop in a PNG, look at the
+stitch preview, press **Export PES**. Nobody has to know what tatami, underlay
+or a satin column is to get a first-pass design.
+
+**Simple view** (the default) shows the artwork, a plain-English sentence about
+how well it suits automatic digitizing, the preview, and whatever must be fixed
+before the file can go to a machine. Where a validation problem has exactly one
+correct answer — the design overruns the hoop, sits outside the safe area, has a
+fill below minimum density, or has stitches longer than the machine allows — the
+app offers a one-click fix. Anything needing judgement is not offered as a fix.
+
+**Advanced view** adds colour count, fill row spacing, underlay, the object list
+and per-object stitch type, angle, density and thread, the raw analysis metrics
+and the object sequencing. It hides nothing that Simple view shows; the toggle
+is in the top bar. No number is calculated differently in one view or the other.
+
+The full pipeline underneath is unchanged:
+
+```
+IMAGE → ANALYZE → DIGITIZE → PREVIEW → VALIDATE → EDIT → EXPORT PES
+```
 
 ## Running it
 
@@ -37,7 +62,8 @@ npm run preview &                                  # in one shell
 node scripts/smoke.mjs http://127.0.0.1:4173/ ./out # in another
 ```
 
-It creates a project, uploads a real PNG, digitizes, runs the simulator, edits
+It creates a project, uploads a real PNG, waits for the automatic digitize,
+switches to Advanced view, runs the simulator, edits
 an object, undoes the edit, validates, exports a `.pes`, saves the project,
 reloads the page, reopens the project and re-imports the exported file. It
 fails if the downloaded file is not a real PES file or if any post-export check
