@@ -1,0 +1,68 @@
+{
+  "_README": [
+    "OPERATOR-MAINTAINED CONFIGURATION — NOT AUTHORITATIVE, NOT BUSINESS LOGIC.",
+    "",
+    "These rates exist so the cost dashboard can turn recorded token counts into",
+    "an estimate. They are a snapshot entered by hand and they go stale. Nothing",
+    "in the application decides anything from them: they are never used to gate a",
+    "feature, price a customer quote, or choose a model. They multiply tokens for",
+    "reporting, and that is all.",
+    "",
+    "Verify against the provider's own pricing page before trusting a number, and",
+    "update 'as_of' when you do. A model with no entry here is NOT assigned a",
+    "guessed rate — its calls are recorded with tokens and a null cost, and the",
+    "dashboard reports it as unpriced. That is deliberate: an honest gap beats a",
+    "fabricated figure.",
+    "",
+    "Dollar-denominated budgets (AI_MONTHLY_COST_*) only bind for priced models.",
+    "The token-denominated budgets bind always and are the real safety net."
+  ],
+  "currency": "USD",
+  "unit": "per 1,000,000 tokens",
+  "as_of": "2026-06-24",
+  "source": "operator-configured estimate; verify at https://www.anthropic.com/pricing",
+  "confidence": "estimate",
+  "models": {
+    "claude-haiku-4-5": {
+      "input": 1.0,
+      "output": 5.0,
+      "cache_write": 1.25,
+      "cache_read": 0.1,
+      "note": "Vision-capable. Default VISION tier."
+    },
+    "claude-sonnet-5": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_write": 3.75,
+      "cache_read": 0.3,
+      "note": "Introductory rates were lower through 2026-08-31; these are list."
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_write": 3.75,
+      "cache_read": 0.3
+    },
+    "claude-opus-5": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-8": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_write": 6.25,
+      "cache_read": 0.5
+    }
+  },
+  "unpriced": {
+    "_note": [
+      "OpenAI models are intentionally absent. No verified rate was available to",
+      "whoever wrote this file, and inventing one would put a fabricated number",
+      "in a financial report. Add entries here after checking",
+      "https://openai.com/api/pricing/ — until then OpenAI calls record real",
+      "token counts with cost = null."
+    ]
+  }
+}
