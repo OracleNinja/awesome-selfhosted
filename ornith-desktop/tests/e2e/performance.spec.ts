@@ -40,6 +40,13 @@ test('a long streamed response keeps the UI responsive', async () => {
   const page: Page = await app.firstWindow();
   await page.waitForSelector('.app', { timeout: 30_000 });
 
+  // Answer the first-run mode choice, which otherwise blocks the composer.
+  const chooser = page.getByTestId('mode-chooser');
+  if (await chooser.isVisible().catch(() => false)) {
+    await page.getByTestId('choose-local').click();
+    await expect(chooser).toHaveCount(0);
+  }
+
   try {
     // Sample frame intervals for the duration of the stream.
     await page.evaluate(() => {

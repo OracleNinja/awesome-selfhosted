@@ -82,7 +82,24 @@ export interface OllamaStatus {
   error?: AppError;
 }
 
-export type StreamState = 'queued' | 'loading-model' | 'streaming' | 'finalising';
+export type StreamState =
+  | 'queued'
+  | 'loading-model'
+  /** Online mode only: the gateway is running a web search. */
+  | 'searching'
+  /** Online mode only: the gateway is extracting fetched pages. */
+  | 'reading'
+  | 'streaming'
+  | 'finalising';
+
+export type AiMode = 'local' | 'online';
+
+export interface AnsweredSource {
+  title: string;
+  url: string;
+  domain: string;
+  cached: boolean;
+}
 
 export type StreamOutcome =
   | { kind: 'complete'; stats: GenerationStats }
@@ -112,6 +129,36 @@ export interface Settings {
   speechRate: number;
   /** BCP-47 locale for on-device speech recognition. */
   sttLocale: string;
+
+  /* ---- online mode ---- */
+
+  /** Which backend answers. Local keeps everything on this Mac. */
+  mode: AiMode;
+  /** True once the user has made a first-run choice, so it is asked only once. */
+  modeChosen: boolean;
+  /** Base URL of the Ornith Cloud gateway. Not secret. */
+  gatewayUrl: string;
+  /**
+   * Bearer token for the gateway. SECRET — main process only. It is
+   * deliberately absent from PublicSettings and must never cross IPC.
+   */
+  gatewayToken: string;
+  /** Allow the gateway to perform web retrieval when a question needs it. */
+  webRetrieval: boolean;
+}
+
+/**
+ * What the renderer is allowed to see. The token is replaced by a boolean so
+ * the secret never enters renderer memory, where a rendering bug or a
+ * compromised dependency could reach it.
+ */
+export type PublicSettings = Omit<Settings, 'gatewayToken'> & {
+  gatewayTokenConfigured: boolean;
+};
+
+export function toPublicSettings(settings: Settings): PublicSettings {
+  const { gatewayToken, ...rest } = settings;
+  return { ...rest, gatewayTokenConfigured: gatewayToken.length > 0 };
 }
 
 export interface AppInfo {

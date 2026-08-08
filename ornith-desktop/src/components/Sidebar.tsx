@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import StatusIndicator from './StatusIndicator';
 import { groupConversations } from '../lib/dates';
-import type { ConversationSummary, OllamaStatus } from '../../shared/types';
+import type { AiMode, ConversationSummary, OllamaStatus } from '../../shared/types';
 
 interface Props {
   conversations: ConversationSummary[];
@@ -13,6 +13,8 @@ interface Props {
   onRename: (id: string, title: string) => void;
   onOpenSettings: () => void;
   onRetryConnection: () => void;
+  mode: AiMode;
+  onlineConfigured: boolean;
 }
 
 export default function Sidebar({
@@ -25,6 +27,8 @@ export default function Sidebar({
   onRename,
   onOpenSettings,
   onRetryConnection,
+  mode,
+  onlineConfigured,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -124,7 +128,7 @@ export default function Sidebar({
         <button type="button" className="ghost-button" onClick={onOpenSettings} data-testid="open-settings">
           Settings
         </button>
-        <StatusIndicator status={status} onRetry={onRetryConnection} />
+        <StatusIndicator status={status} onRetry={onRetryConnection} mode={mode} onlineConfigured={onlineConfigured} />
       </div>
     </aside>
   );

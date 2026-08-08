@@ -6,6 +6,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_MODEL, STATUS_POLL_INTERVAL_MS } from '../shared/defaults';
 import { IPC_VERSION } from '../shared/ipc';
 import type { AppInfo, OllamaStatus, Settings, ThinkingMode } from '../shared/types';
+import { toPublicSettings } from '../shared/types';
+import { createOllamaBackend } from './backends/ollama';
+import { createGatewayBackend } from './backends/gateway';
+import type { ChatBackend } from './backends/types';
 import type {
   SpeakRequest,
   TranscriptionRequest,
@@ -208,7 +212,8 @@ function registerIpc(): void {
   ipcMain.handle('ollama:status', async () => status ?? (await refreshStatus()));
   ipcMain.handle('ollama:refresh', () => refreshStatus());
 
-  ipcMain.handle('settings:get', () => settingsStore.get());
+  // PublicSettings, never Settings: the gateway token stays in main.
+  ipcMain.handle('settings:get', () => toPublicSettings(settingsStore.get()));
   ipcMain.handle('settings:update', async (_e, patch: Partial<Settings>) => {
     const before = settingsStore.get();
     const next = settingsStore.update(patch ?? {});
@@ -221,7 +226,7 @@ function registerIpc(): void {
     if (next.theme !== before.theme) {
       nativeTheme.themeSource = next.theme === 'system' ? 'system' : next.theme;
     }
-    return next;
+    return toPublicSettings(next);
   });
 
   ipcMain.handle('conv:list', () => store.list());
@@ -329,6 +334,28 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Picks the backend for the next turn. Online falls back to local when the
+ * gateway has not been configured, so selecting Online without a token can
+ * never strand the user with a non-working app.
+ */
+function resolveBackend(): ChatBackend {
+  const settings = settingsStore.get();
+
+  if (settings.mode === 'online' && settings.gatewayUrl && settings.gatewayToken) {
+    return createGatewayBackend({
+      url: settings.gatewayUrl,
+      token: settings.gatewayToken,
+    });
+  }
+
+  if (settings.mode === 'online') {
+    log.warn('backend.online_unconfigured', { hasUrl: Boolean(settings.gatewayUrl) });
+  }
+
+  return createOllamaBackend(settings.ollamaUrl);
+}
+
 /* ---------------------------------------------------------------- lifecycle */
 
 function bootstrap(): void {
@@ -356,7 +383,7 @@ function bootstrap(): void {
   if (repaired > 0) log.warn('startup.recovered', { messages: repaired });
 
   settingsStore = createSettingsStore(path.join(userData, 'settings.json'), (next) =>
-    broadcast('settings:changed', next),
+    broadcast('settings:changed', toPublicSettings(next)),
   );
 
   // Test hook: point the app at a stub Ollama server.
@@ -371,6 +398,7 @@ function bootstrap(): void {
     store,
     getSettings: () => settingsStore.get(),
     getThinkingMode: () => thinkingMode,
+    getBackend: resolveBackend,
   });
 
   ttsEngine = createTtsEngine();

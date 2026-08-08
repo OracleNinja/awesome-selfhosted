@@ -14,7 +14,8 @@ import type { AppError, GenerationStats, Settings, ThinkingMode } from '../../sh
 import type { IpcEventMap } from '../../shared/ipc';
 import type { ConversationStore } from '../store/conversations';
 import { buildContext } from '../ollama/context';
-import { streamChat, type RawStats } from '../ollama/client';
+import type { RawStats } from '../ollama/client';
+import type { ChatBackend } from '../backends/types';
 import { createCoalescer } from '../ollama/coalescer';
 import { createThinkingParser } from '../ollama/thinking';
 import { log } from '../log';
@@ -23,6 +24,8 @@ export interface OrchestratorDeps {
   store: ConversationStore;
   getSettings: () => Settings;
   getThinkingMode: () => ThinkingMode;
+  /** Resolves the backend for this turn: local Ollama or the online gateway. */
+  getBackend: () => ChatBackend;
 }
 
 interface ActiveStream {
@@ -200,9 +203,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       log.info('chat.finished', { requestId, status, chars: content.length });
     }
 
-    const abort = streamChat(
+    const backend = deps.getBackend();
+
+    const abort = backend.stream(
       {
-        host: settings.ollamaUrl,
         model: settings.model,
         messages,
         temperature: settings.temperature,
@@ -210,8 +214,23 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         numCtx: settings.numCtx,
         keepAlive: settings.keepAlive,
         think: thinkingMode === 'structured',
+        web: settings.webRetrieval,
       },
       {
+        onStatus: ({ status }) => {
+          // Online progress phases ride the existing chat:state channel rather
+          // than a second status mechanism.
+          if (finished) return;
+          // 'generating' is the gateway's name for what the UI already calls
+          // 'streaming'; searching/reading are genuinely new phases.
+          const state = status === 'generating' ? 'streaming' : status;
+          emit(sender, 'chat:state', { requestId, state });
+        },
+
+        onSources: (sources) => {
+          if (!finished) emit(sender, 'chat:sources', { requestId, sources });
+        },
+
         onDelta: ({ content: c, thinking: t }) => {
           if (!sawFirstToken) {
             sawFirstToken = true;
@@ -260,7 +279,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       dispose: () => finish('cancelled'),
     });
 
-    log.info('chat.started', { requestId, model: settings.model, contextMessages: messages.length });
+    log.info('chat.started', {
+      requestId,
+      backend: backend.name,
+      model: settings.model,
+      contextMessages: messages.length,
+    });
   }
 
   return {

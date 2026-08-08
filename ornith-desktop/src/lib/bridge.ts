@@ -4,6 +4,7 @@ import type {
   Conversation,
   ConversationSummary,
   OllamaStatus,
+  PublicSettings,
   Settings,
 } from '../../shared/types';
 import type {
@@ -20,8 +21,8 @@ export interface OrnithApi {
     refresh(): Promise<OllamaStatus>;
   };
   settings: {
-    get(): Promise<Settings>;
-    update(patch: Partial<Settings>): Promise<Settings>;
+    get(): Promise<PublicSettings>;
+    update(patch: Partial<Settings>): Promise<PublicSettings>;
   };
   conversations: {
     list(): Promise<ConversationSummary[]>;

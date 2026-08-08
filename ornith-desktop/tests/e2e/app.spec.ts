@@ -10,6 +10,9 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.
 declare global {
   interface Window {
     ornith: {
+      settings: {
+        get(): Promise<Record<string, unknown> & { gatewayTokenConfigured: boolean }>;
+      };
       voice: {
         capabilities(): Promise<{
           stt: { available: boolean; reason?: string };
@@ -47,6 +50,14 @@ async function launch(extraEnv: Record<string, string> = {}): Promise<void> {
   });
   page = await app.firstWindow();
   await page.waitForSelector('.app', { timeout: 30_000 });
+
+  // First run blocks the UI until a mode is chosen — that is the privacy
+  // guarantee, so the harness answers it rather than bypassing it.
+  const chooser = page.getByTestId('mode-chooser');
+  if (await chooser.isVisible().catch(() => false)) {
+    await page.getByTestId('choose-local').click();
+    await expect(chooser).toHaveCount(0);
+  }
 }
 
 test.beforeEach(async () => {
@@ -59,6 +70,43 @@ test.afterEach(async () => {
   await app?.close().catch(() => {});
   await stub?.close();
   rmSync(userData, { recursive: true, force: true });
+});
+
+test('asks once for a mode on first run and never sends anything before that', async () => {
+  // beforeEach already answered it, so a fresh profile is needed to see it.
+  await app.close();
+  rmSync(userData, { recursive: true, force: true });
+  userData = mkdtempSync(path.join(tmpdir(), 'ornith-e2e-'));
+
+  app = await electron.launch({
+    args: [appRoot, '--no-sandbox', '--disable-gpu'],
+    env: { ...process.env, ORNITH_USER_DATA: userData, ORNITH_OLLAMA_URL: stub.url, NODE_ENV: 'test' },
+  });
+  page = await app.firstWindow();
+  await page.waitForSelector('.app', { timeout: 30_000 });
+
+  // Blocks the composer until answered.
+  await expect(page.getByTestId('mode-chooser')).toBeVisible();
+  await page.getByTestId('choose-local').click();
+  await expect(page.getByTestId('mode-chooser')).toHaveCount(0);
+  await expect(page.getByTestId('mode-label')).toContainText('Local');
+
+  // And is not asked again after a restart.
+  await app.close();
+  await launch();
+  await expect(page.getByTestId('mode-chooser')).toHaveCount(0);
+});
+
+test('the gateway token is never exposed to the renderer', async () => {
+  await page.getByTestId('open-settings').click();
+  await page.getByTestId('settings-gateway-token').fill('super-secret-token-value');
+  await page.keyboard.press('Escape');
+
+  // Round-trip it through main and confirm the value does not come back.
+  const settings = await page.evaluate(() => window.ornith.settings.get());
+  expect(JSON.stringify(settings)).not.toContain('super-secret-token-value');
+  expect(settings).not.toHaveProperty('gatewayToken');
+  expect(settings.gatewayTokenConfigured).toBe(true);
 });
 
 test('launches and detects Ollama and the ornith-en model', async () => {

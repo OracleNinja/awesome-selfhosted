@@ -3,6 +3,8 @@ import Sidebar from './components/Sidebar';
 import MessageList from './components/MessageList';
 import Composer, { type ComposerHandle } from './components/Composer';
 import SettingsDialog from './components/SettingsDialog';
+import ModeChooser from './components/ModeChooser';
+import SourceList from './components/SourceList';
 import { bridge, newRequestId } from './lib/bridge';
 import { useStreamBuffer } from './lib/useStreamBuffer';
 import { useVoiceInput } from './lib/useVoiceInput';
@@ -12,8 +14,9 @@ import type {
   ChatMessage,
   Conversation,
   ConversationSummary,
+  AnsweredSource,
   OllamaStatus,
-  Settings,
+  PublicSettings,
   StreamState,
 } from '../shared/types';
 
@@ -27,7 +30,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [active, setActive] = useState<Conversation | null>(null);
   const [status, setStatus] = useState<OllamaStatus | null>(null);
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stream, setStream] = useState<ActiveStream | null>(null);
   const [streamState, setStreamState] = useState<StreamState | null>(null);
@@ -35,6 +38,7 @@ export default function App() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [voice, setVoice] = useState<VoiceCapabilities | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [sources, setSources] = useState<AnsweredSource[]>([]);
 
   const buffer = useStreamBuffer();
   const composerRef = useRef<ComposerHandle>(null);
@@ -52,7 +56,7 @@ export default function App() {
   // Whether the in-flight turn was dictated. A spoken prompt always gets a
   // spoken reply, regardless of the global setting.
   const turnFromVoiceRef = useRef(false);
-  const settingsRef = useRef<Settings | null>(null);
+  const settingsRef = useRef<PublicSettings | null>(null);
   settingsRef.current = settings;
 
   const setStreamSafe = useCallback((next: ActiveStream | null) => {
@@ -209,6 +213,10 @@ export default function App() {
     const offStatus = bridge.on('ollama:status-changed', setStatus);
     const offSettings = bridge.on('settings:changed', setSettings);
     const offTts = bridge.on('tts:state', (payload) => setIsSpeaking(payload.speaking));
+    const offSources = bridge.on('chat:sources', (payload) => {
+      if (streamRef.current?.requestId !== payload.requestId) return;
+      setSources(payload.sources);
+    });
 
     return () => {
       offStarted();
@@ -219,6 +227,7 @@ export default function App() {
       offStatus();
       offSettings();
       offTts();
+      offSources();
     };
   }, [buffer, refreshList]);
 
@@ -324,6 +333,7 @@ export default function App() {
 
       buffer.reset();
       setTrimmed(null);
+      setSources([]);
       const requestId = newRequestId();
       setStreamSafe({ requestId, messageId: null });
       setStreamState('queued');
@@ -429,6 +439,8 @@ export default function App() {
         onRename={(id, title) => void handleRename(id, title)}
         onOpenSettings={() => setSettingsOpen(true)}
         onRetryConnection={() => void bridge.ollama.refresh().then(setStatus)}
+        mode={settings?.mode ?? 'local'}
+        onlineConfigured={Boolean(settings?.gatewayTokenConfigured && settings?.gatewayUrl)}
       />
 
       <main className="main">
@@ -455,6 +467,8 @@ export default function App() {
           trimmedNotice={trimmed}
         />
 
+        {sources.length > 0 ? <SourceList sources={sources} /> : null}
+
         <Composer
           ref={composerRef}
           onSend={(text) => void handleSend(text)}
@@ -476,6 +490,14 @@ export default function App() {
           onStopSpeaking={handleStopSpeaking}
         />
       </main>
+
+      {settings && !settings.modeChosen ? (
+        <ModeChooser
+          onChoose={(mode) =>
+            void bridge.settings.update({ mode, modeChosen: true }).then(setSettings)
+          }
+        />
+      ) : null}
 
       {settingsOpen && settings ? (
         <SettingsDialog

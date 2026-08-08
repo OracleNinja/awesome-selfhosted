@@ -10,7 +10,9 @@ import type {
   ChatMessage,
   Conversation,
   ConversationSummary,
+  AnsweredSource,
   OllamaStatus,
+  PublicSettings,
   Settings,
   StreamOutcome,
   StreamState,
@@ -23,8 +25,9 @@ export interface IpcInvokeMap {
   'app:info': { req: void; res: AppInfo };
   'ollama:status': { req: void; res: OllamaStatus };
   'ollama:refresh': { req: void; res: OllamaStatus };
-  'settings:get': { req: void; res: Settings };
-  'settings:update': { req: Partial<Settings>; res: Settings };
+  /** Returns PublicSettings: the gateway token is replaced by a boolean. */
+  'settings:get': { req: void; res: PublicSettings };
+  'settings:update': { req: Partial<Settings>; res: PublicSettings };
   'conv:list': { req: void; res: ConversationSummary[] };
   'conv:get': { req: string; res: Conversation | null };
   'conv:create': { req: { title?: string } | undefined; res: Conversation };
@@ -65,7 +68,9 @@ export interface IpcEventMap {
   'chat:end': { requestId: string; outcome: StreamOutcome; thinkingIncomplete?: boolean };
   'chat:trimmed': { requestId: string; droppedMessages: number };
   'ollama:status-changed': OllamaStatus;
-  'settings:changed': Settings;
+  'settings:changed': PublicSettings;
+  /** Sources the online backend consulted for this turn. */
+  'chat:sources': { requestId: string; sources: AnsweredSource[] };
   'tts:state': TtsState;
 
   /** Menu accelerators, forwarded to the renderer as commands. */
@@ -108,6 +113,7 @@ export const EVENT_CHANNELS = [
   'chat:delta',
   'chat:end',
   'chat:trimmed',
+  'chat:sources',
   'ollama:status-changed',
   'settings:changed',
   'tts:state',

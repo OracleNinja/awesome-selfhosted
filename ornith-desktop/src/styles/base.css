@@ -751,3 +751,81 @@ button {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------- online / sources */
+
+.status-dot.is-online {
+  background: var(--accent);
+}
+
+.mode-modal {
+  width: min(560px, 100%);
+}
+
+.mode-options {
+  gap: 10px;
+}
+
+.mode-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  text-align: left;
+  transition: border-color 120ms ease;
+}
+
+.mode-option:hover {
+  border-color: var(--accent);
+}
+
+.mode-option-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mode-option-body {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.source-list {
+  flex: none;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px 4px;
+}
+
+.source-list-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.source-list ol {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 12px;
+}
+
+.source-list li {
+  margin-bottom: 2px;
+}
+
+.source-list a {
+  color: var(--accent);
+}
+
+.source-domain {
+  margin-left: 8px;
+  color: var(--text-faint);
+}

@@ -74,6 +74,22 @@ export function validateSettings(raw: unknown): Settings {
     out.sttLocale = input.sttLocale.trim();
   }
 
+  if (input.mode === 'local' || input.mode === 'online') {
+    out.mode = input.mode;
+  }
+  if (typeof input.modeChosen === 'boolean') {
+    out.modeChosen = input.modeChosen;
+  }
+  if (typeof input.gatewayUrl === 'string' && /^https?:\/\/\S+$/.test(input.gatewayUrl.trim())) {
+    out.gatewayUrl = input.gatewayUrl.trim().replace(/\/$/, '');
+  }
+  if (typeof input.gatewayToken === 'string') {
+    out.gatewayToken = input.gatewayToken.trim();
+  }
+  if (typeof input.webRetrieval === 'boolean') {
+    out.webRetrieval = input.webRetrieval;
+  }
+
   return out;
 }
 

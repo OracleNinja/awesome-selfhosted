@@ -24,6 +24,14 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceName: '',
   speechRate: 175,
   sttLocale: 'en-US',
+
+  // Local by default: the app must never send a conversation online before the
+  // user has explicitly chosen to. The first-run prompt asks once.
+  mode: 'local',
+  modeChosen: false,
+  gatewayUrl: 'http://localhost:8787',
+  gatewayToken: '',
+  webRetrieval: true,
 };
 
 /** Field bounds, used by settings validation and by the settings dialog. */

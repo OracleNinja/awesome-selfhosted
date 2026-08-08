@@ -6,6 +6,7 @@ import { createConversationStore, type ConversationStore } from '../../electron/
 import { createOrchestrator, type Orchestrator } from '../../electron/chat/orchestrator';
 import { DEFAULT_SETTINGS } from '../../shared/defaults';
 import type { Settings, ThinkingMode } from '../../shared/types';
+import { createOllamaBackend } from '../../electron/backends/ollama';
 import { startStubOllama, type StubHandle } from './stubOllama';
 
 interface Sent {
@@ -65,6 +66,9 @@ describe('chat orchestrator', () => {
       store,
       getSettings: () => settings,
       getThinkingMode: () => thinkingMode,
+      // Local backend: a thin wrapper over the same Ollama client, so these
+      // tests still exercise the real streaming path.
+      getBackend: () => createOllamaBackend(settings.ollamaUrl),
     });
   });
 

@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { SETTINGS_BOUNDS, DEFAULT_SETTINGS } from '../../shared/defaults';
-import type { OllamaStatus, Settings } from '../../shared/types';
+import type { OllamaStatus, PublicSettings, Settings } from '../../shared/types';
 import type { VoiceCapabilities } from '../../shared/voice';
 
 interface Props {
-  settings: Settings;
+  settings: PublicSettings;
   status: OllamaStatus | null;
   voice: VoiceCapabilities | null;
   onUpdate: (patch: Partial<Settings>) => void;
@@ -46,6 +46,61 @@ export default function SettingsDialog({ settings, status, voice, onUpdate, onCl
         </header>
 
         <div className="modal-body">
+          <label className="field">
+            <span className="field-label">Connection mode</span>
+            <select
+              value={settings.mode}
+              onChange={(e) => onUpdate({ mode: e.target.value as Settings['mode'], modeChosen: true })}
+              data-testid="settings-mode"
+            >
+              <option value="local">Local — Ollama on this Mac</option>
+              <option value="online">Online — cloud AI with web retrieval</option>
+            </select>
+            <span className="field-hint">
+              {settings.mode === 'online'
+                ? 'Conversations are sent to the configured gateway.'
+                : 'Everything stays on this Mac.'}
+            </span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">Online gateway URL</span>
+            <input
+              type="text"
+              value={settings.gatewayUrl}
+              onChange={(e) => onUpdate({ gatewayUrl: e.target.value })}
+              data-testid="settings-gateway-url"
+            />
+            <span className="field-hint">Not secret. Example: http://localhost:8787</span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">
+              Online API token{' '}
+              <code data-testid="settings-token-state">
+                {settings.gatewayTokenConfigured ? 'Configured' : 'Not configured'}
+              </code>
+            </span>
+            <input
+              type="password"
+              placeholder={settings.gatewayTokenConfigured ? '••••••••  (replace to change)' : 'Paste gateway token'}
+              onChange={(e) => onUpdate({ gatewayToken: e.target.value })}
+              data-testid="settings-gateway-token"
+            />
+            <span className="field-hint">
+              Write-only: the token is stored by the app and never sent back to this window.
+            </span>
+          </label>
+
+          <label className="field field-inline">
+            <input
+              type="checkbox"
+              checked={settings.webRetrieval}
+              onChange={(e) => onUpdate({ webRetrieval: e.target.checked })}
+            />
+            <span>Allow web retrieval in Online mode</span>
+          </label>
+
           <label className="field">
             <span className="field-label">Model</span>
             <select
