@@ -81,6 +81,9 @@ export default function Sidebar({
                           commitRename();
                         } else if (e.key === 'Escape') {
                           e.preventDefault();
+                          // Keep Escape from reaching the app-level handler,
+                          // which would otherwise also stop generation.
+                          e.stopPropagation();
                           setEditingId(null);
                         }
                       }}

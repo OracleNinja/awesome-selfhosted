@@ -149,21 +149,36 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       clearInterval(persistTimer);
       clearTimeout(loadingTimer);
 
+      let thinkingIncomplete = false;
       if (inlineParser) {
         const tail = inlineParser.flush();
         content += tail.content;
         thinking += tail.thinking;
-        if (tail.malformed) log.warn('thinking.unclosed', { requestId });
+        if (tail.malformed) {
+          // The stream ended inside an unclosed <think>. Keep the text and
+          // label it, rather than discarding the model's output (SPEC §7.3).
+          thinkingIncomplete = true;
+          log.warn('thinking.unclosed', { requestId });
+        }
       }
 
       emit(sender, 'chat:state', { requestId, state: 'finalising' });
+
+      // An unclosed reasoning block is a presentation flag, not a failed turn:
+      // the answer still stands, so the status stays whatever it was.
+      const incompleteError = thinkingIncomplete
+        ? ({
+            code: 'STREAM_MALFORMED',
+            message: 'The model’s reasoning block was never closed.',
+          } as const)
+        : undefined;
 
       try {
         deps.store.finalise(assistantMessage.id, {
           content,
           thinking,
           status,
-          error: extras.error,
+          error: extras.error ?? incompleteError,
           stats: extras.stats,
         });
       } catch (err) {
@@ -180,7 +195,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 error: extras.error ?? { code: 'UNKNOWN', message: 'Something went wrong.' },
               } as const);
 
-      emit(sender, 'chat:end', { requestId, outcome });
+      emit(sender, 'chat:end', { requestId, outcome, thinkingIncomplete });
       cleanup();
       log.info('chat.finished', { requestId, status, chars: content.length });
     }

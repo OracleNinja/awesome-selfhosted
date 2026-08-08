@@ -23,6 +23,7 @@ export interface OrnithApi {
     get(id: string): Promise<Conversation | null>;
     create(): Promise<Conversation>;
     rename(id: string, title: string): Promise<void>;
+    confirmDelete(title: string, messageCount: number): Promise<boolean>;
     remove(id: string): Promise<void>;
     clear(id: string): Promise<void>;
   };

@@ -204,11 +204,19 @@ test('reports a clear error when Ollama goes away, and recovers when it returns'
   await expect(page.getByTestId('message-assistant')).toContainText('Hello world');
 });
 
-test('deletes a conversation and it stays deleted after restart', async () => {
+/** Replaces the native confirm dialog, which Playwright cannot click. */
+async function stubConfirmDialog(choice: 'Cancel' | 'Delete'): Promise<void> {
+  await app.evaluate(({ dialog }, response) => {
+    dialog.showMessageBox = async () => ({ response, checkboxChecked: false });
+  }, choice === 'Delete' ? 1 : 0);
+}
+
+test('deletes a conversation after confirmation and it stays deleted after restart', async () => {
   await page.getByTestId('composer-input').fill('Delete me');
   await page.getByTestId('send-button').click();
   await expect(page.getByTestId('message-assistant')).toContainText('Hello world');
 
+  await stubConfirmDialog('Delete');
   await page.getByTestId('conversation-item').first().hover();
   await page.getByTestId('delete-chat').first().click();
   await expect(page.getByTestId('conversation-item')).toHaveCount(0);
@@ -216,6 +224,64 @@ test('deletes a conversation and it stays deleted after restart', async () => {
   await app.close();
   await launch();
   await expect(page.getByTestId('conversation-item')).toHaveCount(0);
+});
+
+test('cancelling the confirm dialog keeps the conversation', async () => {
+  await page.getByTestId('composer-input').fill('Keep me');
+  await page.getByTestId('send-button').click();
+  await expect(page.getByTestId('message-assistant')).toContainText('Hello world');
+
+  await stubConfirmDialog('Cancel');
+  await page.getByTestId('conversation-item').first().hover();
+  await page.getByTestId('delete-chat').first().click();
+
+  // Still there, and its messages are untouched.
+  await expect(page.getByTestId('conversation-item')).toHaveCount(1);
+  await expect(page.getByTestId('message-assistant')).toContainText('Hello world');
+});
+
+test('Escape stops generation without a menu accelerator', async () => {
+  stub.setOptions({
+    script: Array.from({ length: 60 }, (_, i) => ({ content: `word${i} ` })),
+    chunkDelayMs: 40,
+  });
+
+  await page.getByTestId('composer-input').fill('Count slowly');
+  await page.getByTestId('send-button').click();
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+  await expect(page.getByTestId('message-assistant')).toContainText('word0');
+
+  // Focus must be off the composer, or Escape belongs to the text field.
+  await page.locator('.messages').click();
+  await page.keyboard.press('Escape');
+
+  await expect(page.getByTestId('send-button')).toBeVisible();
+  await expect(page.getByTestId('message-stopped')).toBeVisible();
+});
+
+test('labels an unclosed reasoning block instead of discarding the text', async () => {
+  // Relaunch against a server with no structured `think` support, so the
+  // renderer exercises the inline parser path.
+  await app.close();
+  await stub.close();
+  stub = await startStubOllama({
+    supportsThink: false,
+    script: [
+      { content: '<think>reasoning that never closes' },
+      { done: true, eval_count: 5, eval_duration: 1_000_000_000 },
+    ],
+  });
+  await launch();
+
+  await page.getByTestId('composer-input').fill('think out loud');
+  await page.getByTestId('send-button').click();
+
+  const toggle = page.getByTestId('thinking-toggle');
+  await expect(toggle).toContainText('Incomplete reasoning');
+  // Expanded by default, and the text is preserved rather than dropped.
+  await expect(page.getByTestId('thinking-body')).toContainText('reasoning that never closes');
+  // An unclosed block is a presentation flag, not a failed turn.
+  await expect(page.getByTestId('message-error')).toHaveCount(0);
 });
 
 test('settings changes apply immediately and survive a restart', async () => {

@@ -151,7 +151,15 @@ export default function App() {
                       : payload.outcome.kind === 'cancelled'
                         ? 'cancelled'
                         : 'error',
-                  error: payload.outcome.kind === 'error' ? payload.outcome.error : undefined,
+                  error:
+                    payload.outcome.kind === 'error'
+                      ? payload.outcome.error
+                      : payload.thinkingIncomplete
+                        ? {
+                            code: 'STREAM_MALFORMED' as const,
+                            message: 'The model’s reasoning block was never closed.',
+                          }
+                        : undefined,
                   stats: payload.outcome.kind === 'complete' ? payload.outcome.stats : undefined,
                 }
               : m,
@@ -217,6 +225,15 @@ export default function App() {
 
   const handleDelete = useCallback(
     async (id: string) => {
+      // Confirm before destroying anything the user might miss. An empty chat
+      // skips the prompt; main decides that so the rule lives in one place.
+      const target = conversationsRef.current.find((c) => c.id === id);
+      const confirmed = await bridge.conversations.confirmDelete(
+        target?.title ?? 'this chat',
+        target?.messageCount ?? 0,
+      );
+      if (!confirmed) return;
+
       if (streamRef.current) bridge.chat.abort(streamRef.current.requestId);
       setStreamSafe(null);
       await bridge.conversations.remove(id);
@@ -279,6 +296,26 @@ export default function App() {
     },
     [buffer, refreshList],
   );
+
+  /* -------------------------------------------------------------- keyboard */
+
+  // Escape stops generation, but only when nothing else owns the key. It is
+  // handled here rather than as a menu accelerator because an accelerator is
+  // captured before the renderer sees it, which would break Escape for the
+  // settings dialog and the inline rename field.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (settingsOpen) return; // the dialog closes itself
+      const tag = (document.activeElement?.tagName ?? '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return; // rename / composer
+      if (!streamRef.current) return;
+      bridge.chat.abort(streamRef.current.requestId);
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [settingsOpen]);
 
   /* ----------------------------------------------------------- menu wiring */
 

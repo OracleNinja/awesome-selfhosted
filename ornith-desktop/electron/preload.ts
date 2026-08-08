@@ -49,6 +49,8 @@ const api = {
     get: (id: string) => invoke('conv:get', id),
     create: () => invoke('conv:create', undefined),
     rename: (id: string, title: string) => invoke('conv:rename', { id, title }),
+    confirmDelete: (title: string, messageCount: number) =>
+      invoke('conv:confirm-delete', { title, messageCount }),
     remove: (id: string) => invoke('conv:delete', id),
     clear: (id: string) => invoke('conv:clear', id),
   },

@@ -206,6 +206,27 @@ function registerIpc(): void {
       store.rename(req.id, req.title);
     }
   });
+  ipcMain.handle(
+    'conv:confirm-delete',
+    async (_e, req: { title: string; messageCount: number }): Promise<boolean> => {
+      // An empty chat has nothing to lose, so don't nag about it.
+      if (!req || typeof req.messageCount !== 'number' || req.messageCount === 0) return true;
+
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      if (!win) return false;
+
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Cancel', 'Delete'],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Delete “${req.title}”?`,
+        detail: 'This conversation and all of its messages will be permanently removed.',
+      });
+      return response === 1;
+    },
+  );
+
   ipcMain.handle('conv:delete', (_e, id: string) => {
     if (typeof id === 'string') store.remove(id);
   });

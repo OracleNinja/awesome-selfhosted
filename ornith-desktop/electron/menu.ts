@@ -86,8 +86,13 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
       label: 'Chat',
       submenu: [
         {
+          // Cmd+. is the macOS convention for cancel. Escape is deliberately
+          // NOT used here: a menu accelerator is captured before the renderer
+          // sees the key, which would break Escape for closing the settings
+          // dialog and cancelling an inline rename. The renderer handles
+          // Escape itself, where it can tell those contexts apart.
           label: 'Stop Generating',
-          accelerator: 'Escape',
+          accelerator: 'CmdOrCtrl+.',
           click: send('menu:stop-generating'),
         },
         { type: 'separator' },

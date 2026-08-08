@@ -22,6 +22,8 @@ export interface IpcInvokeMap {
   'conv:get': { req: string; res: Conversation | null };
   'conv:create': { req: { title?: string } | undefined; res: Conversation };
   'conv:rename': { req: { id: string; title: string }; res: void };
+  /** Native confirm before a destructive delete. Resolves true when empty (no prompt). */
+  'conv:confirm-delete': { req: { title: string; messageCount: number }; res: boolean };
   'conv:delete': { req: string; res: void };
   'conv:clear': { req: string; res: void };
   'clipboard:write': { req: string; res: void };
@@ -45,7 +47,8 @@ export interface IpcEventMap {
   };
   'chat:state': { requestId: string; state: StreamState };
   'chat:delta': { requestId: string; content: string; thinking: string };
-  'chat:end': { requestId: string; outcome: StreamOutcome };
+  /** `thinkingIncomplete` marks an unclosed <think> block; the turn itself may still be complete. */
+  'chat:end': { requestId: string; outcome: StreamOutcome; thinkingIncomplete?: boolean };
   'chat:trimmed': { requestId: string; droppedMessages: number };
   'ollama:status-changed': OllamaStatus;
   'settings:changed': Settings;
@@ -74,6 +77,7 @@ export const INVOKE_CHANNELS = [
   'conv:get',
   'conv:create',
   'conv:rename',
+  'conv:confirm-delete',
   'conv:delete',
   'conv:clear',
   'clipboard:write',
