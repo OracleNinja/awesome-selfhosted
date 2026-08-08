@@ -5,6 +5,9 @@ import Composer, { type ComposerHandle } from './components/Composer';
 import SettingsDialog from './components/SettingsDialog';
 import { bridge, newRequestId } from './lib/bridge';
 import { useStreamBuffer } from './lib/useStreamBuffer';
+import { useVoiceInput } from './lib/useVoiceInput';
+import { speakableText } from '../shared/speakable';
+import type { VoiceCapabilities } from '../shared/voice';
 import type {
   ChatMessage,
   Conversation,
@@ -30,6 +33,8 @@ export default function App() {
   const [streamState, setStreamState] = useState<StreamState | null>(null);
   const [trimmed, setTrimmed] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [voice, setVoice] = useState<VoiceCapabilities | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const buffer = useStreamBuffer();
   const composerRef = useRef<ComposerHandle>(null);
@@ -44,6 +49,11 @@ export default function App() {
   const streamRef = useRef<ActiveStream | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const conversationsRef = useRef<ConversationSummary[]>([]);
+  // Whether the in-flight turn was dictated. A spoken prompt always gets a
+  // spoken reply, regardless of the global setting.
+  const turnFromVoiceRef = useRef(false);
+  const settingsRef = useRef<Settings | null>(null);
+  settingsRef.current = settings;
 
   const setStreamSafe = useCallback((next: ActiveStream | null) => {
     streamRef.current = next;
@@ -85,6 +95,10 @@ export default function App() {
       }
     })();
   }, [setConversationsSafe, setActiveIdSafe]);
+
+  useEffect(() => {
+    void bridge.voice.capabilities().then(setVoice);
+  }, []);
 
   // Theme: clearing the attribute lets prefers-color-scheme take over.
   useEffect(() => {
@@ -167,6 +181,25 @@ export default function App() {
         };
       });
 
+      // Speak the answer when the prompt was dictated, or when the user has
+      // asked for every reply to be spoken.
+      const shouldSpeak =
+        payload.outcome.kind !== 'error' &&
+        (turnFromVoiceRef.current || settingsRef.current?.speakResponses === true);
+
+      if (shouldSpeak) {
+        const spoken = speakableText(finalText.content);
+        if (spoken) {
+          void bridge.voice.speak({
+            requestId: payload.requestId,
+            text: spoken,
+            voice: settingsRef.current?.voiceName ?? '',
+            rate: settingsRef.current?.speechRate ?? 175,
+          });
+        }
+      }
+      turnFromVoiceRef.current = false;
+
       setStreamSafe(null);
       setStreamState(null);
       buffer.reset();
@@ -175,6 +208,7 @@ export default function App() {
 
     const offStatus = bridge.on('ollama:status-changed', setStatus);
     const offSettings = bridge.on('settings:changed', setSettings);
+    const offTts = bridge.on('tts:state', (payload) => setIsSpeaking(payload.speaking));
 
     return () => {
       offStarted();
@@ -184,6 +218,7 @@ export default function App() {
       offEnd();
       offStatus();
       offSettings();
+      offTts();
     };
   }, [buffer, refreshList]);
 
@@ -297,6 +332,29 @@ export default function App() {
     [buffer, refreshList],
   );
 
+  /* ----------------------------------------------------------------- voice */
+
+  // Dictated text goes through the ordinary send path; nothing about the chat
+  // pipeline, the Ollama client or persistence is aware that voice exists.
+  const handleTranscript = useCallback(
+    (text: string) => {
+      turnFromVoiceRef.current = true;
+      void handleSend(text);
+    },
+    [handleSend],
+  );
+
+  const voiceInput = useVoiceInput(settings?.sttLocale ?? 'en-US', handleTranscript);
+
+  const handleMicToggle = useCallback(() => {
+    if (voiceInput.state === 'recording') void voiceInput.stop();
+    else void voiceInput.start();
+  }, [voiceInput]);
+
+  const handleStopSpeaking = useCallback(() => {
+    void bridge.voice.stopSpeaking();
+  }, []);
+
   /* -------------------------------------------------------------- keyboard */
 
   // Escape stops generation, but only when nothing else owns the key. It is
@@ -408,6 +466,14 @@ export default function App() {
           onDraftChange={(text) =>
             setDrafts((prev) => ({ ...prev, [activeId ?? '__new']: text }))
           }
+          voiceAvailable={voice?.stt.available ?? false}
+          voiceUnavailableReason={voice?.stt.reason}
+          recordingState={voiceInput.state}
+          onMicToggle={handleMicToggle}
+          voiceError={voiceInput.error?.message ?? null}
+          onDismissVoiceError={voiceInput.clearError}
+          isSpeaking={isSpeaking}
+          onStopSpeaking={handleStopSpeaking}
         />
       </main>
 
@@ -415,6 +481,7 @@ export default function App() {
         <SettingsDialog
           settings={settings}
           status={status}
+          voice={voice}
           onUpdate={(patch) => void bridge.settings.update(patch).then(setSettings)}
           onClose={() => setSettingsOpen(false)}
         />

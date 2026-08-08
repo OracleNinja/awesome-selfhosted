@@ -6,6 +6,11 @@ import type {
   OllamaStatus,
   Settings,
 } from '../../shared/types';
+import type {
+  SpeakRequest,
+  TranscriptionResult,
+  VoiceCapabilities,
+} from '../../shared/voice';
 
 export interface OrnithApi {
   ipcVersion: number;
@@ -32,6 +37,12 @@ export interface OrnithApi {
     abort(requestId: string): void;
   };
   copyText(text: string): Promise<void>;
+  voice: {
+    capabilities(): Promise<VoiceCapabilities>;
+    transcribe(wav: Uint8Array, locale: string): Promise<TranscriptionResult>;
+    speak(request: SpeakRequest): Promise<void>;
+    stopSpeaking(): Promise<void>;
+  };
   on<K extends keyof IpcEventMap>(
     channel: K,
     callback: (payload: IpcEventMap[K]) => void,

@@ -59,6 +59,20 @@ export function validateSettings(raw: unknown): Settings {
   if (typeof input.sendOnEnter === 'boolean') {
     out.sendOnEnter = input.sendOnEnter;
   }
+  if (typeof input.speakResponses === 'boolean') {
+    out.speakResponses = input.speakResponses;
+  }
+  if (typeof input.voiceName === 'string') {
+    out.voiceName = input.voiceName.trim();
+  }
+  if (isFiniteNumber(input.speechRate)) {
+    out.speechRate = Math.round(
+      clamp(input.speechRate, SETTINGS_BOUNDS.speechRate.min, SETTINGS_BOUNDS.speechRate.max),
+    );
+  }
+  if (typeof input.sttLocale === 'string' && /^[a-z]{2}(-[A-Z]{2})?$/.test(input.sttLocale.trim())) {
+    out.sttLocale = input.sttLocale.trim();
+  }
 
   return out;
 }

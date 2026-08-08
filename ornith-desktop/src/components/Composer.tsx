@@ -10,6 +10,16 @@ interface Props {
   /** Preserved per conversation so switching chats does not lose a draft. */
   draft: string;
   onDraftChange: (text: string) => void;
+
+  /* ---- voice layer; all optional so the composer works without it ---- */
+  voiceAvailable?: boolean;
+  voiceUnavailableReason?: string;
+  recordingState?: 'idle' | 'recording' | 'transcribing';
+  onMicToggle?: () => void;
+  voiceError?: string | null;
+  onDismissVoiceError?: () => void;
+  isSpeaking?: boolean;
+  onStopSpeaking?: () => void;
 }
 
 export interface ComposerHandle {
@@ -19,7 +29,23 @@ export interface ComposerHandle {
 const MAX_HEIGHT_PX = 200;
 
 const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { onSend, onStop, isStreaming, disabled, sendOnEnter, draft, onDraftChange },
+  {
+    onSend,
+    onStop,
+    isStreaming,
+    disabled,
+    sendOnEnter,
+    draft,
+    onDraftChange,
+    voiceAvailable = false,
+    voiceUnavailableReason,
+    recordingState = 'idle',
+    onMicToggle,
+    voiceError,
+    onDismissVoiceError,
+    isSpeaking = false,
+    onStopSpeaking,
+  },
   ref,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -64,7 +90,32 @@ const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div className="composer">
+      {voiceError ? (
+        <div className="voice-error" role="status" data-testid="voice-error">
+          <span>{voiceError}</span>
+          <button type="button" className="ghost-button ghost-button-small" onClick={onDismissVoiceError}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       <div className="composer-inner">
+        {onMicToggle ? (
+          <button
+            type="button"
+            className={`mic-button is-${recordingState}`}
+            onClick={onMicToggle}
+            disabled={!voiceAvailable || disabled || isStreaming || recordingState === 'transcribing'}
+            title={voiceAvailable ? 'Speak your message' : voiceUnavailableReason}
+            aria-label={recordingState === 'recording' ? 'Stop recording' : 'Start recording'}
+            aria-pressed={recordingState === 'recording'}
+            data-testid="mic-button"
+            data-state={recordingState}
+          >
+            {recordingState === 'transcribing' ? '···' : '●'}
+          </button>
+        ) : null}
+
         <textarea
           ref={textareaRef}
           className="composer-input"
@@ -95,7 +146,24 @@ const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         )}
       </div>
       <div className="composer-hint">
-        {sendOnEnter ? 'Enter to send · Shift+Enter for a new line' : 'Click Send to submit'}
+        {recordingState === 'recording'
+          ? 'Listening… click the dot again to send'
+          : recordingState === 'transcribing'
+            ? 'Transcribing on-device…'
+            : sendOnEnter
+              ? 'Enter to send · Shift+Enter for a new line'
+              : 'Click Send to submit'}
+
+        {isSpeaking && onStopSpeaking ? (
+          <button
+            type="button"
+            className="stop-speaking-button"
+            onClick={onStopSpeaking}
+            data-testid="stop-speaking"
+          >
+            ◼ Stop speaking
+          </button>
+        ) : null}
       </div>
     </div>
   );

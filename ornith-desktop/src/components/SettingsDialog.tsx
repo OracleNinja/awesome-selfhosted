@@ -1,16 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { SETTINGS_BOUNDS, DEFAULT_SETTINGS } from '../../shared/defaults';
 import type { OllamaStatus, Settings } from '../../shared/types';
+import type { VoiceCapabilities } from '../../shared/voice';
 
 interface Props {
   settings: Settings;
   status: OllamaStatus | null;
+  voice: VoiceCapabilities | null;
   onUpdate: (patch: Partial<Settings>) => void;
   onClose: () => void;
 }
 
 /** Changes apply immediately; there is no Save button to forget to press. */
-export default function SettingsDialog({ settings, status, onUpdate, onClose }: Props) {
+export default function SettingsDialog({ settings, status, voice, onUpdate, onClose }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,6 +161,57 @@ export default function SettingsDialog({ settings, status, onUpdate, onClose }: 
               onChange={(e) => onUpdate({ sendOnEnter: e.target.checked })}
             />
             <span>Enter sends the message</span>
+          </label>
+
+          <label className="field field-inline">
+            <input
+              type="checkbox"
+              checked={settings.speakResponses}
+              onChange={(e) => onUpdate({ speakResponses: e.target.checked })}
+              data-testid="settings-speak"
+            />
+            <span>Speak every response aloud</span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">Voice</span>
+            <select
+              value={settings.voiceName}
+              onChange={(e) => onUpdate({ voiceName: e.target.value })}
+              disabled={!voice?.tts.available}
+              data-testid="settings-voice"
+            >
+              <option value="">System default</option>
+              {(voice?.tts.voices ?? []).map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">
+              {voice?.tts.available
+                ? 'Replies to spoken prompts are always spoken.'
+                : (voice?.tts.reason ?? 'Speech output is unavailable.')}
+            </span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">
+              Speech rate <code>{settings.speechRate}</code> wpm
+            </span>
+            <input
+              type="range"
+              min={SETTINGS_BOUNDS.speechRate.min}
+              max={SETTINGS_BOUNDS.speechRate.max}
+              step={5}
+              value={settings.speechRate}
+              onChange={(e) => onUpdate({ speechRate: Number(e.target.value) })}
+              disabled={!voice?.tts.available}
+            />
+            <span className="field-hint">
+              Dictation:{' '}
+              {voice?.stt.available ? 'on-device speech recognition ready' : (voice?.stt.reason ?? 'unavailable')}
+            </span>
           </label>
         </div>
 

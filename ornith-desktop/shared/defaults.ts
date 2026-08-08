@@ -17,6 +17,13 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'en',
   showThinkingByDefault: false,
   sendOnEnter: true,
+
+  // Off by default: typing a message and having the Mac start talking is a
+  // surprise. Replies to spoken prompts are spoken regardless of this setting.
+  speakResponses: false,
+  voiceName: '',
+  speechRate: 175,
+  sttLocale: 'en-US',
 };
 
 /** Field bounds, used by settings validation and by the settings dialog. */
@@ -24,6 +31,7 @@ export const SETTINGS_BOUNDS = {
   temperature: { min: 0, max: 2 },
   topP: { min: 0, max: 1 },
   numCtx: { min: 2048, max: 131072 },
+  speechRate: { min: 80, max: 400 },
 } as const;
 
 /** Conservative for code-heavy text; deliberately over-estimates tokens. */

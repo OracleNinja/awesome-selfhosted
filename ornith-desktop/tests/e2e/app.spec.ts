@@ -7,6 +7,21 @@ import { startStubOllama, type StubHandle } from '../integration/stubOllama';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+declare global {
+  interface Window {
+    ornith: {
+      voice: {
+        capabilities(): Promise<{
+          stt: { available: boolean; reason?: string };
+          tts: { available: boolean; voices: string[]; reason?: string };
+        }>;
+        speak(req: { requestId: string; text: string; voice: string; rate: number }): Promise<void>;
+        stopSpeaking(): Promise<void>;
+      };
+    };
+  }
+}
+
 let stub: StubHandle;
 let app: ElectronApplication;
 let page: Page;
@@ -303,6 +318,46 @@ test('settings changes apply immediately and survive a restart', async () => {
   await page.getByTestId('open-settings').click();
   await expect(page.getByTestId('settings-numctx')).toHaveValue('16384');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+});
+
+test('the mic button degrades gracefully where speech is unavailable', async () => {
+  const mic = page.getByTestId('mic-button');
+  await expect(mic).toBeVisible();
+
+  const capabilities = await page.evaluate(() => window.ornith.voice.capabilities());
+
+  if (capabilities.stt.available) {
+    await expect(mic).toBeEnabled();
+  } else {
+    // This is the real path on any non-macOS host: disabled, with a reason
+    // the user can act on rather than a dead control or a crash.
+    await expect(mic).toBeDisabled();
+    expect(capabilities.stt.reason).toBeTruthy();
+    await expect(mic).toHaveAttribute('title', capabilities.stt.reason!);
+  }
+
+  // Chatting must be unaffected either way.
+  await page.getByTestId('composer-input').fill('voice off, typing still fine');
+  await page.getByTestId('send-button').click();
+  await expect(page.getByTestId('message-assistant')).toContainText('Hello world');
+});
+
+test('speaking a response is skipped when text-to-speech is unavailable', async () => {
+  const capabilities = await page.evaluate(() => window.ornith.voice.capabilities());
+
+  // Requesting speech must never throw, even with no engine present.
+  const threw = await page.evaluate(async () => {
+    try {
+      await window.ornith.voice.speak({ requestId: 'e2e', text: 'hello', voice: '', rate: 175 });
+      await window.ornith.voice.stopSpeaking();
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
+  expect(threw).toBe(false);
+  if (!capabilities.tts.available) expect(capabilities.tts.voices).toEqual([]);
 });
 
 test('the renderer has no Node access and makes no network requests', async () => {

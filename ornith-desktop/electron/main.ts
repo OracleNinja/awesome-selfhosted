@@ -6,6 +6,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_MODEL, STATUS_POLL_INTERVAL_MS } from '../shared/defaults';
 import { IPC_VERSION } from '../shared/ipc';
 import type { AppInfo, OllamaStatus, Settings, ThinkingMode } from '../shared/types';
+import type {
+  SpeakRequest,
+  TranscriptionRequest,
+  TranscriptionResult,
+  VoiceCapabilities,
+} from '../shared/voice';
+import { createTtsEngine, type TtsEngine } from './voice/tts';
+import { createSttEngine, type SttEngine } from './voice/stt';
 import { fetchStatus, probeThinkingMode } from './ollama/client';
 import { createConversationStore, type ConversationStore } from './store/conversations';
 import { openDatabase } from './store/db';
@@ -24,6 +32,8 @@ let db: DatabaseSync;
 let store: ConversationStore;
 let settingsStore: SettingsStore;
 let orchestrator: Orchestrator;
+let ttsEngine: TtsEngine;
+let sttEngine: SttEngine;
 
 let status: OllamaStatus | null = null;
 let thinkingMode: ThinkingMode = 'none';
@@ -111,6 +121,24 @@ function applyContentSecurityPolicy(): void {
       },
     });
   });
+}
+
+function applyPermissionPolicy(): void {
+  // Deny-by-default. Only the microphone is allowed, and only audio — the
+  // renderer has no legitimate use for camera, geolocation, notifications or
+  // anything else. macOS still shows its own TCC prompt on first use.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (permission === 'media') {
+      const wanted = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
+      const audioOnly = wanted.length === 0 || wanted.every((type) => type === 'audio');
+      if (!audioOnly) log.warn('permission.denied', { permission, wanted });
+      return callback(audioOnly);
+    }
+    log.warn('permission.denied', { permission });
+    callback(false);
+  });
+
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
 }
 
 /* ------------------------------------------------------------------ status */
@@ -238,6 +266,50 @@ function registerIpc(): void {
     if (typeof text === 'string') clipboard.writeText(text);
   });
 
+  /* ---- voice layer ---------------------------------------------------- */
+
+  ipcMain.handle('voice:capabilities', async (): Promise<VoiceCapabilities> => {
+    const tts = ttsEngine.availability();
+    return {
+      stt: sttEngine.availability(),
+      tts: { ...tts, voices: tts.available ? await ttsEngine.listVoices() : [] },
+    };
+  });
+
+  ipcMain.handle(
+    'voice:transcribe',
+    async (_e, req: TranscriptionRequest): Promise<TranscriptionResult> => {
+      if (!req || !(req.wav instanceof Uint8Array) || req.wav.byteLength === 0) {
+        return { text: '', error: 'No audio was captured.' };
+      }
+      const locale = typeof req.locale === 'string' ? req.locale : settingsStore.get().sttLocale;
+      return sttEngine.transcribe({ wav: req.wav, locale });
+    },
+  );
+
+  ipcMain.handle('tts:speak', (_e, req: SpeakRequest) => {
+    if (!req || typeof req.text !== 'string' || typeof req.requestId !== 'string') return;
+
+    const settings = settingsStore.get();
+    broadcast('tts:state', { speaking: true, requestId: req.requestId });
+
+    ttsEngine.speak(
+      {
+        requestId: req.requestId,
+        text: req.text,
+        voice: typeof req.voice === 'string' ? req.voice : settings.voiceName,
+        rate: Number.isFinite(req.rate) ? req.rate : settings.speechRate,
+      },
+      (finishedId) => broadcast('tts:state', { speaking: false, requestId: finishedId }),
+    );
+  });
+
+  ipcMain.handle('tts:stop', () => {
+    const id = ttsEngine.speakingRequestId;
+    ttsEngine.stop();
+    broadcast('tts:state', { speaking: false, requestId: id });
+  });
+
   ipcMain.on('chat:start', (event, req: { conversationId: string; requestId: string; userText: string }) => {
     // The renderer is treated as untrusted: validate before acting.
     if (
@@ -301,9 +373,18 @@ function bootstrap(): void {
     getThinkingMode: () => thinkingMode,
   });
 
+  ttsEngine = createTtsEngine();
+  sttEngine = createSttEngine({
+    appRoot: path.join(__dirname, '..'),
+    resourcesPath: process.resourcesPath ?? path.join(__dirname, '..'),
+  });
+
   log.info('startup', {
     version: app.getVersion(),
     tools: toolRegistry.list().length,
+    stt: sttEngine.availability().engine,
+    sttAvailable: sttEngine.availability().available,
+    ttsAvailable: ttsEngine.availability().available,
     broker: permissionBroker ? 'deny-all' : 'none',
   });
 }
@@ -311,6 +392,7 @@ function bootstrap(): void {
 void app.whenReady().then(async () => {
   bootstrap();
   applyContentSecurityPolicy();
+  applyPermissionPolicy();
   registerIpc();
   buildAppMenu(() => mainWindow);
   createWindow();
@@ -330,6 +412,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (pollTimer) clearInterval(pollTimer);
   orchestrator?.abortAll();
+  ttsEngine?.stop();
   try {
     db?.close();
   } catch {

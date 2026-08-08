@@ -1,4 +1,11 @@
 import type {
+  SpeakRequest,
+  TranscriptionRequest,
+  TranscriptionResult,
+  TtsState,
+  VoiceCapabilities,
+} from './voice';
+import type {
   AppInfo,
   ChatMessage,
   Conversation,
@@ -27,6 +34,13 @@ export interface IpcInvokeMap {
   'conv:delete': { req: string; res: void };
   'conv:clear': { req: string; res: void };
   'clipboard:write': { req: string; res: void };
+
+  /* ---- voice layer ---- */
+  'voice:capabilities': { req: void; res: VoiceCapabilities };
+  /** WAV bytes in, transcript out. Audio never leaves the machine. */
+  'voice:transcribe': { req: TranscriptionRequest; res: TranscriptionResult };
+  'tts:speak': { req: SpeakRequest; res: void };
+  'tts:stop': { req: void; res: void };
 }
 
 /** Fire-and-forget renderer → main channels. */
@@ -52,6 +66,7 @@ export interface IpcEventMap {
   'chat:trimmed': { requestId: string; droppedMessages: number };
   'ollama:status-changed': OllamaStatus;
   'settings:changed': Settings;
+  'tts:state': TtsState;
 
   /** Menu accelerators, forwarded to the renderer as commands. */
   'menu:new-chat': Record<string, never>;
@@ -79,6 +94,10 @@ export const INVOKE_CHANNELS = [
   'conv:rename',
   'conv:confirm-delete',
   'conv:delete',
+  'voice:capabilities',
+  'voice:transcribe',
+  'tts:speak',
+  'tts:stop',
   'conv:clear',
   'clipboard:write',
 ] as const satisfies readonly IpcInvokeChannel[];
@@ -91,6 +110,7 @@ export const EVENT_CHANNELS = [
   'chat:trimmed',
   'ollama:status-changed',
   'settings:changed',
+  'tts:state',
   'menu:new-chat',
   'menu:delete-chat',
   'menu:open-settings',

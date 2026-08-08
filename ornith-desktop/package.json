@@ -17,7 +17,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "start": "npm run build && electron .",
-    "package": "npm run build && electron-builder --mac"
+    "package": "npm run build && electron-builder --mac",
+    "build:stt": "node scripts/build-stt-helper.mjs"
   },
   "dependencies": {
     "highlight.js": "^11.11.1",

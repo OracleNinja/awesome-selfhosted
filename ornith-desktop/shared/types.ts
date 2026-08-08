@@ -103,6 +103,15 @@ export interface Settings {
   language: 'en';
   showThinkingByDefault: boolean;
   sendOnEnter: boolean;
+
+  /** Speak every assistant reply. A reply to a spoken prompt is always spoken. */
+  speakResponses: boolean;
+  /** macOS voice name; empty means the system default. */
+  voiceName: string;
+  /** Words per minute passed to `say`. */
+  speechRate: number;
+  /** BCP-47 locale for on-device speech recognition. */
+  sttLocale: string;
 }
 
 export interface AppInfo {
