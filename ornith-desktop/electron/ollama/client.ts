@@ -135,7 +135,16 @@ export async function probeThinkingMode(host: string, model: string): Promise<Th
       }),
     });
 
-    if (!res.ok) return 'inline';
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      // Ollama is explicit when a model has no reasoning capability at all:
+      //   {"error":"\"ornith-en:latest\" does not support thinking"}
+      // Treating that as 'inline' would leave the <think> parser running over
+      // output that can never contain those tags, so a literal `<think>` in an
+      // answer would be swallowed into a hidden panel.
+      if (/does not support thinking/i.test(detail)) return 'none';
+      return 'inline';
+    }
 
     const body = (await res.json()) as { message?: { thinking?: string } };
     // The field being present at all — even empty — means the server understood it.

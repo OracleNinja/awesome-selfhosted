@@ -239,6 +239,23 @@ describe('thinking capability probe', () => {
     expect(await probeThinkingMode(stub.url, 'ornith-en')).toBe('inline');
   });
 
+  // Real behaviour on ornith-en:latest, confirmed against Ollama 0.24.0.
+  it('reports none when Ollama says the model does not support thinking', async () => {
+    stub = await startStubOllama({
+      supportsThink: false,
+      thinkErrorMessage: '"ornith-en:latest" does not support thinking',
+    });
+    expect(await probeThinkingMode(stub.url, 'ornith-en')).toBe('none');
+  });
+
+  it('falls back to inline for an unrecognised rejection', async () => {
+    stub = await startStubOllama({
+      supportsThink: false,
+      thinkErrorMessage: 'unknown field "think"',
+    });
+    expect(await probeThinkingMode(stub.url, 'ornith-en')).toBe('inline');
+  });
+
   it('falls back to inline when the server is unreachable', async () => {
     expect(await probeThinkingMode('http://127.0.0.1:1', 'ornith-en')).toBe('inline');
   });

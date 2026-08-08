@@ -38,6 +38,8 @@ export interface StubOptions {
   closeAfterChunks?: number;
   /** When false, /api/chat rejects a body containing `think`. */
   supportsThink?: boolean;
+  /** Error body used for that rejection; real Ollama wording varies by cause. */
+  thinkErrorMessage?: string;
   /** Never respond, to exercise the timeout path. */
   hang?: boolean;
   /** Bind a specific port, so a restarted stub can reclaim the same URL. */
@@ -104,7 +106,9 @@ export async function startStubOllama(initial: StubOptions = {}): Promise<StubHa
 
         if (options.supportsThink === false && 'think' in parsed) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'unknown field "think"' }));
+          res.end(
+            JSON.stringify({ error: options.thinkErrorMessage ?? 'unknown field "think"' }),
+          );
           return;
         }
 
