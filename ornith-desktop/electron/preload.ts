@@ -1,50 +1,69 @@
-import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-
-interface WireMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-interface ChatStats {
-  evalCount: number;
-  evalDurationNs: number;
-  totalDurationNs: number;
-}
-
 /**
- * The entire surface the renderer gets. No `ipcRenderer`, no Node, no fetch —
- * just these six functions.
+ * The entire surface the renderer gets. Runs sandboxed, so `electron` is the
+ * only module it may require — everything privileged goes over IPC.
  */
-const api = {
-  getStatus: () => ipcRenderer.invoke('ollama:status'),
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { IPC_VERSION } from '../shared/ipc';
+import type { IpcEventMap, IpcInvokeMap, IpcSendMap } from '../shared/ipc';
 
-  // Electron's clipboard rather than navigator.clipboard: the packaged app is
-  // loaded over file://, which is not a secure context for the web API.
-  copyText: (text: string) => clipboard.writeText(text),
+function invoke<K extends keyof IpcInvokeMap>(
+  channel: K,
+  payload?: IpcInvokeMap[K]['req'],
+): Promise<IpcInvokeMap[K]['res']> {
+  return ipcRenderer.invoke(channel, payload) as Promise<IpcInvokeMap[K]['res']>;
+}
 
-  sendChat: (request: { requestId: string; model: string; messages: WireMessage[] }) =>
-    ipcRenderer.send('ollama:chat', request),
+function send<K extends keyof IpcSendMap>(channel: K, payload: IpcSendMap[K]): void {
+  ipcRenderer.send(channel, payload);
+}
 
-  abortChat: (requestId: string) => ipcRenderer.send('ollama:abort', requestId),
-
-  onDelta: (callback: (payload: { requestId: string; text: string }) => void) =>
-    subscribe('ollama:delta', callback),
-
-  onDone: (callback: (payload: { requestId: string; stats: ChatStats }) => void) =>
-    subscribe('ollama:done', callback),
-
-  onError: (callback: (payload: { requestId: string; message: string }) => void) =>
-    subscribe('ollama:error', callback),
-};
-
-/** Wraps an ipcRenderer.on and hands back an unsubscribe, so effects can clean up. */
-function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
-  const listener = (_event: IpcRendererEvent, payload: T) => callback(payload);
+/** Returns an unsubscribe so React effects can clean up properly. */
+function on<K extends keyof IpcEventMap>(
+  channel: K,
+  callback: (payload: IpcEventMap[K]) => void,
+): () => void {
+  const listener = (_event: IpcRendererEvent, payload: IpcEventMap[K]) => callback(payload);
   ipcRenderer.on(channel, listener);
   return () => {
     ipcRenderer.removeListener(channel, listener);
   };
 }
+
+const api = {
+  ipcVersion: IPC_VERSION,
+
+  appInfo: () => invoke('app:info'),
+
+  ollama: {
+    status: () => invoke('ollama:status'),
+    refresh: () => invoke('ollama:refresh'),
+  },
+
+  settings: {
+    get: () => invoke('settings:get'),
+    update: (patch: IpcInvokeMap['settings:update']['req']) => invoke('settings:update', patch),
+  },
+
+  conversations: {
+    list: () => invoke('conv:list'),
+    get: (id: string) => invoke('conv:get', id),
+    create: () => invoke('conv:create', undefined),
+    rename: (id: string, title: string) => invoke('conv:rename', { id, title }),
+    remove: (id: string) => invoke('conv:delete', id),
+    clear: (id: string) => invoke('conv:clear', id),
+  },
+
+  chat: {
+    start: (payload: IpcSendMap['chat:start']) => send('chat:start', payload),
+    abort: (requestId: string) => send('chat:abort', { requestId }),
+  },
+
+  // Electron's clipboard rather than navigator.clipboard: a packaged app loads
+  // over file://, which is not a secure context for the web API.
+  copyText: (text: string) => invoke('clipboard:write', text),
+
+  on,
+};
 
 contextBridge.exposeInMainWorld('ornith', api);
 

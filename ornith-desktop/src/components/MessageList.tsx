@@ -1,42 +1,61 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
-import Markdown from './Markdown';
-import type { ChatMessage } from '../types';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import MessageItem from './MessageItem';
+import type { ChatMessage, StreamState } from '../../shared/types';
 
 interface Props {
   messages: ChatMessage[];
-  isStreaming: boolean;
+  streamingMessageId: string | null;
+  streamState: StreamState | null;
+  showThinkingByDefault: boolean;
+  trimmedNotice: number | null;
 }
 
-/** How close to the bottom still counts as "following along". */
+/** Within this distance of the bottom, the view keeps following new text. */
 const STICK_THRESHOLD_PX = 80;
 
-export default function MessageList({ messages, isStreaming }: Props) {
+export default function MessageList({
+  messages,
+  streamingMessageId,
+  streamState,
+  showThinkingByDefault,
+  trimmedNotice,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stickToBottom = useRef(true);
+  const stick = useRef(true);
+  const [showJump, setShowJump] = useState(false);
 
-  // Track whether the user has scrolled away; if they have, don't yank them back.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottom.current = distance < STICK_THRESHOLD_PX;
+      stick.current = distance < STICK_THRESHOLD_PX;
+      setShowJump(!stick.current && el.scrollHeight > el.clientHeight * 1.2);
     };
 
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Follow new text only when the user has not scrolled away.
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stickToBottom.current) return;
+    if (!el || !stick.current) return;
     el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  const jumpToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stick.current = true;
+    setShowJump(false);
+  }, []);
+
   if (messages.length === 0) {
     return (
-      <div className="messages" ref={scrollRef}>
+      <div className="messages" ref={scrollRef} data-testid="message-list">
         <div className="empty-state">
           <div className="empty-mark" aria-hidden="true">
             🐦
@@ -49,42 +68,32 @@ export default function MessageList({ messages, isStreaming }: Props) {
   }
 
   return (
-    <div className="messages" ref={scrollRef}>
-      <div className="messages-inner">
-        {messages.map((message, index) => {
-          const isLast = index === messages.length - 1;
-          const pending = isStreaming && isLast && message.role === 'assistant';
+    <div className="messages-wrap">
+      <div className="messages" ref={scrollRef} data-testid="message-list">
+        <div className="messages-inner">
+          {trimmedNotice ? (
+            <div className="trim-divider" data-testid="trim-divider">
+              Earlier messages trimmed to fit the context window ({trimmedNotice} dropped)
+            </div>
+          ) : null}
 
-          return (
-            <article key={message.id} className={`message message-${message.role}`}>
-              <div className="message-role">{message.role === 'user' ? 'You' : 'Ornith'}</div>
-
-              <div className="message-body">
-                {message.error ? (
-                  <div className="message-error">
-                    <strong>Couldn’t get a response.</strong>
-                    <span>{message.error}</span>
-                  </div>
-                ) : message.content ? (
-                  <Markdown content={message.content} />
-                ) : pending ? (
-                  <div className="typing" aria-label="Generating">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                ) : null}
-
-                {pending && message.content ? <span className="caret" /> : null}
-              </div>
-
-              {message.tokensPerSecond ? (
-                <div className="message-meta">{message.tokensPerSecond.toFixed(1)} tok/s</div>
-              ) : null}
-            </article>
-          );
-        })}
+          {messages.map((message) => (
+            <MessageItem
+              key={message.id}
+              message={message}
+              isStreaming={message.id === streamingMessageId}
+              isLoadingModel={message.id === streamingMessageId && streamState === 'loading-model'}
+              showThinkingByDefault={showThinkingByDefault}
+            />
+          ))}
+        </div>
       </div>
+
+      {showJump ? (
+        <button type="button" className="jump-button" onClick={jumpToLatest}>
+          Jump to latest ↓
+        </button>
+      ) : null}
     </div>
   );
 }

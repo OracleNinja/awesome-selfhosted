@@ -7,11 +7,12 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "isolatedModules": true,
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["electron"]
+  "include": ["electron", "shared", "tests", "scripts", "vitest.config.ts", "playwright.config.ts"]
 }

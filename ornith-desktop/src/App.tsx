@@ -1,300 +1,387 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import MessageList from './components/MessageList';
-import Composer from './components/Composer';
-import StatusBar from './components/StatusBar';
-import { bridge } from './lib/bridge';
-import {
-  loadConversations,
-  loadPreferredModel,
-  saveConversations,
-  savePreferredModel,
-} from './lib/storage';
-import {
-  createId,
-  DEFAULT_MODEL,
-  type ChatMessage,
-  type Conversation,
-  type StatusResult,
-} from './types';
+import Composer, { type ComposerHandle } from './components/Composer';
+import SettingsDialog from './components/SettingsDialog';
+import { bridge, newRequestId } from './lib/bridge';
+import { useStreamBuffer } from './lib/useStreamBuffer';
+import type {
+  ChatMessage,
+  Conversation,
+  ConversationSummary,
+  OllamaStatus,
+  Settings,
+  StreamState,
+} from '../shared/types';
 
-/** Which message a live stream is writing into. */
-interface StreamTarget {
+interface ActiveStream {
   requestId: string;
-  conversationId: string;
-  messageId: string;
-}
-
-function titleFrom(text: string): string {
-  const cleaned = text.replace(/\s+/g, ' ').trim();
-  if (!cleaned) return 'New chat';
-  return cleaned.length > 42 ? `${cleaned.slice(0, 42)}…` : cleaned;
-}
-
-function newConversation(): Conversation {
-  const now = Date.now();
-  return { id: createId(), title: 'New chat', messages: [], createdAt: now, updatedAt: now };
+  messageId: string | null;
 }
 
 export default function App() {
-  const restored = useMemo(() => loadConversations(), []);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [active, setActive] = useState<Conversation | null>(null);
+  const [status, setStatus] = useState<OllamaStatus | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [stream, setStream] = useState<ActiveStream | null>(null);
+  const [streamState, setStreamState] = useState<StreamState | null>(null);
+  const [trimmed, setTrimmed] = useState<number | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  const [conversations, setConversations] = useState<Conversation[]>(restored);
-  const [activeId, setActiveId] = useState<string | null>(restored[0]?.id ?? null);
-  const [model, setModel] = useState<string>(() => loadPreferredModel() ?? DEFAULT_MODEL);
-  const [status, setStatus] = useState<StatusResult | null>(null);
-  const [streaming, setStreaming] = useState<StreamTarget | null>(null);
+  const buffer = useStreamBuffer();
+  const composerRef = useRef<ComposerHandle>(null);
 
-  // The IPC listeners are registered once; they read the live target from a ref
-  // so they never close over a stale value.
-  const streamRef = useRef<StreamTarget | null>(null);
-  streamRef.current = streaming;
+  // Listeners are registered once and read live values from refs, so they never
+  // close over stale state.
+  //
+  // These refs are written synchronously at the point of action, NOT during
+  // render. Main persists a turn to local SQLite and emits chat:started in
+  // microseconds — well before React re-renders — so a ref updated on render
+  // would still hold null when the event arrives and the turn would be dropped.
+  const streamRef = useRef<ActiveStream | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  const conversationsRef = useRef<ConversationSummary[]>([]);
 
-  const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
-  const isStreaming = streaming !== null;
+  const setStreamSafe = useCallback((next: ActiveStream | null) => {
+    streamRef.current = next;
+    setStream(next);
+  }, []);
 
-  const patchMessage = useCallback(
-    (conversationId: string, messageId: string, patch: (m: ChatMessage) => ChatMessage) => {
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id !== conversationId
-            ? c
-            : {
-                ...c,
-                updatedAt: Date.now(),
-                messages: c.messages.map((m) => (m.id === messageId ? patch(m) : m)),
-              },
-        ),
+  const setActiveIdSafe = useCallback((next: string | null) => {
+    activeIdRef.current = next;
+    setActiveId(next);
+  }, []);
+
+  const setConversationsSafe = useCallback((next: ConversationSummary[]) => {
+    conversationsRef.current = next;
+    setConversations(next);
+  }, []);
+
+  const isStreaming = stream !== null;
+
+  /* ------------------------------------------------------------ bootstrap */
+
+  const refreshList = useCallback(async () => {
+    setConversationsSafe(await bridge.conversations.list());
+  }, [setConversationsSafe]);
+
+  useEffect(() => {
+    void (async () => {
+      const [list, loadedSettings, loadedStatus] = await Promise.all([
+        bridge.conversations.list(),
+        bridge.settings.get(),
+        bridge.ollama.status(),
+      ]);
+      setConversationsSafe(list);
+      setSettings(loadedSettings);
+      setStatus(loadedStatus);
+
+      if (list.length > 0) {
+        setActiveIdSafe(list[0].id);
+        setActive(await bridge.conversations.get(list[0].id));
+      }
+    })();
+  }, [setConversationsSafe, setActiveIdSafe]);
+
+  // Theme: clearing the attribute lets prefers-color-scheme take over.
+  useEffect(() => {
+    if (!settings) return;
+    if (settings.theme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = settings.theme;
+  }, [settings]);
+
+  /* ------------------------------------------------------------- streaming */
+
+  useEffect(() => {
+    const offStarted = bridge.on('chat:started', (payload) => {
+      if (streamRef.current?.requestId !== payload.requestId) return;
+
+      setStreamSafe({ requestId: payload.requestId, messageId: payload.assistantMessage.id });
+      setActive((prev) =>
+        prev && prev.id === payload.conversationId
+          ? {
+              ...prev,
+              title: payload.title,
+              messages: [...prev.messages, payload.userMessage, payload.assistantMessage],
+            }
+          : prev,
       );
+      void refreshList();
+    });
+
+    const offState = bridge.on('chat:state', (payload) => {
+      if (streamRef.current?.requestId !== payload.requestId) return;
+      setStreamState(payload.state);
+    });
+
+    const offDelta = bridge.on('chat:delta', (payload) => {
+      if (streamRef.current?.requestId !== payload.requestId) return;
+      buffer.append({ content: payload.content, thinking: payload.thinking });
+    });
+
+    const offTrimmed = bridge.on('chat:trimmed', (payload) => {
+      if (streamRef.current?.requestId !== payload.requestId) return;
+      setTrimmed(payload.droppedMessages);
+    });
+
+    const offEnd = bridge.on('chat:end', (payload) => {
+      const current = streamRef.current;
+      if (current?.requestId !== payload.requestId) return;
+
+      // Read the ref, not state: it includes deltas not yet committed to a frame.
+      const finalText = buffer.read();
+      const messageId = current.messageId;
+
+      setActive((prev) => {
+        if (!prev || !messageId) return prev;
+        return {
+          ...prev,
+          messages: prev.messages.map((m) =>
+            m.id === messageId
+              ? {
+                  ...m,
+                  content: finalText.content,
+                  thinking: finalText.thinking,
+                  status:
+                    payload.outcome.kind === 'complete'
+                      ? 'complete'
+                      : payload.outcome.kind === 'cancelled'
+                        ? 'cancelled'
+                        : 'error',
+                  error: payload.outcome.kind === 'error' ? payload.outcome.error : undefined,
+                  stats: payload.outcome.kind === 'complete' ? payload.outcome.stats : undefined,
+                }
+              : m,
+          ),
+        };
+      });
+
+      setStreamSafe(null);
+      setStreamState(null);
+      buffer.reset();
+      void refreshList();
+    });
+
+    const offStatus = bridge.on('ollama:status-changed', setStatus);
+    const offSettings = bridge.on('settings:changed', setSettings);
+
+    return () => {
+      offStarted();
+      offState();
+      offDelta();
+      offTrimmed();
+      offEnd();
+      offStatus();
+      offSettings();
+    };
+  }, [buffer, refreshList]);
+
+  /* --------------------------------------------------------------- actions */
+
+  const selectConversation = useCallback(
+    async (id: string) => {
+      if (streamRef.current) bridge.chat.abort(streamRef.current.requestId);
+      setStreamSafe(null);
+      setStreamState(null);
+      buffer.reset();
+      setTrimmed(null);
+      setActiveIdSafe(id);
+      setActive(await bridge.conversations.get(id));
+    },
+    [buffer],
+  );
+
+  const handleNewChat = useCallback(async () => {
+    if (streamRef.current) bridge.chat.abort(streamRef.current.requestId);
+    setStreamSafe(null);
+    setStreamState(null);
+    buffer.reset();
+    setTrimmed(null);
+
+    // Reuse an existing empty chat rather than stacking up blanks.
+    const empty = conversationsRef.current.find((c) => c.messageCount === 0);
+    if (empty) {
+      setActiveIdSafe(empty.id);
+      setActive(await bridge.conversations.get(empty.id));
+      return;
+    }
+
+    const created = await bridge.conversations.create();
+    setActiveIdSafe(created.id);
+    setActive(created);
+    await refreshList();
+  }, [buffer, refreshList]);
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (streamRef.current) bridge.chat.abort(streamRef.current.requestId);
+      setStreamSafe(null);
+      await bridge.conversations.remove(id);
+      const list = await bridge.conversations.list();
+      setConversationsSafe(list);
+
+      if (activeIdRef.current === id) {
+        const next = list[0];
+        setActiveIdSafe(next?.id ?? null);
+        setActive(next ? await bridge.conversations.get(next.id) : null);
+      }
     },
     [],
   );
 
-  // --- Ollama connection status -------------------------------------------
+  const handleRename = useCallback(
+    async (id: string, title: string) => {
+      await bridge.conversations.rename(id, title);
+      setActive((prev) => (prev && prev.id === id ? { ...prev, title } : prev));
+      await refreshList();
+    },
+    [refreshList],
+  );
 
-  const refreshStatus = useCallback(async () => {
-    const next = await bridge.getStatus();
-    setStatus(next);
-    return next;
-  }, []);
-
-  useEffect(() => {
-    void refreshStatus().then((next) => {
-      if (!next.connected || next.models.length === 0) return;
-      // Prefer the saved choice, then ornith-en, then whatever is installed.
-      setModel((current) => {
-        if (next.models.includes(current)) return current;
-        if (next.models.includes(DEFAULT_MODEL)) return DEFAULT_MODEL;
-        const prefixMatch = next.models.find((m) => m.startsWith(`${DEFAULT_MODEL}:`));
-        return prefixMatch ?? next.models[0];
-      });
-    });
-
-    // Ollama unloads models when idle and can be restarted underneath us.
-    const timer = setInterval(() => void refreshStatus(), 15_000);
-    return () => clearInterval(timer);
-  }, [refreshStatus]);
-
-  useEffect(() => savePreferredModel(model), [model]);
-
-  // --- Streaming wiring ----------------------------------------------------
-
-  useEffect(() => {
-    const offDelta = bridge.onDelta(({ requestId, text }) => {
-      const target = streamRef.current;
-      if (!target || target.requestId !== requestId) return;
-      patchMessage(target.conversationId, target.messageId, (m) => ({
-        ...m,
-        content: m.content + text,
-      }));
-    });
-
-    const offDone = bridge.onDone(({ requestId, stats }) => {
-      const target = streamRef.current;
-      if (!target || target.requestId !== requestId) return;
-
-      const tokensPerSecond =
-        stats.evalDurationNs > 0 && stats.evalCount > 0
-          ? stats.evalCount / (stats.evalDurationNs / 1e9)
-          : undefined;
-
-      patchMessage(target.conversationId, target.messageId, (m) => ({ ...m, tokensPerSecond }));
-      setStreaming(null);
-    });
-
-    const offError = bridge.onError(({ requestId, message }) => {
-      const target = streamRef.current;
-      if (!target || target.requestId !== requestId) return;
-      patchMessage(target.conversationId, target.messageId, (m) => ({ ...m, error: message }));
-      setStreaming(null);
-      void refreshStatus();
-    });
-
-    return () => {
-      offDelta();
-      offDone();
-      offError();
-    };
-  }, [patchMessage, refreshStatus]);
-
-  // --- Persistence ---------------------------------------------------------
-
-  useEffect(() => {
-    // Debounced: streaming would otherwise write to localStorage on every token.
-    const timer = setTimeout(() => saveConversations(conversations), 400);
-    return () => clearTimeout(timer);
-  }, [conversations]);
-
-  // --- Actions -------------------------------------------------------------
-
-  const handleNewChat = useCallback(() => {
-    if (streamRef.current) bridge.abortChat(streamRef.current.requestId);
-    setStreaming(null);
-
-    setConversations((prev) => {
-      // Reuse an existing empty chat rather than stacking up blanks.
-      const empty = prev.find((c) => c.messages.length === 0);
-      if (empty) {
-        setActiveId(empty.id);
-        return prev;
-      }
-      const created = newConversation();
-      setActiveId(created.id);
-      return [created, ...prev];
-    });
-  }, []);
-
-  const handleSelect = useCallback((id: string) => {
-    if (streamRef.current) bridge.abortChat(streamRef.current.requestId);
-    setStreaming(null);
-    setActiveId(id);
-  }, []);
-
-  const handleDelete = useCallback((id: string) => {
-    if (streamRef.current?.conversationId === id) {
-      bridge.abortChat(streamRef.current.requestId);
-      setStreaming(null);
-    }
-    setConversations((prev) => {
-      const next = prev.filter((c) => c.id !== id);
-      setActiveId((current) => (current === id ? (next[0]?.id ?? null) : current));
-      return next;
-    });
-  }, []);
-
-  const handleClear = useCallback(() => {
-    const target = activeId;
-    if (!target) return;
-    if (streamRef.current?.conversationId === target) {
-      bridge.abortChat(streamRef.current.requestId);
-      setStreaming(null);
-    }
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === target ? { ...c, messages: [], title: 'New chat', updatedAt: Date.now() } : c,
-      ),
-    );
-  }, [activeId]);
+  const handleClear = useCallback(async () => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    if (streamRef.current) bridge.chat.abort(streamRef.current.requestId);
+    setStreamSafe(null);
+    buffer.reset();
+    await bridge.conversations.clear(id);
+    setActive(await bridge.conversations.get(id));
+    await refreshList();
+  }, [buffer, refreshList]);
 
   const handleStop = useCallback(() => {
-    const target = streamRef.current;
-    if (!target) return;
-    bridge.abortChat(target.requestId);
-    setStreaming(null);
+    const current = streamRef.current;
+    if (current) bridge.chat.abort(current.requestId);
   }, []);
 
   const handleSend = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || streamRef.current) return;
+    async (text: string) => {
+      if (streamRef.current) return;
 
-      const now = Date.now();
-      const userMessage: ChatMessage = {
-        id: createId(),
-        role: 'user',
-        content: trimmed,
-        createdAt: now,
-      };
-      const assistantMessage: ChatMessage = {
-        id: createId(),
-        role: 'assistant',
-        content: '',
-        createdAt: now + 1,
-      };
+      let conversationId = activeIdRef.current;
+      if (!conversationId) {
+        const created = await bridge.conversations.create();
+        conversationId = created.id;
+        setActiveIdSafe(conversationId);
+        setActive(created);
+        await refreshList();
+      }
 
-      // Resolve the destination up front — a brand new chat needs an id before
-      // we can point the stream at it.
-      const conversationId = activeId ?? createId();
-      const requestId = createId();
-
-      setConversations((prev) => {
-        const existing = prev.find((c) => c.id === conversationId);
-        const base: Conversation = existing ?? {
-          id: conversationId,
-          title: 'New chat',
-          messages: [],
-          createdAt: now,
-          updatedAt: now,
-        };
-
-        const updated: Conversation = {
-          ...base,
-          title: base.messages.length === 0 ? titleFrom(trimmed) : base.title,
-          messages: [...base.messages, userMessage, assistantMessage],
-          updatedAt: now,
-        };
-
-        // Send using the history we just computed, so nothing is missed.
-        const wire = updated.messages
-          .filter((m) => !m.error && (m.role === 'user' || m.content.length > 0))
-          .map((m) => ({ role: m.role, content: m.content }));
-
-        bridge.sendChat({ requestId, model, messages: wire });
-
-        return existing
-          ? prev.map((c) => (c.id === conversationId ? updated : c))
-          : [updated, ...prev];
-      });
-
-      setActiveId(conversationId);
-      setStreaming({ requestId, conversationId, messageId: assistantMessage.id });
+      buffer.reset();
+      setTrimmed(null);
+      const requestId = newRequestId();
+      setStreamSafe({ requestId, messageId: null });
+      setStreamState('queued');
+      bridge.chat.start({ conversationId, requestId, userText: text });
     },
-    [activeId, model],
+    [buffer, refreshList],
   );
+
+  /* ----------------------------------------------------------- menu wiring */
+
+  useEffect(() => {
+    const step = (direction: 1 | -1) => {
+      const list = conversationsRef.current;
+      if (list.length === 0) return;
+      const index = list.findIndex((c) => c.id === activeIdRef.current);
+      const next = list[Math.min(list.length - 1, Math.max(0, index + direction))];
+      if (next && next.id !== activeIdRef.current) void selectConversation(next.id);
+    };
+
+    const offs = [
+      bridge.on('menu:new-chat', () => void handleNewChat()),
+      bridge.on('menu:delete-chat', () => {
+        if (activeIdRef.current) void handleDelete(activeIdRef.current);
+      }),
+      bridge.on('menu:open-settings', () => setSettingsOpen(true)),
+      bridge.on('menu:focus-composer', () => composerRef.current?.focus()),
+      bridge.on('menu:stop-generating', handleStop),
+      bridge.on('menu:prev-chat', () => step(-1)),
+      bridge.on('menu:next-chat', () => step(1)),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [handleNewChat, handleDelete, handleStop, selectConversation]);
+
+  /* ---------------------------------------------------------------- render */
+
+  // Overlay the live buffer onto the streaming message only; every other
+  // message keeps its object identity so MessageItem's memo holds.
+  const displayMessages: ChatMessage[] = useMemo(() => {
+    if (!active) return [];
+    if (!stream?.messageId) return active.messages;
+    return active.messages.map((m) =>
+      m.id === stream.messageId
+        ? { ...m, content: buffer.live.content, thinking: buffer.live.thinking }
+        : m,
+    );
+  }, [active, stream, buffer.live]);
+
+  const connected = status?.connected === true && status.activeModelInstalled;
+  const draft = activeId ? (drafts[activeId] ?? '') : (drafts.__new ?? '');
 
   return (
     <div className="app">
       <Sidebar
         conversations={conversations}
         activeId={activeId}
-        onSelect={handleSelect}
-        onNewChat={handleNewChat}
-        onDelete={handleDelete}
+        status={status}
+        onSelect={(id) => void selectConversation(id)}
+        onNewChat={() => void handleNewChat()}
+        onDelete={(id) => void handleDelete(id)}
+        onRename={(id, title) => void handleRename(id, title)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onRetryConnection={() => void bridge.ollama.refresh().then(setStatus)}
       />
 
       <main className="main">
         <header className="topbar">
-          <div className="topbar-title">{activeConversation?.title ?? 'New chat'}</div>
+          <div className="topbar-title" data-testid="chat-title">
+            {active?.title ?? 'New chat'}
+          </div>
           <button
+            type="button"
             className="ghost-button"
-            onClick={handleClear}
-            disabled={!activeConversation || activeConversation.messages.length === 0}
+            onClick={() => void handleClear()}
+            disabled={!active || active.messages.length === 0}
+            data-testid="clear-chat"
           >
             Clear chat
           </button>
         </header>
 
-        <MessageList messages={activeConversation?.messages ?? []} isStreaming={isStreaming} />
+        <MessageList
+          messages={displayMessages}
+          streamingMessageId={stream?.messageId ?? null}
+          streamState={streamState}
+          showThinkingByDefault={settings?.showThinkingByDefault ?? false}
+          trimmedNotice={trimmed}
+        />
 
-        <Composer onSend={handleSend} onStop={handleStop} isStreaming={isStreaming} />
-
-        <StatusBar
-          status={status}
-          model={model}
-          onModelChange={setModel}
-          onRetry={() => void refreshStatus()}
+        <Composer
+          ref={composerRef}
+          onSend={(text) => void handleSend(text)}
+          onStop={handleStop}
+          isStreaming={isStreaming}
+          disabled={!connected}
+          sendOnEnter={settings?.sendOnEnter ?? true}
+          draft={draft}
+          onDraftChange={(text) =>
+            setDrafts((prev) => ({ ...prev, [activeId ?? '__new']: text }))
+          }
         />
       </main>
+
+      {settingsOpen && settings ? (
+        <SettingsDialog
+          settings={settings}
+          status={status}
+          onUpdate={(patch) => void bridge.settings.update(patch).then(setSettings)}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

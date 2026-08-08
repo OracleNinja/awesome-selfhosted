@@ -9,6 +9,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Split the three big vendor groups so their cost is visible and so a
+        // change to app code does not invalidate all of it.
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          markdown: ['react-markdown', 'remark-gfm'],
+          highlight: ['lowlight'],
+        },
+      },
+    },
   },
   server: {
     strictPort: false,

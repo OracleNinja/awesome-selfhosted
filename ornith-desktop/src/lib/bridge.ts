@@ -1,24 +1,50 @@
-import type { ChatStats, StatusResult } from '../types';
+import type { IpcEventMap } from '../../shared/ipc';
+import type {
+  AppInfo,
+  Conversation,
+  ConversationSummary,
+  OllamaStatus,
+  Settings,
+} from '../../shared/types';
 
-interface WireMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-export interface OrnithBridge {
-  getStatus: () => Promise<StatusResult>;
-  copyText: (text: string) => void;
-  sendChat: (request: { requestId: string; model: string; messages: WireMessage[] }) => void;
-  abortChat: (requestId: string) => void;
-  onDelta: (cb: (payload: { requestId: string; text: string }) => void) => () => void;
-  onDone: (cb: (payload: { requestId: string; stats: ChatStats }) => void) => () => void;
-  onError: (cb: (payload: { requestId: string; message: string }) => void) => () => void;
+export interface OrnithApi {
+  ipcVersion: number;
+  appInfo(): Promise<AppInfo>;
+  ollama: {
+    status(): Promise<OllamaStatus>;
+    refresh(): Promise<OllamaStatus>;
+  };
+  settings: {
+    get(): Promise<Settings>;
+    update(patch: Partial<Settings>): Promise<Settings>;
+  };
+  conversations: {
+    list(): Promise<ConversationSummary[]>;
+    get(id: string): Promise<Conversation | null>;
+    create(): Promise<Conversation>;
+    rename(id: string, title: string): Promise<void>;
+    remove(id: string): Promise<void>;
+    clear(id: string): Promise<void>;
+  };
+  chat: {
+    start(payload: { conversationId: string; requestId: string; userText: string }): void;
+    abort(requestId: string): void;
+  };
+  copyText(text: string): Promise<void>;
+  on<K extends keyof IpcEventMap>(
+    channel: K,
+    callback: (payload: IpcEventMap[K]) => void,
+  ): () => void;
 }
 
 declare global {
   interface Window {
-    ornith: OrnithBridge;
+    ornith: OrnithApi;
   }
 }
 
-export const bridge: OrnithBridge = window.ornith;
+export const bridge: OrnithApi = window.ornith;
+
+export function newRequestId(): string {
+  return crypto.randomUUID();
+}

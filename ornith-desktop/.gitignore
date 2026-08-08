@@ -2,5 +2,8 @@ node_modules/
 dist/
 dist-electron/
 release/
+coverage/
+test-results/
+playwright-report/
 *.log
 .DS_Store

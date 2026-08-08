@@ -1,0 +1,89 @@
+/**
+ * Dark-first token set.
+ *
+ * Three theme states must work: explicit dark, explicit light, and system.
+ * `:root` carries the complete dark palette; the light palette is redefined
+ * both under prefers-color-scheme (for system) and under [data-theme="light"]
+ * (for the explicit choice), so the setting wins in both directions.
+ */
+:root {
+  --bg: #101113;
+  --bg-elevated: #17191c;
+  --bg-sidebar: #0c0d0f;
+  --bg-input: #1b1e22;
+  --border: #26292e;
+  --border-strong: #33373d;
+  --text: #e6e8ea;
+  --text-muted: #9aa0a8;
+  --text-faint: #6b7178;
+  --accent: #6ea8fe;
+  --accent-contrast: #0b0c0e;
+  --danger: #f2777a;
+  --warning: #d29922;
+  --success: #56d364;
+  --code-bg: #0c0d0f;
+
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-number: #ffa657;
+  --hl-title: #d2a8ff;
+  --hl-attr: #79c0ff;
+  --hl-type: #7ee787;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Code', monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #ffffff;
+    --bg-elevated: #f7f8f9;
+    --bg-sidebar: #f2f3f5;
+    --bg-input: #ffffff;
+    --border: #e2e5e9;
+    --border-strong: #cdd2d8;
+    --text: #16181b;
+    --text-muted: #5c636b;
+    --text-faint: #868d95;
+    --accent: #1f6feb;
+    --accent-contrast: #ffffff;
+    --danger: #cf222e;
+    --warning: #9a6700;
+    --success: #1a7f37;
+    --code-bg: #f6f8fa;
+
+    --hl-keyword: #cf222e;
+    --hl-string: #0a3069;
+    --hl-number: #953800;
+    --hl-title: #8250df;
+    --hl-attr: #0550ae;
+    --hl-type: #116329;
+  }
+}
+
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-elevated: #f7f8f9;
+  --bg-sidebar: #f2f3f5;
+  --bg-input: #ffffff;
+  --border: #e2e5e9;
+  --border-strong: #cdd2d8;
+  --text: #16181b;
+  --text-muted: #5c636b;
+  --text-faint: #868d95;
+  --accent: #1f6feb;
+  --accent-contrast: #ffffff;
+  --danger: #cf222e;
+  --warning: #9a6700;
+  --success: #1a7f37;
+  --code-bg: #f6f8fa;
+
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #953800;
+  --hl-title: #8250df;
+  --hl-attr: #0550ae;
+  --hl-type: #116329;
+}
