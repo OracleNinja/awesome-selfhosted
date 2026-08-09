@@ -1,0 +1,145 @@
+---
+# OpenCloak broker catalog — worked examples
+#
+# ⚠️  ILLUSTRATIVE ONLY. The endpoints, privacy addresses, and step sequences below
+#     demonstrate the schema's shape; they have NOT been verified against the live
+#     sites. Before any entry enters a real catalog release it must pass:
+#       1. JSON Schema validation  (catalog/schema/broker.schema.json)
+#       2. a full canary-persona run: discover → submit → verify  (DESIGN.md §4.6)
+#     Never ship an unverified entry — a wrong selector that "succeeds" silently is
+#     worse than no entry at all, because the user believes they are protected.
+#
+# In a real catalog each broker is one file: catalog/brokers/<id>.yaml
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. THE COMMON CASE — long-tail broker, no browser needed, near-zero cost.
+#    ~600 of ~700 brokers look like this. Channels 1 and 3 do all the work.
+# ─────────────────────────────────────────────────────────────────────────────
+- id: example-longtail-marketing
+  name: Example Marketing Data Co.
+  domains: [example-marketing.com]
+  categories: [marketing]
+  registry_ids:
+    cppa: "REPLACE_FROM_REGISTRY_CSV"     # joins to DROP coverage
+  legal_bases: [ccpa_delete, ccpa_opt_out, gdpr_erasure, drop_covered]
+  reappearance_ttl: 180d
+  difficulty: 1
+
+  discovery:
+    method: none                          # no public search surface; nothing to scan
+
+  channels:
+    - type: drop                          # statutory clearinghouse; suppresses the email below for CA residents
+      covers_jurisdictions: [US-CA]
+
+    - type: email
+      to: privacy@example-marketing.com
+      template: ccpa_delete_v3
+      required_fields: [given_name, family_name, city, state, email]
+      reply_to: alias
+      expect_ack_within: 10d
+      sla_days: 45
+
+  verify_removal:
+    method: manual                        # nothing public to re-scan; rely on written confirmation
+    notes: >
+      No public record surface, so removal cannot be independently verified.
+      The dashboard must say so rather than showing a green check it cannot justify.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. THE HARD CASE — people-search site: public records, CAPTCHA, mirror family.
+#    ~50 of these drive most of the felt harm and most of the engineering cost.
+# ─────────────────────────────────────────────────────────────────────────────
+- id: example-peoplesearch
+  name: Example People Search LLC
+  domains: [example-peoplesearch.com, www.example-peoplesearch.com]
+  parent_org: example-holdings            # fan-out: siblings share one database (§4.7)
+  categories: [people_search, public_records]
+  registry_ids:
+    cppa: "REPLACE_FROM_REGISTRY_CSV"
+  legal_bases: [ccpa_delete, ccpa_opt_out, gdpr_erasure, drop_covered, site_policy]
+  reappearance_ttl: 60d                   # aggressive re-ingestion; re-check often
+  difficulty: 3
+
+  discovery:
+    method: site_search
+    steps:
+      - goto: "https://www.example-peoplesearch.com/name/{given_name}-{family_name}/{state}"
+      - wait_for: { role: list, name: "search results" }
+      - extract_records:
+          container: { role: listitem }
+          fields:
+            name: { role: heading }
+            age:  { testid: age }
+            city: { testid: location }
+    match:
+      required: [given_name, family_name]
+      scoring:
+        family_name:   0.40
+        given_name:    0.25
+        city:          0.20
+        age_within_2y: 0.15
+      min_confidence: 0.75                # below this → user confirms; never auto-submit
+
+  channels:
+    # 1. free and statutory — covers this broker without touching their site at all
+    - type: drop
+      covers_jurisdictions: [US-CA]
+
+    # 2. legally binding, no CAPTCHA, works for every jurisdiction
+    - type: email
+      to: privacy@example-peoplesearch.com
+      template: ccpa_delete_v3
+      required_fields: [given_name, family_name, city, state]
+      reply_to: alias
+      expect_ack_within: 10d
+      sla_days: 45
+
+    # 3. their own flow — fastest when it works, breaks most often
+    - type: web_form
+      url: https://www.example-peoplesearch.com/optout
+      # NOTE the minimal field set: the profile URL identifies the record, so no
+      # name / DOB / address is transmitted at all (§4.5, disclosure paradox).
+      required_fields: [profile_url, email]
+      steps:
+        - goto: "{profile_url}"
+        - click: { role: link, name: "Do Not Sell My Info" }
+        - fill:  { label: "Email address", value: "{alias_email}" }
+        - solve: captcha                  # → human task + live noVNC handoff
+        - click: { role: button, name: "Opt out" }
+        - assert_visible: { text: "check your email" }   # REQUIRED by schema
+      verification: [email_confirm]       # link lands on the per-broker alias
+      sla_days: 3
+
+    # 4. last resort
+    - type: human
+      instructions_md: docs/example-peoplesearch-manual.md
+
+  verify_removal:
+    method: recheck_discovery             # never trust the broker's "done" email
+    wait: 7d
+    attempts: 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. THE MISCLASSIFIED CASE — an FCRA consumer reporting agency.
+#    CCPA carves out FCRA-regulated data, so a deletion request here is the wrong
+#    instrument and will be lawfully ignored. Tools that blur this line leave users
+#    believing they are protected when they are not (DESIGN.md §4.7).
+# ─────────────────────────────────────────────────────────────────────────────
+- id: example-cra
+  name: Example Consumer Reporting Agency
+  domains: [example-cra.com]
+  categories: [fcra_cra]                  # routes to the FCRA module, NOT the removal engine
+  legal_bases: [site_policy]              # deliberately NOT ccpa_delete
+  difficulty: 4
+
+  discovery:
+    method: none
+
+  channels:
+    - type: human
+      instructions_md: docs/fcra-freeze.md
+      notes: >
+        Correct instruments are a security freeze and an FCRA §609 file-disclosure
+        request — not a CCPA deletion. The UI must explain the distinction rather
+        than showing this alongside people-search removals.

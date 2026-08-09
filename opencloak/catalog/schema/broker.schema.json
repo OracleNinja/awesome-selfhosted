@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opencloak.org/schema/broker.schema.json",
+  "title": "OpenCloak broker catalog entry",
+  "description": "Declarative description of one data broker and the ordered channels through which a removal request may be submitted. Deliberately NOT Turing-complete: a catalog entry must never be able to execute arbitrary code on a machine holding user identity data.",
+  "type": "object",
+  "required": ["id", "name", "domains", "categories", "legal_bases", "channels"],
+  "additionalProperties": false,
+
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$",
+      "description": "Stable slug. Never reuse or rename; downstream state references it."
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "domains": {
+      "type": "array", "minItems": 1, "items": { "type": "string", "format": "hostname" },
+      "description": "Every domain this broker serves records from. Doubles as the worker egress allowlist."
+    },
+    "parent_org": {
+      "type": "string",
+      "description": "Groups mirror/skin sites sharing one database, so removals fan out across the family (DESIGN.md 4.7)."
+    },
+    "categories": {
+      "type": "array", "minItems": 1,
+      "items": { "enum": ["people_search", "marketing", "risk", "fcra_cra", "ad_tech", "public_records"] },
+      "description": "fcra_cra entries are NOT handled by CCPA deletion; they route to the FCRA module."
+    },
+    "registry_ids": {
+      "type": "object",
+      "properties": {
+        "cppa": { "type": "string", "description": "Join key for California DROP coverage." },
+        "vt": { "type": "string" }, "tx": { "type": "string" }, "or": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "legal_bases": {
+      "type": "array", "minItems": 1,
+      "items": { "enum": ["ccpa_delete", "ccpa_opt_out", "gdpr_erasure", "gdpr_object", "drop_covered", "site_policy"] }
+    },
+    "reappearance_ttl": {
+      "type": "string", "pattern": "^[0-9]+d$", "default": "90d",
+      "description": "Re-scan cadence after a verified removal. Reappearance is expected, not exceptional."
+    },
+    "difficulty": {
+      "type": "integer", "minimum": 1, "maximum": 5,
+      "description": "5 = demands government ID or full SSN. The engine stops and asks rather than complying."
+    },
+    "discovery": { "$ref": "#/$defs/discovery" },
+    "channels": {
+      "type": "array", "minItems": 1,
+      "description": "ORDERED by preference, cheapest and most legally durable first. The engine walks down on failure.",
+      "items": { "$ref": "#/$defs/channel" }
+    },
+    "verify_removal": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": { "enum": ["recheck_discovery", "manual", "none"] },
+        "wait": { "type": "string", "pattern": "^[0-9]+d$", "default": "7d" },
+        "attempts": { "type": "integer", "minimum": 1, "maximum": 5, "default": 3 },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "notes": { "type": "string" }
+  },
+
+  "$defs": {
+    "field_type": {
+      "enum": [
+        "given_name", "family_name", "middle_name", "name_variant", "maiden_name",
+        "street", "city", "state", "postal_code", "country",
+        "email", "phone", "date_of_birth", "birth_year", "age",
+        "employer", "relative_name", "username", "profile_url", "ssn_last4"
+      ]
+    },
+
+    "locator": {
+      "description": "Semantic locators only. CSS/XPath are rejected: they break on every redesign, while role/label locators survive (DESIGN.md 4.2).",
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "role": { "type": "string" },
+        "label": { "type": "string" },
+        "text": { "type": "string" },
+        "testid": { "type": "string" },
+        "name": { "type": "string" },
+        "nth": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
+    "step": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "description": "Exactly one verb per step, so execution order is never ambiguous.",
+      "properties": {
+        "goto": { "type": "string", "description": "URL template; {placeholders} bind to declared required_fields only." },
+        "click": { "$ref": "#/$defs/locator" },
+        "fill": {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "label": { "type": "string" }, "role": { "type": "string" },
+            "testid": { "type": "string" }, "value": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "select": {
+          "type": "object",
+          "required": ["value"],
+          "properties": { "label": { "type": "string" }, "value": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "wait_for": { "$ref": "#/$defs/locator" },
+        "solve": { "enum": ["captcha"], "description": "Escalates to a human task with a live session handoff. Never an auto-solver by default." },
+        "assert_visible": { "$ref": "#/$defs/locator" },
+        "extract_records": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+
+    "discovery": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": { "enum": ["site_search", "none", "manual"] },
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+        "match": {
+          "type": "object",
+          "required": ["required", "min_confidence"],
+          "properties": {
+            "required": { "type": "array", "items": { "$ref": "#/$defs/field_type" } },
+            "scoring": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 } },
+            "min_confidence": {
+              "type": "number", "minimum": 0.5, "maximum": 1,
+              "description": "Below this, no auto-submission. Deleting a stranger's record attacks them and discloses you (DESIGN.md 9.8)."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "channel": {
+      "type": "object",
+      "required": ["type"],
+      "$comment": "LINTER NOTE: when a type-specific `then` branch fails, `unevaluatedProperties` also fires and sorts first, masking the real cause (e.g. a web_form missing assert_visible reports \"'url','steps' unexpected\"). The catalog linter MUST print ALL errors from iter_errors(), not best_match or the first error, or contributors get a message that points at the wrong field.",
+      "unevaluatedProperties": false,
+      "properties": {
+        "type": { "enum": ["drop", "drp_api", "email", "web_form", "postal", "human"] },
+        "required_fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/field_type" },
+          "description": "WHITELIST. The orchestrator unwraps exactly these fields and no others. Keep it minimal; prefer profile_url over identity fields."
+        },
+        "sla_days": { "type": "integer", "minimum": 1, "maximum": 120 },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "email" } }, "required": ["type"] },
+          "then": {
+            "required": ["to", "template"],
+            "properties": {
+              "to": { "type": "string", "format": "email" },
+              "cc": { "type": "array", "items": { "type": "string", "format": "email" } },
+              "template": { "type": "string" },
+              "reply_to": { "const": "alias", "default": "alias", "description": "Always a per-broker alias. The real address is never disclosed." },
+              "expect_ack_within": { "type": "string", "pattern": "^[0-9]+d$" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "web_form" } }, "required": ["type"] },
+          "then": {
+            "required": ["url", "steps"],
+            "properties": {
+              "url": { "type": "string", "format": "uri" },
+              "steps": {
+                "type": "array", "minItems": 1,
+                "items": { "$ref": "#/$defs/step" },
+                "description": "MUST end in assert_visible. A flow without a positive success assertion silently reports success when broken — the worst failure mode in the system.",
+                "contains": { "type": "object", "required": ["assert_visible"] }
+              },
+              "verification": {
+                "type": "array",
+                "items": { "enum": ["email_confirm", "sms_code", "phone_call", "id_upload", "none"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "drop" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "covers_jurisdictions": { "type": "array", "items": { "type": "string" }, "default": ["US-CA"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "postal" } }, "required": ["type"] },
+          "then": {
+            "required": ["address"],
+            "properties": { "address": { "type": "string" }, "form_pdf": { "type": "string" } }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "human" } }, "required": ["type"] },
+          "then": { "required": ["instructions_md"], "properties": { "instructions_md": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "drp_api" } }, "required": ["type"] },
+          "then": { "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "format": "uri" } } }
+        }
+      ]
+    }
+  }
+}
