@@ -1,0 +1,32 @@
+{
+  "name": "ornith-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ornith Cloud Gateway \u2014 provider-agnostic AI and retrieval backend for Ornith Desktop.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@hono/node-server": "^1.19.9",
+    "@mozilla/readability": "^0.6.0",
+    "hono": "^4.13.1",
+    "linkedom": "^0.18.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.23.11",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

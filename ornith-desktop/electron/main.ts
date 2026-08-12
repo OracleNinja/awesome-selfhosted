@@ -1,0 +1,449 @@
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session, shell } from 'electron';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { DatabaseSync } from 'node:sqlite';
+
+import { DEFAULT_MODEL, STATUS_POLL_INTERVAL_MS } from '../shared/defaults';
+import { IPC_VERSION } from '../shared/ipc';
+import type { AppInfo, OllamaStatus, Settings, ThinkingMode } from '../shared/types';
+import { toPublicSettings } from '../shared/types';
+import { createOllamaBackend } from './backends/ollama';
+import { createGatewayBackend } from './backends/gateway';
+import type { ChatBackend } from './backends/types';
+import type {
+  SpeakRequest,
+  TranscriptionRequest,
+  TranscriptionResult,
+  VoiceCapabilities,
+} from '../shared/voice';
+import { createTtsEngine, type TtsEngine } from './voice/tts';
+import { createSttEngine, type SttEngine } from './voice/stt';
+import { fetchStatus, probeThinkingMode } from './ollama/client';
+import { createConversationStore, type ConversationStore } from './store/conversations';
+import { openDatabase } from './store/db';
+import { createSettingsStore, type SettingsStore } from './store/settings';
+import { createOrchestrator, type Orchestrator } from './chat/orchestrator';
+import { createDenyAllBroker, createToolRegistry } from './agent/registry';
+import { buildAppMenu } from './menu';
+import { initLogger, log } from './log';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+const isDev = Boolean(DEV_SERVER_URL);
+
+let mainWindow: BrowserWindow | null = null;
+let db: DatabaseSync;
+let store: ConversationStore;
+let settingsStore: SettingsStore;
+let orchestrator: Orchestrator;
+let ttsEngine: TtsEngine;
+let sttEngine: SttEngine;
+
+let status: OllamaStatus | null = null;
+let thinkingMode: ThinkingMode = 'none';
+let probedModel: string | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+// V1 agent surface: registered but empty, and every request is denied.
+const toolRegistry = createToolRegistry();
+const permissionBroker = createDenyAllBroker();
+
+/* ------------------------------------------------------------------ window */
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 640,
+    minHeight: 480,
+    show: false,
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#101113' : '#ffffff',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      allowRunningInsecureContent: false,
+      devTools: isDev || process.env.ORNITH_DEVTOOLS === '1',
+    },
+  });
+
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
+
+  // External links go to the real browser; nothing opens inside the app.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Block navigation away from the app's own origin.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowed = DEV_SERVER_URL ? url.startsWith(DEV_SERVER_URL) : url.startsWith('file://');
+    if (!allowed) {
+      event.preventDefault();
+      log.warn('navigation.blocked', { url });
+    }
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    log.error('renderer.gone', { reason: details.reason });
+    if (details.reason !== 'clean-exit') mainWindow?.reload();
+  });
+
+  if (DEV_SERVER_URL) {
+    void mainWindow.loadURL(DEV_SERVER_URL);
+  } else {
+    void mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+function applyContentSecurityPolicy(): void {
+  // Dev needs inline scripts and a websocket for HMR; production does not.
+  if (isDev) return;
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            "font-src 'self'",
+            // The renderer never talks to the network; all of it goes over IPC.
+            "connect-src 'none'",
+          ].join('; '),
+        ],
+      },
+    });
+  });
+}
+
+function applyPermissionPolicy(): void {
+  // Deny-by-default. Only the microphone is allowed, and only audio — the
+  // renderer has no legitimate use for camera, geolocation, notifications or
+  // anything else. macOS still shows its own TCC prompt on first use.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (permission === 'media') {
+      const wanted = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
+      const audioOnly = wanted.length === 0 || wanted.every((type) => type === 'audio');
+      if (!audioOnly) log.warn('permission.denied', { permission, wanted });
+      return callback(audioOnly);
+    }
+    log.warn('permission.denied', { permission });
+    callback(false);
+  });
+
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
+}
+
+/* ------------------------------------------------------------------ status */
+
+function broadcast(channel: string, payload: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  }
+}
+
+function statusChanged(a: OllamaStatus | null, b: OllamaStatus): boolean {
+  if (!a) return true;
+  return (
+    a.connected !== b.connected ||
+    a.version !== b.version ||
+    a.activeModel !== b.activeModel ||
+    a.activeModelInstalled !== b.activeModelInstalled ||
+    a.thinkingMode !== b.thinkingMode ||
+    a.error?.code !== b.error?.code ||
+    a.models.join(',') !== b.models.join(',')
+  );
+}
+
+async function refreshStatus(): Promise<OllamaStatus> {
+  const settings = settingsStore.get();
+  const next = await fetchStatus(settings.ollamaUrl, settings.model, DEFAULT_MODEL, thinkingMode);
+
+  // Probe reasoning support once per model, only when it is actually installed.
+  if (next.connected && next.activeModelInstalled && probedModel !== next.activeModel) {
+    probedModel = next.activeModel;
+    thinkingMode = await probeThinkingMode(settings.ollamaUrl, next.activeModel);
+    next.thinkingMode = thinkingMode;
+    log.info('thinking.probed', { model: next.activeModel, mode: thinkingMode });
+  } else {
+    next.thinkingMode = thinkingMode;
+  }
+
+  if (!next.connected) {
+    // Force a re-probe once the server comes back.
+    probedModel = null;
+  }
+
+  if (statusChanged(status, next)) {
+    status = next;
+    broadcast('ollama:status-changed', next);
+    log.info('ollama.status', {
+      connected: next.connected,
+      model: next.activeModel,
+      installed: next.activeModelInstalled,
+    });
+  } else {
+    status = next;
+  }
+
+  return next;
+}
+
+/* --------------------------------------------------------------------- ipc */
+
+function registerIpc(): void {
+  ipcMain.handle('app:info', (): AppInfo => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    ipcVersion: IPC_VERSION,
+  }));
+
+  ipcMain.handle('ollama:status', async () => status ?? (await refreshStatus()));
+  ipcMain.handle('ollama:refresh', () => refreshStatus());
+
+  // PublicSettings, never Settings: the gateway token stays in main.
+  ipcMain.handle('settings:get', () => toPublicSettings(settingsStore.get()));
+  ipcMain.handle('settings:update', async (_e, patch: Partial<Settings>) => {
+    const before = settingsStore.get();
+    const next = settingsStore.update(patch ?? {});
+
+    if (next.ollamaUrl !== before.ollamaUrl || next.model !== before.model) {
+      probedModel = null;
+      thinkingMode = 'none';
+      void refreshStatus();
+    }
+    if (next.theme !== before.theme) {
+      nativeTheme.themeSource = next.theme === 'system' ? 'system' : next.theme;
+    }
+    return toPublicSettings(next);
+  });
+
+  ipcMain.handle('conv:list', () => store.list());
+  ipcMain.handle('conv:get', (_e, id: string) =>
+    typeof id === 'string' ? store.get(id) : null,
+  );
+  ipcMain.handle('conv:create', () => store.create(settingsStore.get().model));
+  ipcMain.handle('conv:rename', (_e, req: { id: string; title: string }) => {
+    if (typeof req?.id === 'string' && typeof req?.title === 'string') {
+      store.rename(req.id, req.title);
+    }
+  });
+  ipcMain.handle(
+    'conv:confirm-delete',
+    async (_e, req: { title: string; messageCount: number }): Promise<boolean> => {
+      // An empty chat has nothing to lose, so don't nag about it.
+      if (!req || typeof req.messageCount !== 'number' || req.messageCount === 0) return true;
+
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      if (!win) return false;
+
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Cancel', 'Delete'],
+        defaultId: 0,
+        cancelId: 0,
+        message: `Delete “${req.title}”?`,
+        detail: 'This conversation and all of its messages will be permanently removed.',
+      });
+      return response === 1;
+    },
+  );
+
+  ipcMain.handle('conv:delete', (_e, id: string) => {
+    if (typeof id === 'string') store.remove(id);
+  });
+  ipcMain.handle('conv:clear', (_e, id: string) => {
+    if (typeof id === 'string') store.clear(id);
+  });
+
+  ipcMain.handle('clipboard:write', (_e, text: string) => {
+    if (typeof text === 'string') clipboard.writeText(text);
+  });
+
+  /* ---- voice layer ---------------------------------------------------- */
+
+  ipcMain.handle('voice:capabilities', async (): Promise<VoiceCapabilities> => {
+    const tts = ttsEngine.availability();
+    return {
+      stt: sttEngine.availability(),
+      tts: { ...tts, voices: tts.available ? await ttsEngine.listVoices() : [] },
+    };
+  });
+
+  ipcMain.handle(
+    'voice:transcribe',
+    async (_e, req: TranscriptionRequest): Promise<TranscriptionResult> => {
+      if (!req || !(req.wav instanceof Uint8Array) || req.wav.byteLength === 0) {
+        return { text: '', error: 'No audio was captured.' };
+      }
+      const locale = typeof req.locale === 'string' ? req.locale : settingsStore.get().sttLocale;
+      return sttEngine.transcribe({ wav: req.wav, locale });
+    },
+  );
+
+  ipcMain.handle('tts:speak', (_e, req: SpeakRequest) => {
+    if (!req || typeof req.text !== 'string' || typeof req.requestId !== 'string') return;
+
+    const settings = settingsStore.get();
+    broadcast('tts:state', { speaking: true, requestId: req.requestId });
+
+    ttsEngine.speak(
+      {
+        requestId: req.requestId,
+        text: req.text,
+        voice: typeof req.voice === 'string' ? req.voice : settings.voiceName,
+        rate: Number.isFinite(req.rate) ? req.rate : settings.speechRate,
+      },
+      (finishedId) => broadcast('tts:state', { speaking: false, requestId: finishedId }),
+    );
+  });
+
+  ipcMain.handle('tts:stop', () => {
+    const id = ttsEngine.speakingRequestId;
+    ttsEngine.stop();
+    broadcast('tts:state', { speaking: false, requestId: id });
+  });
+
+  ipcMain.on('chat:start', (event, req: { conversationId: string; requestId: string; userText: string }) => {
+    // The renderer is treated as untrusted: validate before acting.
+    if (
+      typeof req?.conversationId !== 'string' ||
+      typeof req?.requestId !== 'string' ||
+      typeof req?.userText !== 'string' ||
+      !req.userText.trim()
+    ) {
+      log.warn('ipc.invalid', { channel: 'chat:start' });
+      return;
+    }
+    orchestrator.start(req, event.sender);
+  });
+
+  ipcMain.on('chat:abort', (_event, req: { requestId: string }) => {
+    if (typeof req?.requestId === 'string') orchestrator.abort(req.requestId);
+  });
+}
+
+/**
+ * Picks the backend for the next turn. Online falls back to local when the
+ * gateway has not been configured, so selecting Online without a token can
+ * never strand the user with a non-working app.
+ */
+function resolveBackend(): ChatBackend {
+  const settings = settingsStore.get();
+
+  if (settings.mode === 'online' && settings.gatewayUrl && settings.gatewayToken) {
+    return createGatewayBackend({
+      url: settings.gatewayUrl,
+      token: settings.gatewayToken,
+    });
+  }
+
+  if (settings.mode === 'online') {
+    log.warn('backend.online_unconfigured', { hasUrl: Boolean(settings.gatewayUrl) });
+  }
+
+  return createOllamaBackend(settings.ollamaUrl);
+}
+
+/* ---------------------------------------------------------------- lifecycle */
+
+function bootstrap(): void {
+  // Test hook: lets E2E point at a scratch profile without touching real data.
+  const overrideUserData = process.env.ORNITH_USER_DATA;
+  if (overrideUserData) app.setPath('userData', overrideUserData);
+
+  const userData = app.getPath('userData');
+  initLogger(path.join(userData, 'logs'));
+
+  try {
+    db = openDatabase(path.join(userData, 'ornith.db'));
+    store = createConversationStore(db);
+  } catch (err) {
+    log.error('db.open.failed', { detail: String(err) });
+    dialog.showErrorBox(
+      'Ornith Desktop',
+      `Conversation history couldn't be opened.\n\n${String(err)}\n\nLogs: ${path.join(userData, 'logs')}`,
+    );
+    app.exit(1);
+    return;
+  }
+
+  const repaired = store.recoverInterrupted();
+  if (repaired > 0) log.warn('startup.recovered', { messages: repaired });
+
+  settingsStore = createSettingsStore(path.join(userData, 'settings.json'), (next) =>
+    broadcast('settings:changed', toPublicSettings(next)),
+  );
+
+  // Test hook: point the app at a stub Ollama server.
+  if (process.env.ORNITH_OLLAMA_URL) {
+    settingsStore.update({ ollamaUrl: process.env.ORNITH_OLLAMA_URL });
+  }
+
+  const initial = settingsStore.get();
+  nativeTheme.themeSource = initial.theme === 'system' ? 'system' : initial.theme;
+
+  orchestrator = createOrchestrator({
+    store,
+    getSettings: () => settingsStore.get(),
+    getThinkingMode: () => thinkingMode,
+    getBackend: resolveBackend,
+  });
+
+  ttsEngine = createTtsEngine();
+  sttEngine = createSttEngine({
+    appRoot: path.join(__dirname, '..'),
+    resourcesPath: process.resourcesPath ?? path.join(__dirname, '..'),
+  });
+
+  log.info('startup', {
+    version: app.getVersion(),
+    tools: toolRegistry.list().length,
+    stt: sttEngine.availability().engine,
+    sttAvailable: sttEngine.availability().available,
+    ttsAvailable: ttsEngine.availability().available,
+    broker: permissionBroker ? 'deny-all' : 'none',
+  });
+}
+
+void app.whenReady().then(async () => {
+  bootstrap();
+  applyContentSecurityPolicy();
+  applyPermissionPolicy();
+  registerIpc();
+  buildAppMenu(() => mainWindow);
+  createWindow();
+
+  await refreshStatus();
+  pollTimer = setInterval(() => void refreshStatus(), STATUS_POLL_INTERVAL_MS);
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  if (pollTimer) clearInterval(pollTimer);
+  orchestrator?.abortAll();
+  ttsEngine?.stop();
+  try {
+    db?.close();
+  } catch {
+    /* already closed */
+  }
+});
