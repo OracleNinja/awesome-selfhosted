@@ -1,60 +1,36 @@
-# Ornith Cloud Gateway — Fly Machines configuration.
-#
-# This app IS public: the desktop reaches it over HTTPS from wherever the user
-# is. Its own credentials (Anthropic, search) never leave the server, and the
-# desktop authenticates with the separate ORNITH_GATEWAY_TOKEN.
-#
-# No secret belongs in this file. Set them with `fly secrets set` — see README.
-
-# CHANGE ME: must be globally unique across Fly.
-app = "ornith-gateway"
-
-# CHANGE ME: pick the region closest to you. Latency to the desktop is the
-# whole point of this phase, so this is not a throwaway choice.
-primary_region = "lhr"
+# Ornith Cloud Gateway — public edge. Reached through Fly Proxy, so it can
+# autostop and still wake on request. The gateway itself reaches SearXNG over
+# the private network (6PN), never through a public URL.
+app = "ornith-cloud"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
 
+# Non-secret environment. Secrets (ORNITH_GATEWAY_TOKEN, ANTHROPIC_API_KEY,
+# SEARCH_API_KEY) are set separately with `fly secrets set` and never live in
+# this file or in git.
 [env]
-  # Must match http_service.internal_port below and the app's own default.
+  AI_PROVIDER = "anthropic"
   PORT = "8787"
-  NODE_ENV = "production"
-  LOG_LEVEL = "info"
-
-  # Retrieval bounds. Safe to tune here; none of these are secret.
-  ORNITH_SEARCH_RESULTS = "5"
-  ORNITH_DOCUMENTS_FETCHED = "3"
-  ORNITH_MAX_DOCUMENT_CHARS = "20000"
-  ORNITH_MAX_CONTEXT_CHARS = "50000"
-  ORNITH_SEARCH_TIMEOUT_MS = "8000"
-  ORNITH_FETCH_TIMEOUT_MS = "8000"
 
 [http_service]
   internal_port = 8787
   force_https = true
-  auto_start_machines = true
-
-  # The app binds 0.0.0.0 (verified: it answers on 127.0.0.1 but not on ::1).
-  # That is fine here because fly-proxy terminates the public connection and
-  # dials the machine — but it is why this app cannot be reached over
-  # .internal, and why the SearXNG side is configured differently.
-
-  # A stopped machine costs nothing but adds a cold start to the first token,
-  # which is the metric this whole phase exists to improve. Keeping one warm is
-  # a deliberate cost/latency trade — see the report.
   auto_stop_machines = "stop"
-  min_machines_running = 1
+  auto_start_machines = true
+  min_machines_running = 0
 
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 30
+
+  # Liveness is deliberately unauthenticated and reveals nothing about config.
   [[http_service.checks]]
+    interval = "10s"
+    timeout = "5s"
     grace_period = "10s"
-    interval = "15s"
-    method = "GET"
+    method = "get"
     path = "/health"
     protocol = "http"
-    timeout = "3s"
-
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
-  cpus = 1

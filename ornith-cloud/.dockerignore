@@ -1,25 +1,16 @@
-# Secrets must never enter the build context. Even with multi-stage builds, a
-# file copied into any layer is recoverable from the image.
+# Never copy secrets or local-only state into the build context.
 .env
 .env.*
 !.env.example
 
-# Rebuilt inside the image; copying host artifacts risks a stale or
-# wrong-architecture binary.
-node_modules
-dist
-coverage
+node_modules/
+dist/
+coverage/
 
-# Tests are compiled by tsconfig's include list, so excluding them here keeps
-# test code out of the production image entirely.
-tests
-
-.git
-.gitignore
-.github
-
-Dockerfile
-.dockerignore
-README.md
+tests/
 *.log
+
+.git/
 .DS_Store
+searxng/
+scripts/

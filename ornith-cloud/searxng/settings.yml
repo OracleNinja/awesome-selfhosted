@@ -1,0 +1,47 @@
+# SearXNG configuration for the private Ornith gateway backend.
+#
+# This file is copied into the image at /etc/searxng/settings.yml, which is
+# the path the current searxng/searxng image reads at startup
+# (SEARXNG_SETTINGS_PATH -> get_user_cfg_folder -> /etc/searxng/settings.yml).
+#
+# It is a private/internal instance: it is only reachable over Fly's private
+# network (6PN) from the gateway. There is deliberately no public exposure.
+#
+# The gateway adapter (ornith-cloud/src/retrieval/search.ts) issues:
+#   GET /search?q=<query>&format=json&safesearch=1
+# so BOTH 'html' and 'json' must be enabled, and safesearch must be usable.
+#
+# No credentials or secrets live here. The session signing key is injected at
+# deploy time through the SEARXNG_SECRET environment variable, which the
+# settings schema maps onto server.secret_key (see
+# searx/settings_defaults.py -> SettingsValue(..., environ_name='SEARXNG_SECRET')).
+
+use_default_settings: true
+
+general:
+  instance_name: "Ornith SearXNG (private)"
+  debug: false
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  # The gateway depends on both of these formats. 'json' is NOT enabled by
+  # default in the current image (formats: [html]), and without it SearXNG
+  # aborts every format=json request with HTTP 403.
+  formats:
+    - html
+    - json
+  # The gateway always sends safesearch=1, so a conservative default matches.
+  safe_search: 1
+
+server:
+  # The image's entrypoint only substitutes a random value for the
+  # "ultrasecretkey" placeholder when it creates settings.yml itself. Because
+  # this file is baked into the image at that path, the entrypoint will NOT
+  # touch it, so a random secret is injected at runtime instead:
+  #   fly secrets set SEARXNG_SECRET="$(openssl rand -hex 32)"
+  # If SEARXNG_SECRET is absent the schema falls back to this placeholder —
+  # acceptable for a private instance, but the deploy must set it anyway.
+  secret_key: "ultrasecretkey"

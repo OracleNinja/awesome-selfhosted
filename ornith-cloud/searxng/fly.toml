@@ -1,0 +1,30 @@
+# Ornith SearXNG — private search backend. Reachable ONLY over the private
+# network (6PN) from the gateway. There is deliberately no [http_service] and
+# no [[services]] block here, so Fly never allocates a public IP or routes
+# traffic to it. Never add one, and never run `fly ips allocate` on this app.
+#
+# The gateway resolves it as `ornith-searxng.internal` (`.internal` DNS) and
+# calls `GET /search?q=...&format=json&safesearch=1`.
+app = "ornith-searxng"
+primary_region = "iad"
+
+# Builds a private SearXNG from the upstream image, overlaying a settings.yml
+# that enables the JSON output format the gateway requires (see ./settings.yml).
+[build]
+  dockerfile = "Dockerfile"
+
+# The upstream image listens on [::]:8080 by default (granian GRANIAN_HOST="::",
+# GRANIAN_PORT="8080"). Binding to IPv6 matters: Fly's private network is
+# IPv6-only, so a 0.0.0.0 bind would be unreachable. The image maps SEARXNG_PORT
+# to GRANIAN_PORT; no port override is needed here.
+# SEARXNG_SECRET must be set via `fly secrets set` — never commit it.
+
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
+
+# No autostop: `.internal` DNS only resolves machines that are currently
+# running (there is no Fly Proxy on the private path to autostart one), so
+# the gateway would 504 until this machine was manually started. This app
+# must never be scaled to zero or reconfigured with auto_stop_machines.
