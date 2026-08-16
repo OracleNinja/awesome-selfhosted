@@ -144,11 +144,30 @@ export interface JsonSchema {
   additionalProperties?: boolean;
 }
 
+/**
+ * Default tool timeout.
+ *
+ * Chosen against the timeouts already in this codebase: search allows 20s,
+ * `fetchWithTimeout` defaults to 60s, provider chat allows 120s. Local tools
+ * (time, memory, files) finish in well under a millisecond, so this only binds
+ * tools that reach the network — and 30s clears the 20s search budget while
+ * staying under the 60s transport default, so a hung tool is caught by its own
+ * boundary rather than by the transport's.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
+
 export interface ToolContext {
   userId: string;
   conversationId: string | null;
   /** Which agent (or "jarvis") is invoking the tool. */
   agent: string;
+  /** The user turn this call belongs to. Correlation metadata, never permission. */
+  turnId: string;
+  /**
+   * Aborts when the turn is cancelled or this tool exceeds its timeout.
+   * Tools that reach the network should pass it on; tools that cannot be
+   * interrupted may ignore it, and the executor still stops waiting.
+   */
   signal?: AbortSignal;
 }
 
@@ -172,6 +191,14 @@ export interface ToolDefinition {
    * to approval but can never opt out of the policy.
    */
   requiresApproval: boolean;
+  /**
+   * How long this tool may run before the executor aborts it.
+   *
+   * Omitted means DEFAULT_TOOL_TIMEOUT_MS. Override only where a tool has
+   * genuinely different operational characteristics — delegation runs a whole
+   * sub-agent, a local file read does not.
+   */
+  timeoutMs?: number;
   /** Tools an agent may not use are filtered out before the model ever sees them. */
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }
@@ -183,6 +210,8 @@ export interface ToolInfo {
   inputSchema: JsonSchema;
   risk: RiskLevel;
   requiresApproval: boolean;
+  /** Effective timeout in milliseconds, after the default is applied. */
+  timeoutMs: number;
   available: boolean;
   unavailableReason?: string;
 }
@@ -212,7 +241,7 @@ export interface AgentRunResult {
   output: string;
   iterations: number;
   toolCalls: { name: string; ok: boolean }[];
-  stoppedBecause: 'complete' | 'max_iterations' | 'awaiting_approval' | 'error';
+  stoppedBecause: 'complete' | 'max_iterations' | 'awaiting_approval' | 'error' | 'cancelled';
   error?: string;
 }
 
@@ -247,6 +276,7 @@ export const EVENT_TYPES = [
   'APPROVAL_REQUEST',
   'APPROVAL_RESOLVED',
   'ACTION_EXECUTED',
+  'TURN_CANCELLED',
   'ERROR',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -254,6 +284,8 @@ export type EventType = (typeof EVENT_TYPES)[number];
 export interface JarvisEvent {
   id: string;
   type: EventType;
+  /** The turn this event belongs to. Null for records written before v0.2. */
+  turnId: string | null;
   conversationId: string | null;
   userId: string;
   agent: string;
@@ -287,6 +319,8 @@ export interface ApprovalRequest {
 export interface AuditEvent {
   id: string;
   timestamp: ISODate;
+  /** The turn this invocation belongs to. Null for pre-v0.2 records. */
+  turnId: string | null;
   userId: string;
   agent: string;
   tool: string;

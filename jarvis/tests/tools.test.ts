@@ -17,6 +17,7 @@ const ctx = (overrides: Partial<ToolContext> = {}): ToolContext => ({
   userId: 'user_test',
   conversationId: null,
   agent: 'jarvis',
+  turnId: 'turn_test',
   ...overrides,
 });
 

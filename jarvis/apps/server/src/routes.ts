@@ -124,13 +124,14 @@ export function createRouter(jarvis: Jarvis): Router {
 
   // ------------------------------------------------------------------ chat
   router.post('/api/chat', async (ctx) => {
-    const body = await ctx.body<{ message?: string; conversationId?: string }>();
+    const body = await ctx.body<{ message?: string; conversationId?: string; turnId?: string }>();
     const message = requiredString(body.message, 'message', 32_000);
 
     const turn = await jarvis.orchestrator.handleMessage({
       userId: ctx.userId,
       conversationId: body.conversationId ?? null,
       text: message,
+      ...(body.turnId ? { turnId: body.turnId } : {}),
     });
 
     ctx.json(200, turn);
@@ -263,13 +264,50 @@ export function createRouter(jarvis: Jarvis): Router {
     const task = requiredString(body.task, 'task', 8000);
     jarvis.store.users.ensure(ctx.userId);
 
-    const result = await jarvis.runner.run(definition, task, {
-      userId: ctx.userId,
-      conversationId: body.conversationId ?? null,
-      memories: jarvis.orchestrator.retrieveContext(ctx.userId, task, 4),
-      ...(body.briefing ? { briefing: body.briefing } : {}),
-    });
-    ctx.json(200, { result });
+    // A direct agent run is its own turn: cancellable, and correlated.
+    const turn = jarvis.turns.begin({ userId: ctx.userId, conversationId: body.conversationId ?? null });
+    try {
+      const result = await jarvis.runner.run(definition, task, {
+        userId: ctx.userId,
+        conversationId: body.conversationId ?? null,
+        memories: jarvis.orchestrator.retrieveContext(ctx.userId, task, 4),
+        turn: turn.context,
+        ...(body.briefing ? { briefing: body.briefing } : {}),
+      });
+      ctx.json(200, { turnId: turn.turnId, result });
+    } finally {
+      turn.end();
+    }
+  });
+
+  // ----------------------------------------------------------------- turns
+
+  /** Turns currently running. */
+  router.get('/api/turns', (ctx) => {
+    ctx.json(200, { turns: jarvis.activeTurns(ctx.userId) });
+  });
+
+  /**
+   * Everything recorded during one turn.
+   *
+   * The operational payoff of turn correlation: one request, one story, joined
+   * across events, audit and tool calls.
+   */
+  router.get('/api/turns/:id', (ctx) => {
+    ctx.json(200, jarvis.turnTrace(ctx.params.id!));
+  });
+
+  /**
+   * Cancel an in-flight turn.
+   *
+   * Returns a status rather than throwing: cancelling a turn that already
+   * finished is normal (it may have completed between render and click) and is
+   * reported as `already_finished`, not as an error.
+   */
+  router.post('/api/turns/:id/cancel', async (ctx) => {
+    const body = await ctx.body<{ reason?: string }>();
+    const outcome = jarvis.cancelTurn(ctx.params.id!, body.reason);
+    ctx.json(outcome.status === 'not_found' ? 404 : 200, outcome);
   });
 
   // ------------------------------------------------------------- approvals

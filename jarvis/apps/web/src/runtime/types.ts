@@ -81,7 +81,7 @@ export interface RuntimeCounters {
 export interface RuntimeErrorInfo {
   summary: string;
   agent: string;
-  kind: 'provider' | 'tool' | 'agent' | 'permission' | 'unknown';
+  kind: 'provider' | 'tool' | 'agent' | 'permission' | 'timeout' | 'unknown';
   at: string;
 }
 
@@ -198,6 +198,8 @@ export interface VoiceState {
 export interface RuntimeEvent {
   id: string;
   type: EventType;
+  /** The turn this event belongs to. Null for records written before v0.2. */
+  turnId: string | null;
   /** Semantic name from the integration brief, derived — never sent by the backend. */
   kind: RuntimeEventKind;
   agent: string;
@@ -222,6 +224,8 @@ export type RuntimeEventKind =
   | 'approval.denied'
   | 'approval.expired'
   | 'provider.error'
+  | 'turn.cancelled'
+  | 'tool.timeout'
   | 'memory.read'
   | 'memory.write'
   | 'memory.search'
@@ -250,6 +254,8 @@ export interface JarvisRuntimeState {
   lastCommandError: string | null;
   /** True while a command/brief is in flight. */
   commandInFlight: boolean;
+  /** The turn currently running from this client, if any. Enables cancel. */
+  activeTurnId: string | null;
   droppedEvents: number;
 }
 
@@ -258,7 +264,7 @@ export interface ToolActivityEntry {
   tool: string;
   agent: string;
   risk: RiskLevel | null;
-  status: 'running' | 'completed' | 'failed' | 'awaiting_approval';
+  status: 'running' | 'completed' | 'failed' | 'awaiting_approval' | 'timeout' | 'cancelled';
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;

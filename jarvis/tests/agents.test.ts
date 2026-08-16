@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AGENT_DEFINITIONS, loadAgentDefinitions } from '@jarvis/agents';
-import { createTestJarvis, type TestHarness } from './helpers.ts';
+import { createTestJarvis, testTurn, type TestHarness } from './helpers.ts';
 
 describe('agent roster', () => {
   it('defines scout, operator, advisor and developer', () => {
@@ -235,7 +235,7 @@ describe('delegation', () => {
     const result = await harness.jarvis.runner.run(
       harness.jarvis.agents.advisor!,
       'Assess the current situation.',
-      { userId: harness.userId, conversationId: null },
+      { userId: harness.userId, conversationId: null, turn: testTurn() },
     );
 
     expect(result.agent).toBe('advisor');
@@ -253,6 +253,7 @@ describe('delegation', () => {
     const result = await harness.jarvis.runner.run(harness.jarvis.agents.scout!, 'Loop forever.', {
       userId: harness.userId,
       conversationId: null,
+      turn: testTurn(),
     });
 
     expect(result.stoppedBecause).toBe('max_iterations');

@@ -81,6 +81,38 @@ through `resolveWorkspacePath()`, which rejects:
 Everything is confined to `JARVIS_WORKSPACE_DIR`. Writes are capped at 1 MB,
 reads at 256 KB. `file_delete` refuses directories.
 
+## Cancellation and timeouts
+
+Both are control boundaries, not conveniences.
+
+**Cancellation.** A turn owns exactly one `AbortController`, created by the
+runtime and never handed out — callers hold a `TurnHandle` that exposes a
+read-only signal and an idempotent `end()`. The controller is a genuine private
+field, so no caller can reach in and abort another turn's work. Cancelling
+propagates to the in-flight model call, every running tool call, and any
+delegated sub-agent, which shares its caller's turn.
+
+Cancellation cannot bypass authorization. A cancelled turn refuses to *start* a
+tool, so it can never turn a refusal into an execution, and it creates no
+approval on the way out.
+
+**Tool timeouts.** Every tool runs inside a boundary that aborts on whichever
+comes first: the turn being cancelled, or the tool exceeding its timeout
+(`DEFAULT_TOOL_TIMEOUT_MS`, 30s, overridable per tool). The cause is recorded at
+the moment it fires, first writer wins, so a user cancellation is never
+reclassified as a timeout by a timer that fires afterwards — or the reverse.
+
+A tool is *asked* to stop through its signal, and the executor stops waiting
+either way. The honest limit: JavaScript cannot kill a running promise, so a
+tool that ignores its signal may still complete its work in the background. Its
+result is discarded and the turn is not held open, but the side effect it was
+performing is not undone. Tools that touch anything consequential must honour
+their signal.
+
+**Timeout never becomes an authorized retry.** A timed-out call produces a
+`timeout` outcome and an audit row. It is not retried automatically, and the
+model is told the action did not complete.
+
 ## No shell
 
 There is no shell tool in v0.1, and Developer's prompt states plainly that it

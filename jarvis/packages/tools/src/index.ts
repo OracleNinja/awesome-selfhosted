@@ -8,6 +8,7 @@ import { fileDeleteTool, fileListTool, fileReadTool, fileWriteTool } from './bui
 import { webSearchTool } from './builtin/search.ts';
 
 export * from './registry.ts';
+export * from './timeouts.ts';
 export { currentTimeTool } from './builtin/time.ts';
 export { memorySearchTool, memoryWriteTool, memoryForgetTool } from './builtin/memory.ts';
 export { taskCreateTool, taskListTool, taskUpdateTool } from './builtin/tasks.ts';

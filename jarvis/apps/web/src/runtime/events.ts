@@ -25,6 +25,7 @@ const KNOWN_TYPES = new Set([
   'APPROVAL_REQUEST',
   'APPROVAL_RESOLVED',
   'ACTION_EXECUTED',
+  'TURN_CANCELLED',
   'ERROR',
 ]);
 
@@ -65,9 +66,13 @@ export function classify(event: JarvisEvent): RuntimeEventKind {
     case 'MEMORY_READ':
       return event.data.via === 'memory_search' ? 'memory.search' : 'memory.read';
 
+    case 'TURN_CANCELLED':
+      return 'turn.cancelled';
+
     case 'ERROR':
       // The executor tags provider failures; an agent-scoped error is an agent
       // failure. Anything else stays a generic error rather than being guessed at.
+      if (event.data.kind === 'timeout') return 'tool.timeout';
       if (event.data.kind === 'provider') return 'provider.error';
       if (event.agent && event.agent !== 'jarvis' && event.agent !== 'user') return 'agent.failed';
       return 'error';
@@ -111,6 +116,7 @@ export function normalizeEvent(raw: unknown, receivedAt = Date.now()): RuntimeEv
     // An unknown type is kept verbatim rather than dropped: a newer runtime
     // must not make an older client blind, it should just show it plainly.
     type: candidate.type as JarvisEvent['type'],
+    turnId: typeof candidate.turnId === 'string' ? candidate.turnId : null,
     conversationId: typeof candidate.conversationId === 'string' ? candidate.conversationId : null,
     userId: typeof candidate.userId === 'string' ? candidate.userId : '',
     agent: typeof candidate.agent === 'string' ? candidate.agent : 'unknown',
@@ -122,6 +128,7 @@ export function normalizeEvent(raw: unknown, receivedAt = Date.now()): RuntimeEv
   return {
     id: event.id,
     type: event.type,
+    turnId: event.turnId,
     kind: isKnownEventType(event.type) ? classify(event) : 'unknown',
     agent: event.agent,
     summary: event.summary,

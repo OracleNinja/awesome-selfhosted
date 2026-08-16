@@ -23,9 +23,12 @@ import type { Store } from '@jarvis/memory';
 import type { ModelProvider } from '@jarvis/providers';
 import type { ToolRegistry } from '@jarvis/tools';
 import type { ToolExecutor } from './executor.ts';
+import { TurnRegistry, type TurnHandle, type TurnOutcome } from './turns.ts';
 
 export interface OrchestratorDeps {
   provider: ModelProvider;
+  /** Owns the cancellation boundary for every turn this orchestrator runs. */
+  turns: TurnRegistry;
   registry: ToolRegistry;
   executor: ToolExecutor;
   store: Store;
@@ -36,6 +39,10 @@ export interface OrchestratorDeps {
 }
 
 export interface TurnResult {
+  /** Correlates every event, audit row and tool call produced by this turn. */
+  turnId: string;
+  /** How the turn ended. Cancellation is never reported as a failure. */
+  outcome: TurnOutcome;
   conversationId: string;
   reply: string;
   messages: StoredMessage[];
@@ -75,7 +82,8 @@ export class Orchestrator {
     userId: string;
     conversationId?: string | null;
     text: string;
-    signal?: AbortSignal;
+    /** Supply to reuse a turn id (the API allocates one so it can be cancelled). */
+    turnId?: string;
   }): Promise<TurnResult> {
     const { store, events, provider, registry, executor, jarvisAgent } = this.deps;
     const { userId, text } = input;
@@ -85,6 +93,14 @@ export class Orchestrator {
       ? (store.conversations.get(input.conversationId) ?? store.conversations.create(userId))
       : store.conversations.create(userId);
     const conversationId = conversation.id;
+
+    // One controller for the whole turn. Every model call and tool call below
+    // receives its signal, and `finally` releases it on every exit path.
+    const turn = this.deps.turns.begin({
+      userId,
+      conversationId,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+    });
 
     const collected: JarvisEvent[] = [];
     const unsubscribe = events.subscribe((event) => {
@@ -98,6 +114,7 @@ export class Orchestrator {
       events.emit({
         type: 'USER_MESSAGE',
         userId,
+        turnId: turn.turnId,
         conversationId,
         agent: 'user',
         summary: truncate(text, 140),
@@ -113,12 +130,13 @@ export class Orchestrator {
         events.emit({
           type: 'ERROR',
           userId,
+          turnId: turn.turnId,
           conversationId,
           agent: 'jarvis',
           summary: `Model provider unavailable: ${provider.id}`,
           data: { reason },
         });
-        return this.result(conversationId, reply, collected, [], 0, reason);
+        return this.result(turn, 'failed', conversationId, reply, collected, [], 0, reason);
       }
 
       const memories = this.retrieveContext(userId, text);
@@ -126,6 +144,7 @@ export class Orchestrator {
         events.emit({
           type: 'MEMORY_READ',
           userId,
+          turnId: turn.turnId,
           conversationId,
           agent: 'jarvis',
           summary: `Recalled ${memories.length} relevant memor${memories.length === 1 ? 'y' : 'ies'}.`,
@@ -144,6 +163,10 @@ export class Orchestrator {
       let reply = '';
 
       while (iterations < jarvisAgent.maxIterations) {
+        // Cancelled between steps: the next model call never starts.
+        if (turn.signal.aborted) {
+          return this.cancelled(turn, conversationId, collected, toolCalls, iterations);
+        }
         iterations += 1;
 
         let response;
@@ -152,13 +175,19 @@ export class Orchestrator {
             messages,
             tools: specs,
             temperature: 0.4,
-            ...(input.signal ? { signal: input.signal } : {}),
+            signal: turn.signal,
           });
         } catch (error) {
+          // A model call that failed because the turn was cancelled is a
+          // cancellation, not a provider failure.
+          if (turn.signal.aborted) {
+            return this.cancelled(turn, conversationId, collected, toolCalls, iterations);
+          }
           const message = (error as Error).message;
           events.emit({
             type: 'ERROR',
             userId,
+            turnId: turn.turnId,
             conversationId,
             agent: 'jarvis',
             summary: `Model call failed: ${truncate(message, 140)}`,
@@ -166,7 +195,7 @@ export class Orchestrator {
           });
           reply = `The model call failed: ${message}\n\nNothing was executed. Check the provider configuration in Settings and try again.`;
           store.messages.append(conversationId, { role: 'assistant', content: reply, agent: 'jarvis' });
-          return this.result(conversationId, reply, collected, toolCalls, iterations, message);
+          return this.result(turn, 'failed', conversationId, reply, collected, toolCalls, iterations, message);
         }
 
         if (response.toolCalls.length === 0) {
@@ -175,6 +204,7 @@ export class Orchestrator {
           events.emit({
             type: 'MODEL_RESPONSE',
             userId,
+            turnId: turn.turnId,
             conversationId,
             agent: 'jarvis',
             summary: truncate(reply, 140),
@@ -201,13 +231,18 @@ export class Orchestrator {
         });
 
         for (const call of response.toolCalls) {
+          // Cancelled between tool calls: the remaining calls never start.
+          if (turn.signal.aborted) {
+            return this.cancelled(turn, conversationId, collected, toolCalls, iterations);
+          }
+
           const outcome = await executor.execute({
             tool: call.name,
             args: call.arguments,
             agent: jarvisAgent,
             userId,
             conversationId,
-            ...(input.signal ? { signal: input.signal } : {}),
+            turn: turn.context,
           });
           toolCalls.push({ name: call.name, status: outcome.status });
 
@@ -235,9 +270,11 @@ export class Orchestrator {
       }
 
       store.conversations.touch(conversationId);
-      return this.result(conversationId, reply, collected, toolCalls, iterations);
+      return this.result(turn, 'completed', conversationId, reply, collected, toolCalls, iterations);
     } finally {
       unsubscribe();
+      // Releases the controller on completion, error and cancellation alike.
+      turn.end();
     }
   }
 
@@ -256,10 +293,17 @@ export class Orchestrator {
     note: string;
     /** User-facing sentence used if the model produces nothing usable. */
     fallback: string;
-    signal?: AbortSignal;
+    /** The turn the approval decision belongs to, so the follow-up correlates to it. */
+    turnId?: string;
   }): Promise<TurnResult> {
     const { store, events, provider } = this.deps;
     const { userId, conversationId, note, fallback } = input;
+
+    const turn = this.deps.turns.begin({
+      userId,
+      conversationId,
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+    });
 
     const collected: JarvisEvent[] = [];
     const unsubscribe = events.subscribe((event) => {
@@ -273,7 +317,16 @@ export class Orchestrator {
       store.messages.append(conversationId, { role: 'system', content: note, agent: 'system' });
 
       if (!provider.isAvailable()) {
-        return this.result(conversationId, fallback, collected, [], 0, 'model provider unavailable');
+        return this.result(
+          turn,
+          'failed',
+          conversationId,
+          fallback,
+          collected,
+          [],
+          0,
+          'model provider unavailable',
+        );
       }
 
       const memories = this.retrieveContext(userId, note);
@@ -290,7 +343,7 @@ export class Orchestrator {
         const response = await provider.chat({
           messages,
           temperature: 0.3,
-          ...(input.signal ? { signal: input.signal } : {}),
+          signal: turn.signal,
         });
         reply = response.content.trim() || fallback;
       } catch (error) {
@@ -301,6 +354,7 @@ export class Orchestrator {
       events.emit({
         type: 'MODEL_RESPONSE',
         userId,
+        turnId: turn.turnId,
         conversationId,
         agent: 'jarvis',
         summary: truncate(reply, 140),
@@ -308,13 +362,16 @@ export class Orchestrator {
       });
       store.conversations.touch(conversationId);
 
-      return this.result(conversationId, reply, collected, [], 1);
+      return this.result(turn, 'completed', conversationId, reply, collected, [], 1);
     } finally {
       unsubscribe();
+      turn.end();
     }
   }
 
   private result(
+    turn: TurnHandle,
+    outcome: TurnOutcome,
     conversationId: string,
     reply: string,
     events: JarvisEvent[],
@@ -323,6 +380,8 @@ export class Orchestrator {
     error?: string,
   ): TurnResult {
     const result: TurnResult = {
+      turnId: turn.turnId,
+      outcome,
       conversationId,
       reply,
       messages: this.deps.store.messages.list(conversationId),
@@ -337,6 +396,43 @@ export class Orchestrator {
     };
     if (error) result.error = error;
     return result;
+  }
+
+  /**
+   * Stop a cancelled turn.
+   *
+   * Reported as `cancelled`, never as an error: the user asked for this, and a
+   * UI that shows "something failed" after a deliberate cancel is lying about
+   * what happened. The partial reply is recorded so the transcript reflects
+   * where the turn actually stopped.
+   */
+  private cancelled(
+    turn: TurnHandle,
+    conversationId: string,
+    events: JarvisEvent[],
+    toolCalls: { name: string; status: string }[],
+    iterations: number,
+  ): TurnResult {
+    const reply = `Cancelled. I stopped this turn after ${iterations} step${
+      iterations === 1 ? '' : 's'
+    }${toolCalls.length > 0 ? ` and ${toolCalls.length} tool call${toolCalls.length === 1 ? '' : 's'}` : ''}. Nothing further was executed.`;
+
+    this.deps.store.messages.append(conversationId, {
+      role: 'assistant',
+      content: reply,
+      agent: 'jarvis',
+    });
+    this.deps.events.emit({
+      type: 'TURN_CANCELLED',
+      userId: turn.userId,
+      turnId: turn.turnId,
+      conversationId,
+      agent: 'jarvis',
+      summary: turn.reason ?? 'Turn cancelled.',
+      data: { iterations, toolCalls: toolCalls.length, reason: turn.reason },
+    });
+
+    return this.result(turn, 'cancelled', conversationId, reply, events, toolCalls, iterations);
   }
 
   /** Conversation history, trimmed and converted to provider-neutral messages. */

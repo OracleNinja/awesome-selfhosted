@@ -30,6 +30,10 @@ export function delegateAgentTool(deps: DelegationDeps): ToolDefinition {
       'Give the agent everything it needs in the task text — it cannot see this conversation.',
     risk: 'WRITE',
     requiresApproval: false,
+    // Delegation runs a whole sub-agent: up to maxIterations model calls, each
+    // with its own provider timeout. The default tool budget would abort a
+    // legitimate run, so this is the one justified override.
+    timeoutMs: 300_000,
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,14 +65,16 @@ export function delegateAgentTool(deps: DelegationDeps): ToolDefinition {
       }
 
       const task = String(args.task ?? '');
+      // The sub-agent runs inside the caller's turn: same unit of user work,
+      // so cancelling the turn stops it and its tool calls share the turnId.
       const runContext: AgentRunContext = {
         userId: ctx.userId,
         conversationId: ctx.conversationId,
+        turn: { turnId: ctx.turnId, signal: ctx.signal ?? new AbortController().signal },
       };
       const memories = deps.contextFor?.(ctx.userId, task);
       if (memories && memories.length > 0) runContext.memories = memories;
       if (typeof args.briefing === 'string' && args.briefing) runContext.briefing = args.briefing;
-      if (ctx.signal) runContext.signal = ctx.signal;
 
       const result = await deps.runner.run(definition, task, runContext);
 

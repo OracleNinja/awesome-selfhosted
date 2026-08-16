@@ -36,6 +36,7 @@ export function VoiceBar({ conversationId, onConversation }: {
     (a, b) => a.phase === b.phase && a.error === b.error && a.sttMode === b.sttMode,
   );
   const inFlight = useRuntime((state) => state.commandInFlight);
+  const activeTurnId = useRuntime((state) => state.activeTurnId);
   const commandError = useRuntime((state) => state.lastCommandError);
 
   const serverVoice = voice.sttMode === 'server';
@@ -144,14 +145,25 @@ export function VoiceBar({ conversationId, onConversation }: {
           <span className="mic-icon">{voice.phase === 'listening' ? '■' : '🎙'}</span>
         </button>
 
-        <button
-          className="btn btn-primary brief-btn"
-          onClick={() => void brief()}
-          disabled={inFlight}
-          data-testid="brief-me"
-        >
-          {inFlight ? 'WORKING…' : 'BRIEF ME'}
-        </button>
+        {inFlight && activeTurnId ? (
+          <button
+            className="btn btn-danger brief-btn"
+            onClick={() => void client.cancelTurn()}
+            data-testid="cancel-turn"
+            title={`Cancel turn ${activeTurnId}`}
+          >
+            CANCEL
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary brief-btn"
+            onClick={() => void brief()}
+            disabled={inFlight}
+            data-testid="brief-me"
+          >
+            BRIEF ME
+          </button>
+        )}
 
         <input
           className="input command-input"

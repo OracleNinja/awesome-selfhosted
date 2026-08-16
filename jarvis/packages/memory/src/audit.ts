@@ -5,6 +5,7 @@ import { parseJson, type Db } from './db.ts';
 interface AuditRow {
   id: string;
   timestamp: string;
+  turn_id: string | null;
   user_id: string;
   agent: string;
   tool: string;
@@ -20,6 +21,7 @@ interface AuditRow {
 interface EventRow {
   id: string;
   type: JarvisEvent['type'];
+  turn_id: string | null;
   conversation_id: string | null;
   user_id: string;
   agent: string;
@@ -30,6 +32,8 @@ interface EventRow {
 
 export interface AuditWriteInput {
   userId: string;
+  /** The turn this invocation belongs to. Null only for out-of-turn writes. */
+  turnId?: string | null;
   agent: string;
   tool: string;
   arguments: Record<string, unknown>;
@@ -46,6 +50,7 @@ function toAudit(row: AuditRow): AuditEvent {
   return {
     id: row.id,
     timestamp: row.timestamp,
+    turnId: row.turn_id ?? null,
     userId: row.user_id,
     agent: row.agent,
     tool: row.tool,
@@ -73,6 +78,7 @@ export class AuditRepo {
     const event: AuditEvent = {
       id: id('aud'),
       timestamp: now(),
+      turnId: input.turnId ?? null,
       userId: input.userId,
       agent: input.agent,
       tool: input.tool,
@@ -87,13 +93,14 @@ export class AuditRepo {
 
     this.db
       .prepare(
-        `INSERT INTO audit_events (id, timestamp, user_id, agent, tool, arguments, approval_state,
-           approval_id, result, error, duration_ms, risk)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit_events (id, timestamp, turn_id, user_id, agent, tool, arguments,
+           approval_state, approval_id, result, error, duration_ms, risk)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.id,
         event.timestamp,
+        event.turnId,
         event.userId,
         event.agent,
         event.tool,
@@ -110,12 +117,13 @@ export class AuditRepo {
     // UI can show "what happened in this conversation" without scanning audit.
     this.db
       .prepare(
-        `INSERT INTO tool_calls (id, conversation_id, user_id, agent, tool, arguments, risk,
-           approval_id, state, result, error, duration_ms, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tool_calls (id, turn_id, conversation_id, user_id, agent, tool, arguments,
+           risk, approval_id, state, result, error, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id('tc'),
+        event.turnId,
         input.conversationId ?? null,
         event.userId,
         event.agent,
@@ -155,6 +163,14 @@ export class AuditRepo {
       .get(userId) as { n: number };
     return row.n;
   }
+
+  /** Every invocation belonging to one turn, oldest first. */
+  byTurn(turnId: string): AuditEvent[] {
+    const rows = this.db
+      .prepare('SELECT * FROM audit_events WHERE turn_id = ? ORDER BY timestamp, rowid')
+      .all(turnId) as AuditRow[];
+    return rows.map(toAudit);
+  }
 }
 
 /** Durable copy of the in-memory event bus, so activity survives a restart. */
@@ -164,12 +180,13 @@ export class EventRepo {
   record(event: JarvisEvent): void {
     this.db
       .prepare(
-        `INSERT INTO events (id, type, conversation_id, user_id, agent, summary, data, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO events (id, type, turn_id, conversation_id, user_id, agent, summary, data, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.id,
         event.type,
+        event.turnId ?? null,
         event.conversationId,
         event.userId,
         event.agent,
@@ -206,6 +223,25 @@ export class EventRepo {
     return rows.map((row) => ({
       id: row.id,
       type: row.type,
+      turnId: row.turn_id ?? null,
+      conversationId: row.conversation_id,
+      userId: row.user_id,
+      agent: row.agent,
+      summary: row.summary,
+      data: parseJson<Record<string, unknown>>(row.data, {}),
+      createdAt: row.created_at,
+    }));
+  }
+
+  /** Every event belonging to one turn, oldest first. */
+  byTurn(turnId: string): JarvisEvent[] {
+    const rows = this.db
+      .prepare('SELECT * FROM events WHERE turn_id = ? ORDER BY created_at, rowid')
+      .all(turnId) as EventRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      turnId: row.turn_id ?? null,
       conversationId: row.conversation_id,
       userId: row.user_id,
       agent: row.agent,

@@ -151,4 +151,24 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_events_time ON events(user_id, created_at DESC);
     `,
   },
+  {
+    version: 2,
+    name: 'turn_correlation',
+    sql: /* sql */ `
+      -- Correlate everything produced by one user turn.
+      --
+      -- Nullable on purpose: rows written before v0.2 have no turn to point at,
+      -- and destroying that history to satisfy a NOT NULL would be a worse
+      -- trade than reading a null. Every read path treats null as "pre-v0.2".
+      ALTER TABLE events       ADD COLUMN turn_id TEXT;
+      ALTER TABLE audit_events ADD COLUMN turn_id TEXT;
+      ALTER TABLE tool_calls   ADD COLUMN turn_id TEXT;
+
+      -- The whole point of turn_id is answering "show me everything that
+      -- happened during this turn", which is three lookups by turn_id.
+      CREATE INDEX idx_events_turn       ON events(turn_id);
+      CREATE INDEX idx_audit_turn        ON audit_events(turn_id);
+      CREATE INDEX idx_tool_calls_turn   ON tool_calls(turn_id);
+    `,
+  },
 ];

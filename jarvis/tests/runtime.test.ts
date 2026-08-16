@@ -18,6 +18,7 @@ import { createTestJarvis, type TestHarness } from './helpers.ts';
 const event = (type: string, extra: Record<string, unknown> = {}) => ({
   id: `evt_${Math.random().toString(36).slice(2)}`,
   type: type as never,
+  turnId: (extra.turnId as string) ?? 'turn_test',
   conversationId: 'conv_1',
   userId: 'user_test',
   agent: (extra.agent as string) ?? 'jarvis',

@@ -58,7 +58,7 @@ export interface RuntimeErrorInfo {
   summary: string;
   agent: string;
   /** `provider` errors are a different problem from tool or agent errors. */
-  kind: 'provider' | 'tool' | 'agent' | 'permission' | 'unknown';
+  kind: 'provider' | 'tool' | 'agent' | 'permission' | 'timeout' | 'unknown';
   at: string;
 }
 
@@ -100,7 +100,13 @@ function emptyCounters(): RuntimeCounters {
 /** Classify an ERROR event so the UI can tell a provider outage from a tool bug. */
 export function classifyError(event: JarvisEvent): RuntimeErrorInfo['kind'] {
   const kind = event.data.kind;
-  if (kind === 'provider' || kind === 'tool' || kind === 'agent' || kind === 'permission') {
+  if (
+    kind === 'provider' ||
+    kind === 'tool' ||
+    kind === 'agent' ||
+    kind === 'permission' ||
+    kind === 'timeout'
+  ) {
     return kind;
   }
   if (typeof event.data.reason === 'string' && /not configured|API key|base URL/i.test(event.data.reason)) {
@@ -218,8 +224,22 @@ export class RuntimeMonitor {
           this.settle();
           break;
 
+        case 'TURN_CANCELLED': {
+          // A cancelled tool never sends a TOOL_RESULT; clear it here or it
+          // stays "in flight" forever.
+          this.clearCall(event);
+          this.settle();
+          break;
+        }
+
         case 'ERROR':
           this.counters.errors += 1;
+          // Same for a timed-out call: the boundary aborted it, so no result
+          // event is coming.
+          if (event.data.callId) {
+            this.clearCall(event);
+            if (event.data.outcome === 'timeout') this.counters.toolFailures += 1;
+          }
           this.lastError = {
             summary: event.summary,
             agent: event.agent,
@@ -235,6 +255,15 @@ export class RuntimeMonitor {
     } catch {
       /* observation must never break execution */
     }
+  }
+
+  /** Drop an in-flight tool entry that will never receive a result. */
+  private clearCall(event: JarvisEvent): void {
+    const callId = event.data.callId;
+    const index = callId
+      ? this.tools.findIndex((tool) => tool.callId === callId)
+      : this.tools.findIndex((tool) => tool.tool === event.data.tool);
+    if (index >= 0) this.tools.splice(index, 1);
   }
 
   /** Return to the least-busy phase consistent with what is still outstanding. */

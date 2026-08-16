@@ -25,6 +25,13 @@ import type { Store } from '@jarvis/memory';
 import type { PermissionPolicy } from '@jarvis/security';
 import type { ToolRegistry } from '@jarvis/tools';
 import type { ExecutionOutcome } from '@jarvis/agents';
+import {
+  DEFAULT_TOOL_TIMEOUT_MS,
+  isAbortError,
+  linkTimeout,
+  ToolTimeoutError,
+  type TurnContext,
+} from './turns.ts';
 
 export interface ExecuteRequest {
   tool: string;
@@ -32,7 +39,8 @@ export interface ExecuteRequest {
   agent: AgentDefinition;
   userId: string;
   conversationId: string | null;
-  signal?: AbortSignal;
+  /** The turn this call belongs to: its id for correlation, its signal for cancellation. */
+  turn: TurnContext;
 }
 
 export interface ToolExecutorDeps {
@@ -62,6 +70,27 @@ export class ToolExecutor {
     // watching the stream has to guess which result belongs to which call when
     // the same tool is invoked twice in one turn.
     const callId = id('exec');
+    const { turnId, signal: turnSignal } = request.turn;
+
+    // 0. Already cancelled? Then this call never starts. Checked before the
+    //    tool is resolved so a cancelled turn cannot create an approval or
+    //    reach an execute() body.
+    if (turnSignal.aborted) {
+      const message = `Cancelled: turn ${turnId} was cancelled before "${toolName}" started. It did not run.`;
+      store.audit.record({
+        userId,
+        turnId,
+        agent: agent.name,
+        tool: toolName,
+        arguments: request.args,
+        approvalState: 'not_required',
+        error: 'turn cancelled before execution',
+        durationMs: 0,
+        risk: registry.get(toolName)?.risk ?? 'READ',
+        conversationId,
+      });
+      return { status: 'cancelled', result: null, message };
+    }
 
     // 1. Resolve.
     const tool = registry.get(toolName);
@@ -72,6 +101,7 @@ export class ToolExecutor {
         .join(', ')}.`;
       store.audit.record({
         userId,
+        turnId,
         agent: agent.name,
         tool: toolName,
         arguments: request.args,
@@ -84,6 +114,7 @@ export class ToolExecutor {
       events.emit({
         type: 'ERROR',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: `Unknown tool: ${toolName}`,
@@ -95,6 +126,7 @@ export class ToolExecutor {
     events.emit({
       type: 'TOOL_REQUEST',
       userId,
+      turnId,
       conversationId,
       agent: agent.name,
       summary: `${agent.name} → ${tool.name}`,
@@ -107,6 +139,7 @@ export class ToolExecutor {
       const message = `Refused: ${permission.reason}. This action did not run.`;
       store.audit.record({
         userId,
+        turnId,
         agent: agent.name,
         tool: tool.name,
         arguments: request.args,
@@ -119,6 +152,7 @@ export class ToolExecutor {
       events.emit({
         type: 'ERROR',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: `Permission denied: ${tool.name}`,
@@ -133,6 +167,7 @@ export class ToolExecutor {
       const message = `Invalid arguments for ${tool.name}: ${validation.errors.join('; ')}. The tool did not run — fix the arguments and try again.`;
       store.audit.record({
         userId,
+        turnId,
         agent: agent.name,
         tool: tool.name,
         arguments: request.args,
@@ -145,6 +180,7 @@ export class ToolExecutor {
       events.emit({
         type: 'ERROR',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: `Invalid arguments for ${tool.name}`,
@@ -169,6 +205,7 @@ export class ToolExecutor {
 
       store.audit.record({
         userId,
+        turnId,
         agent: agent.name,
         tool: tool.name,
         arguments: validation.value,
@@ -183,6 +220,7 @@ export class ToolExecutor {
       events.emit({
         type: 'APPROVAL_REQUEST',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: `Approval required: ${request_.description}`,
@@ -221,7 +259,7 @@ export class ToolExecutor {
   async executeApproved(
     approval: ApprovalRequest,
     agent: AgentDefinition,
-    signal?: AbortSignal,
+    turn: TurnContext,
   ): Promise<ExecutionOutcome> {
     const { registry, store, events } = this.deps;
     const startedAt = Date.now();
@@ -230,6 +268,7 @@ export class ToolExecutor {
       const message = `Approval ${approval.id} is ${approval.state}; the action was not executed.`;
       store.audit.record({
         userId: approval.userId,
+        turnId: turn.turnId,
         agent: approval.agent,
         tool: approval.tool,
         arguments: approval.arguments,
@@ -249,6 +288,7 @@ export class ToolExecutor {
       events.emit({
         type: 'ERROR',
         userId: approval.userId,
+        turnId: turn.turnId,
         conversationId: approval.conversationId,
         agent: approval.agent,
         summary: message,
@@ -266,7 +306,7 @@ export class ToolExecutor {
         agent,
         userId: approval.userId,
         conversationId: approval.conversationId,
-        ...(signal ? { signal } : {}),
+        turn,
       },
       startedAt,
       approval.id,
@@ -274,6 +314,15 @@ export class ToolExecutor {
     );
   }
 
+  /**
+   * Run the tool inside its own abort boundary.
+   *
+   * The boundary is linked to the turn, so a cancelled turn aborts the tool,
+   * and it carries the tool's own timer, so a hung tool aborts itself. Which
+   * one fired is recorded at the moment it happened — that is what lets a
+   * timeout be told apart from a cancellation when both land in the same
+   * millisecond.
+   */
   private async runTool(
     tool: ToolDefinition,
     args: Record<string, unknown>,
@@ -284,52 +333,127 @@ export class ToolExecutor {
   ): Promise<ExecutionOutcome> {
     const { store, events } = this.deps;
     const { agent, userId, conversationId } = request;
+    const { turnId, signal: turnSignal } = request.turn;
+    const timeoutMs = tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+
+    // The timer starts when execution starts — not when the request arrived, so
+    // time spent waiting on validation or an approval is not charged to the tool.
+    const boundary = linkTimeout(turnSignal, timeoutMs, tool.name);
+    const approvalState = approvalId ? ('approved' as const) : ('not_required' as const);
 
     let result: ToolResult;
     try {
-      result = await tool.execute(args, {
+      const execution = tool.execute(args, {
         userId,
         conversationId,
         agent: agent.name,
-        ...(request.signal ? { signal: request.signal } : {}),
+        turnId,
+        signal: boundary.signal,
       });
+
+      // A tool is *asked* to stop via its signal, but a tool that ignores it
+      // must still not hold the turn open. Racing the boundary means the
+      // executor stops waiting either way.
+      //
+      // Note the honest limit: JavaScript cannot kill a running promise. A tool
+      // that ignores cancellation may still finish its work in the background —
+      // its result is simply discarded, and the late rejection is swallowed
+      // below so it cannot surface as an unhandled rejection.
+      execution.catch(() => undefined);
+
+      const aborted = new Promise<never>((_resolve, reject) => {
+        if (boundary.signal.aborted) {
+          reject(boundary.signal.reason);
+          return;
+        }
+        boundary.signal.addEventListener('abort', () => reject(boundary.signal.reason), {
+          once: true,
+        });
+      });
+
+      result = await Promise.race([execution, aborted]);
     } catch (error) {
-      const message = (error as Error).message;
+      // Classify by what actually aborted, in this order: an explicit turn
+      // cancellation beats a timer that fired afterwards, and both beat a
+      // generic error. `cause()` is set once, by whichever fired first.
+      const cause = boundary.cause();
+      const aborted = isAbortError(error) || boundary.signal.aborted;
+      const status: ExecutionOutcome['status'] =
+        aborted && cause === 'turn_cancelled'
+          ? 'cancelled'
+          : aborted && cause === 'tool_timeout'
+            ? 'timeout'
+            : 'error';
+
+      const durationMs = Date.now() - startedAt;
+      const detail =
+        status === 'cancelled'
+          ? `Cancelled: the user cancelled turn ${turnId} while "${tool.name}" was running.`
+          : status === 'timeout'
+            ? `Timed out: "${tool.name}" exceeded its ${timeoutMs}ms limit and was aborted.`
+            : (error as Error).message;
+
       store.audit.record({
         userId,
+        turnId,
         agent: agent.name,
         tool: tool.name,
         arguments: args,
-        approvalState: approvalId ? 'approved' : 'not_required',
+        approvalState,
         approvalId,
-        error: message,
-        durationMs: Date.now() - startedAt,
+        error: detail,
+        durationMs,
         risk: tool.risk,
         conversationId,
       });
+
       events.emit({
-        type: 'ERROR',
+        type: status === 'cancelled' ? 'TURN_CANCELLED' : 'ERROR',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
-        summary: `${tool.name} threw: ${truncate(message, 120)}`,
-        data: { kind: 'tool', callId, tool: tool.name, error: message },
+        summary:
+          status === 'cancelled'
+            ? `Cancelled during ${tool.name}`
+            : status === 'timeout'
+              ? `${tool.name} timed out after ${timeoutMs}ms`
+              : `${tool.name} threw: ${truncate(detail, 120)}`,
+        data: {
+          kind: status === 'timeout' ? 'timeout' : status === 'cancelled' ? 'cancelled' : 'tool',
+          callId,
+          tool: tool.name,
+          outcome: status,
+          timeoutMs: status === 'timeout' ? timeoutMs : undefined,
+          durationMs,
+          error: status === 'error' ? detail : undefined,
+        },
       });
+
       return {
-        status: 'error',
+        status,
         result: null,
         approvalId,
-        message: `${tool.name} failed with an error: ${message}. The action did not complete.`,
+        message:
+          status === 'cancelled'
+            ? `${detail} The action did not complete.`
+            : status === 'timeout'
+              ? `${detail} The action did not complete — do not assume it succeeded.`
+              : `${tool.name} failed with an error: ${detail}. The action did not complete.`,
       };
+    } finally {
+      // Always: clears the timer and detaches the turn listener, on every path.
+      boundary.dispose();
     }
 
     const durationMs = Date.now() - startedAt;
     store.audit.record({
       userId,
+      turnId,
       agent: agent.name,
       tool: tool.name,
       arguments: args,
-      approvalState: approvalId ? 'approved' : 'not_required',
+      approvalState,
       approvalId,
       result: result.ok ? JSON.stringify({ summary: result.summary, data: result.data }) : null,
       error: result.ok ? null : (result.error ?? result.summary),
@@ -341,16 +465,25 @@ export class ToolExecutor {
     events.emit({
       type: 'TOOL_RESULT',
       userId,
+      turnId,
       conversationId,
       agent: agent.name,
       summary: `${tool.name}: ${truncate(result.summary, 120)}`,
-      data: { callId, tool: tool.name, ok: result.ok, durationMs, error: result.error },
+      data: {
+        callId,
+        tool: tool.name,
+        ok: result.ok,
+        outcome: result.ok ? 'completed' : 'failed',
+        durationMs,
+        error: result.error,
+      },
     });
 
     if (result.ok && tool.risk !== 'READ') {
       events.emit({
         type: 'ACTION_EXECUTED',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: `${tool.risk}: ${truncate(result.summary, 120)}`,
@@ -366,6 +499,7 @@ export class ToolExecutor {
       events.emit({
         type: 'MEMORY_READ',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: truncate(result.summary, 140),
@@ -377,6 +511,7 @@ export class ToolExecutor {
       events.emit({
         type: 'MEMORY_WRITE',
         userId,
+        turnId,
         conversationId,
         agent: agent.name,
         summary: truncate(result.summary, 140),

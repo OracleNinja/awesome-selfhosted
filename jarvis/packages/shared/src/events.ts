@@ -13,6 +13,8 @@ export type EventListener = (event: JarvisEvent) => void;
 export interface EmitOptions {
   type: EventType;
   userId: string;
+  /** Correlates this event with the user turn that caused it. */
+  turnId?: string | null;
   conversationId?: string | null;
   agent?: string;
   summary: string;
@@ -39,6 +41,7 @@ export class EventBus {
     const event: JarvisEvent = {
       id: id('evt'),
       type: options.type,
+      turnId: options.turnId ?? null,
       conversationId: options.conversationId ?? null,
       userId: options.userId,
       agent: options.agent ?? 'jarvis',

@@ -20,8 +20,15 @@ import { EventBus, truncate } from '@jarvis/shared';
 import type { ModelProvider } from '@jarvis/providers';
 import type { ToolRegistry } from '@jarvis/tools';
 
+/**
+ * How a tool invocation ended.
+ *
+ * `cancelled` and `timeout` are deliberately separate terminal states rather
+ * than flavours of `error`: a caller must be able to tell "the user stopped
+ * this" from "this broke", and both from "this took too long".
+ */
 export interface ExecutionOutcome {
-  status: 'executed' | 'awaiting_approval' | 'denied' | 'error';
+  status: 'executed' | 'awaiting_approval' | 'denied' | 'error' | 'timeout' | 'cancelled';
   result: ToolResult | null;
   approvalId?: string | null;
   /** Model-facing description of what happened. Always truthful. */
@@ -35,7 +42,8 @@ export interface ToolExecutorPort {
     agent: AgentDefinition;
     userId: string;
     conversationId: string | null;
-    signal?: AbortSignal;
+    /** The turn this call belongs to — correlation id plus cancellation signal. */
+    turn: { readonly turnId: string; readonly signal: AbortSignal };
   }): Promise<ExecutionOutcome>;
 }
 
@@ -46,7 +54,12 @@ export interface AgentRunContext {
   memories?: MemorySearchResult[];
   /** Extra background the orchestrator wants the agent to have. */
   briefing?: string;
-  signal?: AbortSignal;
+  /**
+   * The turn this run belongs to. A delegated agent shares its caller's turn:
+   * it is the same unit of user work, so cancelling the turn stops the
+   * sub-agent too, and its tool calls correlate to the same turnId.
+   */
+  turn: { readonly turnId: string; readonly signal: AbortSignal };
 }
 
 export interface AgentRunnerDeps {
@@ -72,6 +85,7 @@ export class AgentRunner {
     events.emit({
       type: 'AGENT_DELEGATION',
       userId: ctx.userId,
+      turnId: ctx.turn.turnId,
       conversationId: ctx.conversationId,
       agent: agent.name,
       summary: `${agent.title} started: ${truncate(task, 100)}`,
@@ -83,6 +97,7 @@ export class AgentRunner {
       events.emit({
         type: 'ERROR',
         userId: ctx.userId,
+        turnId: ctx.turn.turnId,
         conversationId: ctx.conversationId,
         agent: agent.name,
         summary: `${agent.title} could not start: ${message}`,
@@ -108,6 +123,8 @@ export class AgentRunner {
     let awaitingApproval = false;
 
     while (iterations < agent.maxIterations) {
+      // Cancelled between steps: the next model call never starts.
+      if (ctx.turn.signal.aborted) return this.cancelledResult(agent, iterations, toolCallLog, ctx);
       iterations += 1;
 
       let response;
@@ -116,13 +133,14 @@ export class AgentRunner {
           messages,
           tools: specs,
           temperature: 0.3,
-          ...(ctx.signal ? { signal: ctx.signal } : {}),
+          signal: ctx.turn.signal,
         });
       } catch (error) {
         const message = (error as Error).message;
         events.emit({
           type: 'ERROR',
           userId: ctx.userId,
+          turnId: ctx.turn.turnId,
           conversationId: ctx.conversationId,
           agent: agent.name,
           summary: `${agent.title} model call failed: ${truncate(message, 120)}`,
@@ -142,6 +160,7 @@ export class AgentRunner {
         events.emit({
           type: 'AGENT_RESULT',
           userId: ctx.userId,
+          turnId: ctx.turn.turnId,
           conversationId: ctx.conversationId,
           agent: agent.name,
           summary: `${agent.title} finished after ${iterations} step${iterations === 1 ? '' : 's'}.`,
@@ -163,13 +182,16 @@ export class AgentRunner {
       });
 
       for (const call of response.toolCalls) {
+        // Cancelled between tool calls: the remaining calls never start.
+        if (ctx.turn.signal.aborted) return this.cancelledResult(agent, iterations, toolCallLog, ctx);
+
         const outcome = await executor.execute({
           tool: call.name,
           args: call.arguments,
           agent,
           userId: ctx.userId,
           conversationId: ctx.conversationId,
-          ...(ctx.signal ? { signal: ctx.signal } : {}),
+          turn: ctx.turn,
         });
 
         if (outcome.status === 'awaiting_approval') awaitingApproval = true;
@@ -198,7 +220,7 @@ export class AgentRunner {
           },
         ],
         temperature: 0.2,
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
+        signal: ctx.turn.signal,
       });
       closing = response.content.trim();
     } catch (error) {
@@ -208,6 +230,7 @@ export class AgentRunner {
     events.emit({
       type: 'AGENT_RESULT',
       userId: ctx.userId,
+      turnId: ctx.turn.turnId,
       conversationId: ctx.conversationId,
       agent: agent.name,
       summary: `${agent.title} stopped at its ${agent.maxIterations}-step limit.`,
@@ -220,6 +243,36 @@ export class AgentRunner {
       iterations,
       toolCalls: toolCallLog,
       stoppedBecause: 'max_iterations',
+    };
+  }
+
+  /**
+   * Stop cleanly on cancellation.
+   *
+   * Reported as its own stop reason so the caller can tell "the user stopped
+   * this" from "the model failed" — the same distinction the executor makes.
+   */
+  private cancelledResult(
+    agent: AgentDefinition,
+    iterations: number,
+    toolCalls: { name: string; ok: boolean }[],
+    ctx: AgentRunContext,
+  ): AgentRunResult {
+    this.deps.events.emit({
+      type: 'TURN_CANCELLED',
+      userId: ctx.userId,
+      turnId: ctx.turn.turnId,
+      conversationId: ctx.conversationId,
+      agent: agent.name,
+      summary: `${agent.title} stopped: the turn was cancelled.`,
+      data: { iterations, toolCalls: toolCalls.length },
+    });
+    return {
+      agent: agent.name,
+      output: `${agent.title} stopped because the turn was cancelled. Its work did not complete.`,
+      iterations,
+      toolCalls,
+      stoppedBecause: 'cancelled',
     };
   }
 

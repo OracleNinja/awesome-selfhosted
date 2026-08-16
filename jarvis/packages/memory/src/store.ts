@@ -35,6 +35,41 @@ export class Store {
     this.agents = new AgentRepo(this.db);
   }
 
+  /**
+   * Tool calls belonging to one turn, oldest first.
+   *
+   * Lives here rather than in a repo because `tool_calls` is a mirror table
+   * written by AuditRepo; this is the only read of it by turn.
+   */
+  toolCallsByTurn(turnId: string): {
+    id: string;
+    turnId: string | null;
+    conversationId: string | null;
+    agent: string;
+    tool: string;
+    risk: string;
+    state: string;
+    error: string | null;
+    durationMs: number;
+    createdAt: string;
+  }[] {
+    const rows = this.db
+      .prepare('SELECT * FROM tool_calls WHERE turn_id = ? ORDER BY created_at, rowid')
+      .all(turnId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      turnId: (row.turn_id as string | null) ?? null,
+      conversationId: (row.conversation_id as string | null) ?? null,
+      agent: String(row.agent),
+      tool: String(row.tool),
+      risk: String(row.risk),
+      state: String(row.state),
+      error: (row.error as string | null) ?? null,
+      durationMs: Number(row.duration_ms ?? 0),
+      createdAt: String(row.created_at),
+    }));
+  }
+
   health(): { ok: boolean; schemaVersion: number; tables: string[] } {
     const tables = listTables(this.db);
     const required = [

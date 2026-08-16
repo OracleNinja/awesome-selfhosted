@@ -54,6 +54,7 @@ import {
 import { ToolExecutor } from './executor.ts';
 import { Orchestrator, type TurnResult } from './orchestrator.ts';
 import { RuntimeMonitor, type RuntimeActivity } from './monitor.ts';
+import { TurnRegistry, type CancelResult, type TurnInfo } from './turns.ts';
 import { TelemetryCollector, type SystemTelemetry } from './telemetry.ts';
 
 export interface JarvisSystemStatus {
@@ -135,6 +136,8 @@ export class Jarvis {
   readonly vision: VisionProvider;
   readonly charterErrors: string[];
   readonly monitor: RuntimeMonitor;
+  /** Owns every in-flight turn's cancellation boundary. */
+  readonly turns: TurnRegistry;
   readonly telemetry: TelemetryCollector;
   private approvalSweep: ReturnType<typeof setInterval> | null = null;
 
@@ -166,6 +169,7 @@ export class Jarvis {
     // observes the bus and never calls back into execution.
     this.monitor = new RuntimeMonitor(this.events);
     this.telemetry = new TelemetryCollector();
+    this.turns = new TurnRegistry();
 
     // Expiry can be triggered by any approval read, so the announcement is
     // attached to the repository rather than to a periodic sweep.
@@ -214,6 +218,7 @@ export class Jarvis {
 
     this.orchestrator = new Orchestrator({
       provider: this.provider,
+      turns: this.turns,
       registry: this.registry,
       executor: this.executor,
       store: this.store,
@@ -256,7 +261,16 @@ export class Jarvis {
     });
 
     const agent = this.agents[resolved.agent] ?? this.jarvisAgent;
-    const outcome = await this.executor.executeApproved(resolved, agent);
+    // The approved action runs in its own turn: it is a new unit of work,
+    // started by the human decision rather than by the original message, and it
+    // needs its own cancellation boundary.
+    const approvalTurn = this.turns.begin({ userId, conversationId: resolved.conversationId });
+    let outcome;
+    try {
+      outcome = await this.executor.executeApproved(resolved, agent, approvalTurn.context);
+    } finally {
+      approvalTurn.end();
+    }
 
     const noteText =
       outcome.status === 'executed'
@@ -279,6 +293,7 @@ export class Jarvis {
       result.turn = await this.orchestrator.continueAfterApproval({
         userId,
         conversationId: resolved.conversationId,
+        turnId: approvalTurn.turnId,
         note: noteText,
         fallback:
           outcome.status === 'executed'
@@ -345,6 +360,44 @@ export class Jarvis {
       });
     }
     return result;
+  }
+
+  /**
+   * Cancel an in-flight turn.
+   *
+   * Every outcome is a value: cancelling a turn that already finished, or one
+   * that never existed, is a normal thing for a UI to do and must not surface
+   * as an internal error. The raw controller is never exposed.
+   */
+  cancelTurn(turnId: string, reason?: string): { status: CancelResult; turnId: string } {
+    return { status: this.turns.cancel(turnId, reason), turnId };
+  }
+
+  /** Turns currently running. A leak in the registry would show up here. */
+  activeTurns(userId?: string): TurnInfo[] {
+    return this.turns.active(userId);
+  }
+
+  /**
+   * Everything that happened during one turn.
+   *
+   * This is what `turnId` is for: three tables recorded pieces of the same
+   * request, and until now nothing joined them.
+   */
+  turnTrace(turnId: string): {
+    turnId: string;
+    active: boolean;
+    events: JarvisEvent[];
+    audit: ReturnType<Store['audit']['byTurn']>;
+    toolCalls: ReturnType<Store['toolCallsByTurn']>;
+  } {
+    return {
+      turnId,
+      active: this.turns.has(turnId),
+      events: this.store.events.byTurn(turnId),
+      audit: this.store.audit.byTurn(turnId),
+      toolCalls: this.store.toolCallsByTurn(turnId),
+    };
   }
 
   status(): JarvisSystemStatus {
@@ -538,6 +591,8 @@ export class Jarvis {
 
   close(): void {
     this.stopBackgroundTasks();
+    // Stop in-flight work rather than leaving controllers dangling.
+    this.turns.cancelAll();
     this.store.close();
   }
 }

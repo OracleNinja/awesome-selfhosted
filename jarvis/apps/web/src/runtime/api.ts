@@ -70,6 +70,8 @@ export interface AuditEntry {
 }
 
 export interface TurnResult {
+  turnId: string;
+  outcome: 'completed' | 'cancelled' | 'failed';
   conversationId: string;
   reply: string;
   messages: Message[];
@@ -173,8 +175,18 @@ export const api = {
     request<{ conversation: Conversation; messages: Message[] }>('GET', `/api/conversations/${id}/messages`),
   deleteConversation: (id: string) => request<{ deleted: string }>('DELETE', `/api/conversations/${id}`),
 
-  chat: (message: string, conversationId?: string | null) =>
-    request<TurnResult>('POST', '/api/chat', { message, conversationId }),
+  chat: (message: string, conversationId?: string | null, turnId?: string) =>
+    request<TurnResult>('POST', '/api/chat', { message, conversationId, turnId }),
+
+  cancelTurn: (turnId: string, reason?: string) =>
+    request<{ status: string; turnId: string }>('POST', `/api/turns/${turnId}/cancel`, { reason }),
+  activeTurns: () =>
+    request<{ turns: { turnId: string; startedAt: string; cancelled: boolean }[] }>('GET', '/api/turns'),
+  turnTrace: (turnId: string) =>
+    request<{ turnId: string; active: boolean; events: unknown[]; audit: unknown[]; toolCalls: unknown[] }>(
+      'GET',
+      `/api/turns/${turnId}`,
+    ),
 
   memories: (query?: string, type?: string) => {
     const params = new URLSearchParams();

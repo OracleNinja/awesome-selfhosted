@@ -67,6 +67,31 @@ than the abstraction.
 The model decides *what* to do — answer, retrieve, call a tool, write a memory,
 delegate. JARVIS decides what is *allowed*, and that decision is made in code.
 
+## Turns
+
+A *turn* is one unit of user work: a message, everything it causes, and the
+reply. It is the unit of cancellation and the unit of correlation.
+
+```
+turn_9fd2…  ── model call ──▶
+            ├─ tool call A ─▶  same turnId, same signal
+            ├─ tool call B ─▶
+            ├─ delegated agent ─┬─ its model calls
+            │                   └─ its tool calls
+            └─ model call ──▶
+```
+
+`TurnRegistry.begin()` mints the id and the controller; `handleMessage` releases
+it in a `finally`, so completion, failure and cancellation all clean up the same
+way and the registry's size is a live count rather than a leak. A delegated
+sub-agent shares its caller's turn — it is the same unit of user work, so
+cancelling stops it too and its tool calls correlate to the same id.
+
+The id reaches `events`, `audit_events` and `tool_calls`, which is what makes
+"show me everything that happened during this turn" a single query per table
+rather than three timestamp scans. Columns are nullable: rows written before
+v0.2 have no turn, and reading a null is a better trade than destroying history.
+
 ## The executor
 
 [`packages/core/src/executor.ts`](../packages/core/src/executor.ts) is the single

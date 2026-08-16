@@ -61,6 +61,7 @@ export function initialState(): JarvisRuntimeState {
     voice: initialVoice,
     lastCommandError: null,
     commandInFlight: false,
+    activeTurnId: null,
     droppedEvents: 0,
   };
 }
@@ -283,8 +284,8 @@ export class RuntimeStore {
 
   // ---------------------------------------------------------------- commands
 
-  setCommandInFlight(inFlight: boolean): void {
-    this.set({ commandInFlight: inFlight });
+  setCommandInFlight(inFlight: boolean, turnId: string | null = null): void {
+    this.set({ commandInFlight: inFlight, activeTurnId: inFlight ? turnId : null });
   }
 
   setCommandError(message: string | null): void {

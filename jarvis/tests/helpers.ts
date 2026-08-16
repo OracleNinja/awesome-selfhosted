@@ -111,6 +111,14 @@ export class ScriptedProvider implements ModelProvider {
   }
 }
 
+/**
+ * A standalone turn context, for tests that drive the runner or executor
+ * directly rather than through the orchestrator (which makes its own).
+ */
+export function testTurn(turnId = 'turn_test'): { turnId: string; signal: AbortSignal } {
+  return { turnId, signal: new AbortController().signal };
+}
+
 export interface TestHarness {
   jarvis: Jarvis;
   provider: ScriptedProvider;

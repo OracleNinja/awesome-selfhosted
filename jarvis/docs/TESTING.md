@@ -38,6 +38,7 @@ serialisation and tool-call parsing are genuinely exercised.
 | `orchestrator.test.ts` | Turn loop, tool feedback, memory injection, provider failure, iteration limit, orphaned tool messages |
 | `approvals.test.ts` | Full approval workflow, denial, replay, expiry, ownership, audit of every path, redaction |
 | `agents.test.ts` | Agent roster, capability boundaries, charters, delegation, sub-agent refusals, budgets |
+| `control-plane.test.ts` | Turn registry, cancellation at every point in a turn, the timeout/cancellation race, per-tool timeouts, correlation, concurrency, migration against a real v1 database |
 | `api.test.ts` | Real HTTP: auth both modes, chat, conversations, memory, tools, agents, approvals, audit, SSE, media 503s, no key leakage |
 
 ## The tests that matter most
@@ -57,6 +58,13 @@ Some assert behaviour the whole design exists to guarantee:
   verification.
 - **`tools.test.ts` → "web_search says it is unavailable instead of inventing
   results"** — the no-fabrication rule, as an assertion.
+- **`control-plane.test.ts` → "cancelling one turn does not touch another"** —
+  four tools across two concurrent turns; cancelling one leaves the other
+  running to completion. If turn isolation ever breaks, this is what catches it.
+- **`control-plane.test.ts` → "stops waiting on a tool that ignores its abort
+  signal"** — the executor returns on the timeout, not after the tool's own
+  delay. This found a real gap: the first implementation awaited the tool and
+  would have hung the turn.
 
 ## Adding tests
 

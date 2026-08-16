@@ -226,18 +226,30 @@ export class JarvisRuntimeClient {
   async sendCommand(
     text: string,
     conversationId?: string | null,
-  ): Promise<{ ok: boolean; conversationId?: string; reply?: string; error?: string }> {
-    this.store.setCommandInFlight(true);
+  ): Promise<{ ok: boolean; conversationId?: string; reply?: string; error?: string; turnId?: string }> {
+    // The turn id is minted here and sent with the request, so the user can
+    // cancel before the response returns — which is the only moment cancelling
+    // is actually useful.
+    const turnId = `turn_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    this.store.setCommandInFlight(true, turnId);
     this.store.setCommandError(null);
     try {
-      const turn = await api.chat(text, conversationId ?? null);
+      const turn = await api.chat(text, conversationId ?? null, turnId);
       // The turn carries the authoritative pending-approval list for it.
       this.store.setApprovals(turn.pendingApprovals);
       if (turn.error) this.store.setCommandError(turn.error);
-      const result: { ok: boolean; conversationId?: string; reply?: string; error?: string } = {
-        ok: !turn.error,
+      const result: {
+        ok: boolean;
+        conversationId?: string;
+        reply?: string;
+        error?: string;
+        turnId?: string;
+      } = {
+        // A cancelled turn is not a failure — the user asked for it.
+        ok: !turn.error && turn.outcome !== 'failed',
         conversationId: turn.conversationId,
         reply: turn.reply,
+        turnId: turn.turnId,
       };
       if (turn.error) result.error = turn.error;
       return result;
@@ -248,6 +260,23 @@ export class JarvisRuntimeClient {
     } finally {
       this.store.setCommandInFlight(false);
       void this.refreshState();
+    }
+  }
+
+  /**
+   * Cancel the turn this client is waiting on.
+   *
+   * The runtime decides the outcome; a turn that finished between render and
+   * click reports `already_finished`, which is information, not an error.
+   */
+  async cancelTurn(turnId?: string): Promise<{ status: string } | null> {
+    const target = turnId ?? this.store.getState().activeTurnId;
+    if (!target) return null;
+    try {
+      return await api.cancelTurn(target, 'cancelled from the Control Room');
+    } catch (error) {
+      this.store.setCommandError(`Cancel failed: ${(error as Error).message}`);
+      return null;
     }
   }
 

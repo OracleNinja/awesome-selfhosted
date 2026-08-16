@@ -1,4 +1,5 @@
 import type { AgentDefinition, ToolDefinition, ToolInfo } from '@jarvis/shared';
+import { DEFAULT_TOOL_TIMEOUT_MS } from '@jarvis/shared';
 import type { PermissionPolicy } from '@jarvis/security';
 import type { ToolSpec } from '@jarvis/providers';
 
@@ -83,6 +84,7 @@ export class ToolRegistry {
         inputSchema: tool.inputSchema,
         risk: tool.risk,
         requiresApproval: this.policy.approvalFor(tool).required,
+        timeoutMs: tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
         available: state.available,
       };
       if (state.reason) info.unavailableReason = state.reason;
