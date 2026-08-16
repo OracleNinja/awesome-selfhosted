@@ -1,5 +1,9 @@
 # Roadmap
 
+> **Superseded in part by [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md)**, which
+> audits this list against the code and re-prioritises it. Read that first; this
+> file remains the narrative view of where each capability attaches.
+
 v0.1 is the foundation: orchestration, memory, tools, permissions, approvals,
 audit, agents, providers and the mission-control UI. Everything below is
 deliberately *not* built yet, with a note on where it plugs in.
