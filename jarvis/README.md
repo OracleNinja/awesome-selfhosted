@@ -28,12 +28,45 @@ Without an API key JARVIS still runs: memory, tools, approvals, audit, agents
 and the whole UI work. The conversation itself will tell you the model provider
 is not configured, and how to fix it.
 
+### Or run the production build — one process, one port
+
+```bash
+npm install
+cp .env.example .env
+npm run build                # bundles the server, builds the UI
+npm start
+```
+
+Open **http://localhost:8787**. The single server serves both the API and the
+Control Room, so there is no second process and no proxy.
+
+### Which URL, and who can reach it
+
+The Control Room is the landing view at `/` — there is no separate path to
+navigate to.
+
+| How you started it | Open | Reachable from |
+|---|---|---|
+| `npm run dev` | `http://localhost:5173` (Vite proxies `/api` to `:8787`) | this machine only |
+| `npm start`, no token | `http://localhost:8787` | this machine only |
+| `npm start` with `JARVIS_API_TOKEN` | `http://<this-host-ip>:8787` | any device on your network |
+
+**Binding follows the token, deliberately.** With no `JARVIS_API_TOKEN` the
+server binds `127.0.0.1` and nothing outside the machine can reach it. Set a
+token and it binds `0.0.0.0` — the startup banner then prints the LAN address to
+use. Open that URL, go to **Settings**, and paste the same token; until you do,
+the Control Room shows `UNAUTHORIZED` and tells you so. The token is kept in
+`localStorage` and is never a provider key.
+
+To reach it from outside your network, put it behind a reverse proxy with TLS —
+see [docs/PRODUCTION.md](docs/PRODUCTION.md). Do not expose port 8787 directly.
+
 ### Other commands
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Server + web UI together, both watching |
-| `npm test` | The full test suite (141 tests) |
+| `npm test` | The full test suite (356 tests) |
 | `npm run typecheck` | TypeScript across server, packages and web |
 | `npm run build` | Production build: bundled server + static UI |
 | `npm start` | Run the production build (serves the UI too) |

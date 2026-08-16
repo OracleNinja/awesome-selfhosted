@@ -6,6 +6,7 @@
  */
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { createJarvis } from '@jarvis/core';
 import { JARVIS_VERSION, loadConfig, loadDotEnv, repoRoot } from '@jarvis/shared';
 import { startJarvisServer } from './server.ts';
@@ -31,8 +32,18 @@ async function main(): Promise<void> {
 
   console.log(`\n  JARVIS ${JARVIS_VERSION}`);
   console.log(`  ${'─'.repeat(52)}`);
-  console.log(`  listening        http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
-  console.log(`  auth             ${config.apiToken ? 'bearer token required' : 'local mode (loopback only, no token set)'}`);
+  console.log(`  open this        http://localhost:${port}`);
+  // Binding to 0.0.0.0 is what makes the UI reachable from another machine, so
+  // say so and give the address to actually type there — printing "localhost"
+  // for an all-interfaces bind hides the only URL that works from a phone.
+  if (host === '0.0.0.0') {
+    const lan = Object.values(networkInterfaces())
+      .flat()
+      .find((entry) => entry && entry.family === 'IPv4' && !entry.internal);
+    console.log(`  also reachable   http://${lan?.address ?? '<this-host-ip>'}:${port}  (all interfaces)`);
+  }
+  console.log(`  serving on       ${host}:${port}`);
+  console.log(`  auth             ${config.apiToken ? 'bearer token required — paste it into Settings in the UI' : 'local mode (loopback only, no token set)'}`);
   console.log(`  model provider   ${status.activeModelProvider} · ${status.activeModel}`);
   console.log(`  database         schema v${status.database.schemaVersion}, ${status.database.tables.length} tables`);
   console.log(`  tools            ${status.tools.total} registered, ${status.tools.requiringApproval} approval-gated`);

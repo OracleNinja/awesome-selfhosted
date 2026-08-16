@@ -101,6 +101,12 @@ export class JarvisRuntimeClient {
 
   private openStream(): void {
     if (this.closed) return;
+    // A rejected token is a terminal answer, not a transport failure. The stream
+    // would fail the same way, and its generic error handler would replace an
+    // actionable diagnosis ("enter your token in Settings") with a reconnect
+    // countdown that can never succeed on its own. Both connect() and
+    // reconnect() come through here, so one guard covers both.
+    if (this.store.getState().connection === 'unauthorized') return;
     this.source?.close();
 
     const source = this.makeEventSource(this.streamUrl());
@@ -190,9 +196,15 @@ export class JarvisRuntimeClient {
       return snapshot;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        // "No token" and "wrong token" need different instructions, and the
+        // first is what every operator hits the moment they set
+        // JARVIS_API_TOKEN — which PRODUCTION.md requires for any non-loopback
+        // deployment.
         this.store.setConnection(
           'unauthorized',
-          'The runtime rejected this token. Set a valid JARVIS_API_TOKEN in Settings.',
+          this.tokenProvider()
+            ? 'The runtime rejected this token. Enter a valid JARVIS_API_TOKEN in Settings.'
+            : 'This runtime requires an API token. Open Settings and enter the JARVIS_API_TOKEN the server was started with.',
         );
       } else {
         this.store.setConnection(

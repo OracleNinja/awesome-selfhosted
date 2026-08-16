@@ -161,6 +161,65 @@ describe('connection lifecycle', () => {
     expect(client.store.getState().connectionDetail).toMatch(/token/i);
   });
 
+  /**
+   * The failure an operator actually hits: they set JARVIS_API_TOKEN (required
+   * for any non-loopback deployment), open the UI with nothing stored yet, and
+   * the runtime 401s. The stream 401s too — and its generic error handler used
+   * to overwrite "unauthorized" with "reconnecting in 2s", which is both wrong
+   * and unactionable, and retries forever without ever mentioning a token.
+   */
+  it('does not let the stream downgrade an unauthorized verdict to offline', async () => {
+    stubFetch({
+      '/api/runtime/state': () => ({ status: 401, body: { error: { code: 'unauthorized', message: 'nope' } } }),
+    });
+    const client = makeClient();
+    await client.connect();
+
+    // The stream is never opened once the token is known to be rejected: doing
+    // so would fail identically and bury the diagnosis.
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(client.store.getState().connection).toBe('unauthorized');
+    expect(client.store.getState().connectionDetail).toMatch(/Settings/i);
+  });
+
+  it('tells an operator with no token stored what to do, not that the token is wrong', async () => {
+    stubFetch({
+      '/api/runtime/state': () => ({ status: 401, body: { error: { code: 'unauthorized', message: 'nope' } } }),
+    });
+    const client = new JarvisRuntimeClient({
+      eventSourceFactory: (url) => new FakeEventSource(url),
+      setTimeoutImpl: fakeSetTimeout,
+      clearTimeoutImpl: () => undefined,
+      tokenProvider: () => '',
+    });
+    await client.connect();
+
+    expect(client.store.getState().connectionDetail).toMatch(/requires an API token/i);
+    expect(client.store.getState().connectionDetail).not.toMatch(/rejected/i);
+  });
+
+  it('recovers to unauthorized if the token stops working mid-session', async () => {
+    let authorised = true;
+    stubFetch({
+      '/api/runtime/state': () =>
+        authorised
+          ? { body: snapshotFixture() }
+          : { status: 401, body: { error: { code: 'unauthorized', message: 'nope' } } },
+    });
+    const client = makeClient();
+    await client.connect();
+    expect(client.store.getState().connection).toBe('online');
+
+    // The server is restarted with a different token: the stream drops, and the
+    // reconnect re-reads state and lands on the right verdict rather than
+    // retrying blindly forever.
+    authorised = false;
+    FakeEventSource.latest().fail();
+    await runScheduled();
+
+    expect(client.store.getState().connection).toBe('unauthorized');
+  });
+
   it('reports offline when the runtime is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
     const client = makeClient();
