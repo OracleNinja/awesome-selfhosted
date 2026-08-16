@@ -6,7 +6,14 @@
  * either.
  */
 import { useEffect, useState } from 'react';
-import { api, getToken, setToken, type AuditEntry, type Memory, type ToolInfo } from '../runtime/api';
+import {
+  api,
+  getToken,
+  setToken,
+  type AuditEntry,
+  type CapabilityReport,
+  type Memory,
+} from '../runtime/api';
 import { useRuntime, useRuntimeClient, shallowArrayEqual } from '../runtime/react';
 import { ActivityFeed } from '../components/ActivityFeed';
 
@@ -288,30 +295,91 @@ export function AgentsView({ conversationId }: { conversationId: string | null }
 // ------------------------------------------------------------------ Tools
 
 export function ToolsView() {
-  const [tools, setTools] = useState<ToolInfo[]>([]);
-  const [levels, setLevels] = useState<string[]>([]);
+  const [report, setReport] = useState<CapabilityReport | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     api
-      .tools()
-      .then((result) => {
-        setTools(result.tools);
-        setLevels(result.approvalRequiredLevels);
-      })
+      .capabilities()
+      .then(setReport)
       .catch((cause: Error) => setError(cause.message));
   }, []);
+
+  const tools = report?.capabilities ?? [];
+  const levels = report?.approvalRequiredLevels ?? [];
+  const servers = report?.mcpServers ?? [];
 
   return (
     <div className="scroll pad grow">
       {error && <div className="error-banner">{error}</div>}
       <div className="small muted" style={{ marginBottom: 12 }}>
-        {tools.length} tools registered. Actions at{' '}
+        {report?.counts.total ?? 0} capabilities registered
+        {report ? ` · ${report.counts.local} local · ${report.counts.remote} remote` : ''}
+        {report && report.counts.enabled !== report.counts.total
+          ? ` · ${report.counts.total - report.counts.enabled} unavailable`
+          : ''}
+        . Actions at{' '}
         {levels.map((level) => (
           <span className={`chip ${level}`} key={level} style={{ marginRight: 4 }}>{level}</span>
         ))}
         require your approval before they run.
       </div>
+
+      {/* Where remote capabilities come from, and what authority they were given. */}
+      {servers.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="section-label" style={{ padding: '0 0 8px' }}>MCP servers</div>
+          <div className="small muted" style={{ marginBottom: 10 }}>
+            Remote servers provide capabilities. They do not classify them: the risk floor
+            below is set in configuration, and a server&rsquo;s own claims about its safety
+            are ignored.
+          </div>
+          {servers.map((server) => (
+            <div className="row-between" key={server.id} style={{ marginBottom: 8 }}>
+              <div>
+                <span className="mono" style={{ fontSize: 13 }}>{server.id}</span>
+                <div className="small muted">{server.detail}</div>
+                {server.rejected.map((rejected) => (
+                  <div className="small muted" key={rejected.name}>
+                    refused &ldquo;{rejected.name}&rdquo;: {rejected.reason}
+                  </div>
+                ))}
+              </div>
+              <div className="row" style={{ gap: 6 }}>
+                <span className={`chip ${server.riskFloor}`}>floor {server.riskFloor}</span>
+                <span className={`chip ${server.state === 'ready' ? 'ok' : 'off'}`}>{server.state}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Routing is on declared model capability, never on a guess about the question. */}
+      {report && report.models.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="section-label" style={{ padding: '0 0 8px' }}>Model routing</div>
+          {report.models.map((entry) => (
+            <div className="row-between" key={entry.providerId} style={{ marginBottom: 6 }}>
+              <div>
+                <span className="mono" style={{ fontSize: 13 }}>{entry.providerId}</span>
+                {entry.isDefault && <span className="chip ok" style={{ marginLeft: 6 }}>default</span>}
+                <div className="small muted">
+                  {entry.model || 'no model configured'}
+                  {entry.available
+                    ? ''
+                    : ` · ${entry.reason ?? 'not configured'}`}
+                </div>
+              </div>
+              <div className="small mono muted">
+                {Object.entries(entry.capabilities)
+                  .filter(([, enabled]) => enabled)
+                  .map(([name]) => name)
+                  .join(' ') || 'none declared'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid-cards">
         {tools.map((tool) => (
@@ -322,12 +390,15 @@ export function ToolsView() {
             </div>
             <div className="small" style={{ marginBottom: 8 }}>{tool.description}</div>
             <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <span className="chip">
+                {tool.source.kind === 'local' ? 'local' : `via ${tool.source.server}`}
+              </span>
               {tool.requiresApproval && <span className="chip EXTERNAL_ACTION">approval required</span>}
-              <span className={`chip ${tool.available ? 'ok' : 'off'}`}>
-                {tool.available ? 'available' : 'unavailable'}
+              <span className={`chip ${tool.available && tool.enabled ? 'ok' : 'off'}`}>
+                {tool.available && tool.enabled ? 'available' : 'unavailable'}
               </span>
             </div>
-            {!tool.available && tool.unavailableReason && (
+            {(!tool.available || !tool.enabled) && tool.unavailableReason && (
               <div className="small muted" style={{ marginTop: 8 }}>{tool.unavailableReason}</div>
             )}
             {tool.inputSchema.properties && (

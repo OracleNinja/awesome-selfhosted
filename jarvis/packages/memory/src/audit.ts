@@ -6,6 +6,7 @@ interface AuditRow {
   id: string;
   timestamp: string;
   turn_id: string | null;
+  parent_turn_id: string | null;
   user_id: string;
   agent: string;
   tool: string;
@@ -22,6 +23,7 @@ interface EventRow {
   id: string;
   type: JarvisEvent['type'];
   turn_id: string | null;
+  parent_turn_id: string | null;
   conversation_id: string | null;
   user_id: string;
   agent: string;
@@ -34,6 +36,8 @@ export interface AuditWriteInput {
   userId: string;
   /** The turn this invocation belongs to. Null only for out-of-turn writes. */
   turnId?: string | null;
+  /** The turn that caused this one, when it was started by an approval decision. */
+  parentTurnId?: string | null;
   agent: string;
   tool: string;
   arguments: Record<string, unknown>;
@@ -51,6 +55,7 @@ function toAudit(row: AuditRow): AuditEvent {
     id: row.id,
     timestamp: row.timestamp,
     turnId: row.turn_id ?? null,
+    parentTurnId: row.parent_turn_id ?? null,
     userId: row.user_id,
     agent: row.agent,
     tool: row.tool,
@@ -79,6 +84,7 @@ export class AuditRepo {
       id: id('aud'),
       timestamp: now(),
       turnId: input.turnId ?? null,
+      parentTurnId: input.parentTurnId ?? null,
       userId: input.userId,
       agent: input.agent,
       tool: input.tool,
@@ -93,14 +99,15 @@ export class AuditRepo {
 
     this.db
       .prepare(
-        `INSERT INTO audit_events (id, timestamp, turn_id, user_id, agent, tool, arguments,
-           approval_state, approval_id, result, error, duration_ms, risk)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit_events (id, timestamp, turn_id, parent_turn_id, user_id, agent, tool,
+           arguments, approval_state, approval_id, result, error, duration_ms, risk)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.id,
         event.timestamp,
         event.turnId,
+        event.parentTurnId,
         event.userId,
         event.agent,
         event.tool,
@@ -180,13 +187,15 @@ export class EventRepo {
   record(event: JarvisEvent): void {
     this.db
       .prepare(
-        `INSERT INTO events (id, type, turn_id, conversation_id, user_id, agent, summary, data, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO events (id, type, turn_id, parent_turn_id, conversation_id, user_id, agent,
+           summary, data, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.id,
         event.type,
         event.turnId ?? null,
+        event.parentTurnId ?? null,
         event.conversationId,
         event.userId,
         event.agent,
@@ -224,6 +233,7 @@ export class EventRepo {
       id: row.id,
       type: row.type,
       turnId: row.turn_id ?? null,
+      parentTurnId: row.parent_turn_id ?? null,
       conversationId: row.conversation_id,
       userId: row.user_id,
       agent: row.agent,
@@ -231,6 +241,23 @@ export class EventRepo {
       data: parseJson<Record<string, unknown>>(row.data, {}),
       createdAt: row.created_at,
     }));
+  }
+
+  /**
+   * The turn that requested a given approval.
+   *
+   * Read from the persisted APPROVAL_REQUEST event rather than kept in memory,
+   * so an approval decided after a restart still knows which turn asked for it.
+   */
+  turnForApproval(approvalId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT turn_id FROM events
+         WHERE type = 'APPROVAL_REQUEST' AND json_extract(data, '$.approvalId') = ?
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(approvalId) as { turn_id: string | null } | undefined;
+    return row?.turn_id ?? null;
   }
 
   /** Every event belonging to one turn, oldest first. */
@@ -242,6 +269,7 @@ export class EventRepo {
       id: row.id,
       type: row.type,
       turnId: row.turn_id ?? null,
+      parentTurnId: row.parent_turn_id ?? null,
       conversationId: row.conversation_id,
       userId: row.user_id,
       agent: row.agent,

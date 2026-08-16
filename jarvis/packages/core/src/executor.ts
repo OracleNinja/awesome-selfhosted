@@ -70,7 +70,7 @@ export class ToolExecutor {
     // watching the stream has to guess which result belongs to which call when
     // the same tool is invoked twice in one turn.
     const callId = id('exec');
-    const { turnId, signal: turnSignal } = request.turn;
+    const { turnId, signal: turnSignal, parentTurnId } = request.turn;
 
     // 0. Already cancelled? Then this call never starts. Checked before the
     //    tool is resolved so a cancelled turn cannot create an approval or
@@ -80,6 +80,7 @@ export class ToolExecutor {
       store.audit.record({
         userId,
         turnId,
+        parentTurnId,
         agent: agent.name,
         tool: toolName,
         arguments: request.args,
@@ -102,6 +103,7 @@ export class ToolExecutor {
       store.audit.record({
         userId,
         turnId,
+        parentTurnId,
         agent: agent.name,
         tool: toolName,
         arguments: request.args,
@@ -115,6 +117,7 @@ export class ToolExecutor {
         type: 'ERROR',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: `Unknown tool: ${toolName}`,
@@ -123,10 +126,43 @@ export class ToolExecutor {
       return { status: 'error', result: null, message };
     }
 
+    // 1b. Disabled? A capability whose source is unavailable (a disconnected
+    //     MCP server, an operator switch) is refused here, at the same choke
+    //     point as everything else — not by hiding it from the model and hoping.
+    const disabled = registry.disabledReason(tool.name);
+    if (disabled) {
+      const message = `Refused: ${disabled}. This action did not run.`;
+      store.audit.record({
+        userId,
+        turnId,
+        parentTurnId,
+        agent: agent.name,
+        tool: tool.name,
+        arguments: request.args,
+        approvalState: 'denied',
+        error: disabled,
+        durationMs: Date.now() - startedAt,
+        risk: tool.risk,
+        conversationId,
+      });
+      events.emit({
+        type: 'ERROR',
+        userId,
+        turnId,
+        parentTurnId,
+        conversationId,
+        agent: agent.name,
+        summary: `Capability unavailable: ${tool.name}`,
+        data: { kind: 'capability', tool: tool.name, reason: disabled },
+      });
+      return { status: 'denied', result: null, message };
+    }
+
     events.emit({
       type: 'TOOL_REQUEST',
       userId,
       turnId,
+      parentTurnId,
       conversationId,
       agent: agent.name,
       summary: `${agent.name} → ${tool.name}`,
@@ -140,6 +176,7 @@ export class ToolExecutor {
       store.audit.record({
         userId,
         turnId,
+        parentTurnId,
         agent: agent.name,
         tool: tool.name,
         arguments: request.args,
@@ -153,6 +190,7 @@ export class ToolExecutor {
         type: 'ERROR',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: `Permission denied: ${tool.name}`,
@@ -168,6 +206,7 @@ export class ToolExecutor {
       store.audit.record({
         userId,
         turnId,
+        parentTurnId,
         agent: agent.name,
         tool: tool.name,
         arguments: request.args,
@@ -181,6 +220,7 @@ export class ToolExecutor {
         type: 'ERROR',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: `Invalid arguments for ${tool.name}`,
@@ -206,6 +246,7 @@ export class ToolExecutor {
       store.audit.record({
         userId,
         turnId,
+        parentTurnId,
         agent: agent.name,
         tool: tool.name,
         arguments: validation.value,
@@ -221,6 +262,7 @@ export class ToolExecutor {
         type: 'APPROVAL_REQUEST',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: `Approval required: ${request_.description}`,
@@ -333,7 +375,7 @@ export class ToolExecutor {
   ): Promise<ExecutionOutcome> {
     const { store, events } = this.deps;
     const { agent, userId, conversationId } = request;
-    const { turnId, signal: turnSignal } = request.turn;
+    const { turnId, signal: turnSignal, parentTurnId } = request.turn;
     const timeoutMs = tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
 
     // The timer starts when execution starts — not when the request arrived, so
@@ -396,6 +438,7 @@ export class ToolExecutor {
       store.audit.record({
         userId,
         turnId,
+        parentTurnId,
         agent: agent.name,
         tool: tool.name,
         arguments: args,
@@ -411,6 +454,7 @@ export class ToolExecutor {
         type: status === 'cancelled' ? 'TURN_CANCELLED' : 'ERROR',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary:
@@ -450,6 +494,7 @@ export class ToolExecutor {
     store.audit.record({
       userId,
       turnId,
+      parentTurnId,
       agent: agent.name,
       tool: tool.name,
       arguments: args,
@@ -466,6 +511,7 @@ export class ToolExecutor {
       type: 'TOOL_RESULT',
       userId,
       turnId,
+      parentTurnId,
       conversationId,
       agent: agent.name,
       summary: `${tool.name}: ${truncate(result.summary, 120)}`,
@@ -484,6 +530,7 @@ export class ToolExecutor {
         type: 'ACTION_EXECUTED',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: `${tool.risk}: ${truncate(result.summary, 120)}`,
@@ -500,6 +547,7 @@ export class ToolExecutor {
         type: 'MEMORY_READ',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: truncate(result.summary, 140),
@@ -512,6 +560,7 @@ export class ToolExecutor {
         type: 'MEMORY_WRITE',
         userId,
         turnId,
+        parentTurnId,
         conversationId,
         agent: agent.name,
         summary: truncate(result.summary, 140),

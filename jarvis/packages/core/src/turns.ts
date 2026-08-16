@@ -24,6 +24,15 @@ import { DEFAULT_TOOL_TIMEOUT_MS, id, now } from '@jarvis/shared';
 export interface TurnContext {
   readonly turnId: string;
   readonly signal: AbortSignal;
+  /**
+   * The turn that caused this one.
+   *
+   * Set when a turn was started by a decision on another turn's approval. The
+   * approved action is genuinely its own turn — a human started it, and it has
+   * its own cancellation boundary — so `turnId` keeps its meaning and the
+   * causal link is recorded separately.
+   */
+  readonly parentTurnId: string | null;
 }
 
 /** Why a turn stopped. Cancellation is never collapsed into a generic error. */
@@ -58,6 +67,7 @@ export class ToolTimeoutError extends Error {
 
 export interface TurnInfo {
   turnId: string;
+  parentTurnId: string | null;
   userId: string;
   conversationId: string | null;
   startedAt: string;
@@ -73,6 +83,7 @@ export interface TurnInfo {
  */
 export class TurnHandle {
   readonly turnId: string;
+  readonly parentTurnId: string | null;
   readonly userId: string;
   readonly conversationId: string | null;
   readonly startedAt: string;
@@ -86,9 +97,11 @@ export class TurnHandle {
     turnId: string;
     userId: string;
     conversationId: string | null;
+    parentTurnId?: string | null;
     onEnd: (turnId: string) => void;
   }) {
     this.turnId = options.turnId;
+    this.parentTurnId = options.parentTurnId ?? null;
     this.userId = options.userId;
     this.conversationId = options.conversationId;
     this.startedAt = now();
@@ -106,7 +119,7 @@ export class TurnHandle {
   }
 
   get context(): TurnContext {
-    return { turnId: this.turnId, signal: this.#controller.signal };
+    return { turnId: this.turnId, signal: this.#controller.signal, parentTurnId: this.parentTurnId };
   }
 
   isCancelled(): boolean {
@@ -143,6 +156,7 @@ export class TurnHandle {
   info(): TurnInfo {
     return {
       turnId: this.turnId,
+      parentTurnId: this.parentTurnId,
       userId: this.userId,
       conversationId: this.conversationId,
       startedAt: this.startedAt,
@@ -162,12 +176,19 @@ export class TurnHandle {
 export class TurnRegistry {
   private turns = new Map<string, TurnHandle>();
 
-  begin(options: { userId: string; conversationId?: string | null; turnId?: string }): TurnHandle {
+  begin(options: {
+    userId: string;
+    conversationId?: string | null;
+    turnId?: string;
+    /** Set when this turn was started by a decision on another turn's approval. */
+    parentTurnId?: string | null;
+  }): TurnHandle {
     const turnId = options.turnId ?? id('turn');
     const handle = new TurnHandle({
       turnId,
       userId: options.userId,
       conversationId: options.conversationId ?? null,
+      parentTurnId: options.parentTurnId ?? null,
       onEnd: (finished) => {
         this.turns.delete(finished);
       },

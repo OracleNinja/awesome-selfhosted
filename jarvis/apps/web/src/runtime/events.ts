@@ -117,6 +117,9 @@ export function normalizeEvent(raw: unknown, receivedAt = Date.now()): RuntimeEv
     // must not make an older client blind, it should just show it plainly.
     type: candidate.type as JarvisEvent['type'],
     turnId: typeof candidate.turnId === 'string' ? candidate.turnId : null,
+    // Correlation only. A turn that claims a parent it does not have changes
+    // nothing about what it is allowed to do.
+    parentTurnId: typeof candidate.parentTurnId === 'string' ? candidate.parentTurnId : null,
     conversationId: typeof candidate.conversationId === 'string' ? candidate.conversationId : null,
     userId: typeof candidate.userId === 'string' ? candidate.userId : '',
     agent: typeof candidate.agent === 'string' ? candidate.agent : 'unknown',

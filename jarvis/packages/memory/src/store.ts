@@ -4,6 +4,7 @@ import { MemoryRepo } from './memories.ts';
 import { TaskRepo } from './tasks.ts';
 import { ApprovalRepo } from './approvals.ts';
 import { AuditRepo, EventRepo } from './audit.ts';
+import { UsageRepo } from './usage.ts';
 import { AgentRepo } from './agents.ts';
 
 /**
@@ -21,6 +22,7 @@ export class Store {
   readonly audit: AuditRepo;
   readonly events: EventRepo;
   readonly agents: AgentRepo;
+  readonly usage: UsageRepo;
 
   constructor(path: string) {
     this.db = openDatabase(path);
@@ -33,6 +35,7 @@ export class Store {
     this.audit = new AuditRepo(this.db);
     this.events = new EventRepo(this.db);
     this.agents = new AgentRepo(this.db);
+    this.usage = new UsageRepo(this.db);
   }
 
   /**
@@ -83,6 +86,7 @@ export class Store {
       'approvals',
       'audit_events',
       'events',
+      'model_usage',
     ];
     return {
       ok: required.every((table) => tables.includes(table)),

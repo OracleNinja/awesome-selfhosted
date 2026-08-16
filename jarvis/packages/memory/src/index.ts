@@ -5,5 +5,6 @@ export * from './memories.ts';
 export * from './tasks.ts';
 export * from './approvals.ts';
 export * from './audit.ts';
+export * from './usage.ts';
 export * from './agents.ts';
 export * from './store.ts';

@@ -45,7 +45,7 @@ describe('tool registry', () => {
 
   it('refuses malformed tool names and non-object schemas', () => {
     const bad: ToolDefinition = { ...currentTimeTool, name: 'Bad Name' };
-    expect(() => registry.register(bad)).toThrow(/invalid tool name/);
+    expect(() => registry.register(bad)).toThrow(/invalid capability name/);
 
     const badSchema = {
       ...currentTimeTool,

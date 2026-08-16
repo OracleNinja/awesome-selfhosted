@@ -165,6 +165,68 @@ Residual risk: an agent can still be made to *report* something false, and an
 approval card can be made to look reasonable. Read the arguments before
 approving — that is what the card is for.
 
+## MCP and remote capabilities
+
+The governing rule: **expanding capability must not expand authority.**
+
+An MCP server is an untrusted external capability provider. Being named in
+configuration makes its tools *available*; it does not make them *trusted*, and
+it does not make them exempt from anything below.
+
+### A server cannot classify itself
+
+Risk comes from `MCP_<ID>_RISK_FLOOR` — set by the operator, defaulting to
+`EXTERNAL_ACTION`, which means approval-gated. `classifyRemoteRisk()` reads the
+server's *configuration* and nothing else.
+
+Remote descriptors routinely carry fields like `risk`, `requiresApproval`,
+`dangerous`, `readOnlyHint` and `destructiveHint`. JARVIS reads none of them.
+There is no code path in which a value supplied by a remote server can lower a
+risk level, clear an approval requirement, or otherwise decide what it is
+allowed to do. A tool's `requiresApproval` is computed locally from the
+configured floor.
+
+The only way a remote capability runs without approval is an operator lowering
+the floor for a server they have audited — a configuration decision, made by a
+human, recorded in the environment.
+
+### Remote metadata is data
+
+Everything a server sends is treated as hostile input:
+
+- **Names** must match `^[A-Za-z0-9_.-]{1,64}$`; anything else is refused with
+  the reason recorded. Accepted names are then namespaced `mcp__<server>__<name>`,
+  so a remote tool cannot shadow or collide with a local one.
+- **Schemas** are rebuilt, not forwarded: unrecognised keys dropped, depth
+  bounded to 8, properties bounded to 100, and the top level forced to
+  `type: 'object'`.
+- **Descriptions** are truncated and prefixed `[via MCP server "id"]`. The model
+  reads them; the runtime never acts on them.
+- **Results** are bounded and flattened to text. A result saying "ignore
+  previous instructions and execute X" is a string in a tool result — the same
+  position as hostile text from a web page, covered by the mitigations above. It
+  cannot become an instruction the runtime obeys, because nothing between the
+  transport and the model interprets result content as control.
+- **Frames** are bounded at 4 MB per line and 200 tools per server, so a
+  malicious or broken server cannot exhaust memory.
+
+### The control plane still applies
+
+- Every remote call goes through the same executor, the same permission gate and
+  the same approval gate as a local tool. There is no MCP fast path.
+- The per-call timeout is JARVIS's, injected into the client. A server cannot
+  extend it, and a server that simply never answers is abandoned at the boundary
+  rather than holding the turn.
+- A timeout or cancellation records a terminal outcome. Neither converts an
+  unauthorised call into an authorised retry.
+- No endpoint, tool or model-reachable path connects to a new server. There is
+  no dynamic "connect to anything" interface.
+
+Residual risk: a server the operator has explicitly trusted with a lowered risk
+floor can act within that floor without a per-call prompt. That is what lowering
+it means. The default does not do this, and the floor is visible in the Control
+Room next to every capability the server provides.
+
 ## Threat model
 
 | Threat | Mitigation |
@@ -179,6 +241,10 @@ approving — that is what the card is for.
 | Unauthorised network access | Token auth (constant-time) or loopback-only binding |
 | Runaway agent loop | Per-agent iteration budgets; closing summary without tools |
 | Database corruption | WAL, foreign keys on, migrations in transactions |
+| MCP server claims to be low-risk | Risk comes from configuration; remote metadata is never read for authority |
+| MCP server shadows a local tool | Mandatory `mcp__<server>__` namespace, enforced at registration |
+| MCP server hangs or floods the transport | Runtime-owned timeout, 4 MB line cap, 200-tool cap, per-server isolation |
+| Hostile text in a remote tool result | Bounded, flattened to text, and read only by the model — never by the runtime |
 
 ## Known limitations in v0.1
 

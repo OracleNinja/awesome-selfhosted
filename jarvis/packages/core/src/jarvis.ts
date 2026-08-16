@@ -20,6 +20,7 @@ import {
   type JarvisConfig,
   type JarvisEvent,
   type ProviderStatus,
+  type ToolInfo,
 } from '@jarvis/shared';
 import { Store } from '@jarvis/memory';
 import { PermissionPolicy } from '@jarvis/security';
@@ -30,6 +31,7 @@ import {
   createSearchProvider,
   createVideoProvider,
   createVisionProvider,
+  ModelRouter,
   modelProviderStatuses,
   type ImageEditingProvider,
   type ImageGenerationProvider,
@@ -51,6 +53,7 @@ import {
   delegateAgentTool,
   loadAgentDefinitions,
 } from '@jarvis/agents';
+import { McpManager, type McpServerStatus } from '@jarvis/mcp';
 import { ToolExecutor } from './executor.ts';
 import { Orchestrator, type TurnResult } from './orchestrator.ts';
 import { RuntimeMonitor, type RuntimeActivity } from './monitor.ts';
@@ -102,6 +105,14 @@ export interface RuntimeStateSnapshot {
   }[];
   approvals: ApprovalRequest[];
   tools: { total: number; requiringApproval: number; names: string[] };
+  /** Every registered capability, local and remote, with its provenance. */
+  capabilities: ToolInfo[];
+  /** Configured MCP servers and their connection state. */
+  mcpServers: McpServerStatus[];
+  /** What each provider can do, and which is default. */
+  routing: ReturnType<ModelRouter['inventory']>;
+  /** Token and latency totals. Nulls where a provider does not report. */
+  usage: ReturnType<Store['usage']['summary']>;
   database: { ok: boolean; schemaVersion: number; tables: string[] };
   counts: { memories: number; auditEvents: number; pendingApprovals: number; conversations: number };
   recentEvents: JarvisEvent[];
@@ -138,6 +149,10 @@ export class Jarvis {
   readonly monitor: RuntimeMonitor;
   /** Owns every in-flight turn's cancellation boundary. */
   readonly turns: TurnRegistry;
+  /** Capability-based model selection. */
+  readonly router: ModelRouter;
+  /** Configured MCP servers. Empty when none are declared. */
+  readonly mcp: McpManager;
   readonly telemetry: TelemetryCollector;
   private approvalSweep: ReturnType<typeof setInterval> | null = null;
 
@@ -170,6 +185,7 @@ export class Jarvis {
     this.monitor = new RuntimeMonitor(this.events);
     this.telemetry = new TelemetryCollector();
     this.turns = new TurnRegistry();
+    this.router = new ModelRouter(config, { providers: { [config.modelProvider]: this.provider } });
 
     // Expiry can be triggered by any approval read, so the announcement is
     // attached to the repository rather than to a periodic sweep.
@@ -219,6 +235,7 @@ export class Jarvis {
     this.orchestrator = new Orchestrator({
       provider: this.provider,
       turns: this.turns,
+      router: this.router,
       registry: this.registry,
       executor: this.executor,
       store: this.store,
@@ -230,6 +247,14 @@ export class Jarvis {
       this.store.agents.register(definition);
     }
     this.store.agents.register(this.jarvisAgent);
+
+    // MCP servers are declared in configuration and connected explicitly at
+    // startup. Nothing self-registers, and a failing server stays local to
+    // itself — its capabilities become unavailable, the runtime does not.
+    this.mcp = new McpManager(config.mcpServers, {
+      registry: this.registry,
+      events: this.events,
+    });
 
     mkdirSync(config.workspaceDir, { recursive: true });
   }
@@ -264,7 +289,13 @@ export class Jarvis {
     // The approved action runs in its own turn: it is a new unit of work,
     // started by the human decision rather than by the original message, and it
     // needs its own cancellation boundary.
-    const approvalTurn = this.turns.begin({ userId, conversationId: resolved.conversationId });
+    // parentTurnId records which turn asked for this. The approved action is
+    // still its own turn — a human started it — so turnId keeps its meaning.
+    const approvalTurn = this.turns.begin({
+      userId,
+      conversationId: resolved.conversationId,
+      parentTurnId: this.store.events.turnForApproval(approvalId),
+    });
     let outcome;
     try {
       outcome = await this.executor.executeApproved(resolved, agent, approvalTurn.context);
@@ -294,6 +325,7 @@ export class Jarvis {
         userId,
         conversationId: resolved.conversationId,
         turnId: approvalTurn.turnId,
+        parentTurnId: approvalTurn.parentTurnId,
         note: noteText,
         fallback:
           outcome.status === 'executed'
@@ -480,6 +512,17 @@ export class Jarvis {
   }
 
   /**
+   * Connect configured MCP servers and register what they offer.
+   *
+   * Separate from the constructor because it is async and does I/O: a
+   * constructor that reaches out to subprocesses cannot be used in a test
+   * without them. Returns per-server status rather than throwing.
+   */
+  async connectMcpServers(): Promise<McpServerStatus[]> {
+    return this.mcp.connectAll();
+  }
+
+  /**
    * Start periodic background work.
    *
    * Only the server calls this. Tests construct a Jarvis without timers, so a
@@ -573,6 +616,10 @@ export class Jarvis {
           .length,
         names: this.registry.list().map((tool) => tool.name),
       },
+      capabilities: this.capabilityInfos(),
+      mcpServers: this.mcp.status(),
+      routing: this.router.inventory(),
+      usage: this.store.usage.summary(userId),
       database: this.store.health(),
       counts: {
         memories: this.store.memories.count(userId),
@@ -585,6 +632,21 @@ export class Jarvis {
     };
   }
 
+  /**
+   * Every capability with its availability.
+   *
+   * One list covering local and remote alike — the point of the registry is
+   * that there is no separate MCP inventory to consult.
+   */
+  capabilityInfos(): ToolInfo[] {
+    return this.registry.infos((tool) => {
+      if (tool.name === 'web_search' && !this.search.isAvailable()) {
+        return { available: false, reason: this.search.status().reason ?? 'search not configured' };
+      }
+      return { available: true };
+    });
+  }
+
   publicConfig() {
     return publicConfig(this.config);
   }
@@ -593,6 +655,7 @@ export class Jarvis {
     this.stopBackgroundTasks();
     // Stop in-flight work rather than leaving controllers dangling.
     this.turns.cancelAll();
+    this.mcp.shutdown();
     this.store.close();
   }
 }

@@ -203,6 +203,34 @@ export interface ToolDefinition {
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }
 
+/**
+ * Where a capability came from.
+ *
+ * Provenance is recorded by JARVIS at registration time, never declared by the
+ * capability itself — a remote server describes what its tool does, it does not
+ * get to say where it came from or what it is allowed to do.
+ */
+export type CapabilitySource =
+  | { kind: 'local' }
+  | {
+      kind: 'mcp';
+      /** Configured server id. Part of the namespace, assigned by JARVIS. */
+      server: string;
+      /** The name the remote server used. Kept for display and debugging only. */
+      remoteName: string;
+    };
+
+/** A registered capability: the tool, plus how JARVIS came to have it. */
+export interface CapabilityRecord {
+  definition: ToolDefinition;
+  source: CapabilitySource;
+  /** Disabled capabilities are refused at execution and hidden from models. */
+  enabled: boolean;
+  registeredAt: ISODate;
+  /** Set when the capability is unusable — a disconnected MCP server, say. */
+  unavailableReason?: string;
+}
+
 /** Serialisable view of a tool — safe to send to the browser. */
 export interface ToolInfo {
   name: string;
@@ -214,6 +242,9 @@ export interface ToolInfo {
   timeoutMs: number;
   available: boolean;
   unavailableReason?: string;
+  /** `local`, or the MCP server this came from. */
+  source: CapabilitySource;
+  enabled: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +317,8 @@ export interface JarvisEvent {
   type: EventType;
   /** The turn this event belongs to. Null for records written before v0.2. */
   turnId: string | null;
+  /** The turn that caused this one, when started by an approval decision. */
+  parentTurnId: string | null;
   conversationId: string | null;
   userId: string;
   agent: string;
@@ -321,6 +354,8 @@ export interface AuditEvent {
   timestamp: ISODate;
   /** The turn this invocation belongs to. Null for pre-v0.2 records. */
   turnId: string | null;
+  /** The turn that caused this one, when started by an approval decision. */
+  parentTurnId: string | null;
   userId: string;
   agent: string;
   tool: string;

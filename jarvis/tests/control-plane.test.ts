@@ -863,11 +863,12 @@ describe('turn correlation', () => {
     const indexes = harness.jarvis.store.db
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%turn%'")
       .all() as { name: string }[];
-    expect(indexes.map((row) => row.name).sort()).toEqual([
-      'idx_audit_turn',
-      'idx_events_turn',
-      'idx_tool_calls_turn',
-    ]);
+    const names = indexes.map((row) => row.name).sort();
+    // Correlation columns are indexed because "everything in this turn" is the
+    // query they exist to serve.
+    expect(names).toContain('idx_audit_turn');
+    expect(names).toContain('idx_events_turn');
+    expect(names).toContain('idx_tool_calls_turn');
   });
 
   it('applies the migration to an existing v1 database without losing history', async () => {
@@ -906,7 +907,7 @@ describe('turn correlation', () => {
 
     // Reopen: migration 2 runs against the v1 database.
     const second = new Store(path);
-    expect(second.health().schemaVersion).toBe(2);
+    expect(second.health().schemaVersion).toBe(3);
 
     // History survives.
     expect(second.conversations.get(conversation.id)?.title).toBe('Old conversation');

@@ -15,6 +15,8 @@ export interface EmitOptions {
   userId: string;
   /** Correlates this event with the user turn that caused it. */
   turnId?: string | null;
+  /** Set when this turn was started by a decision on another turn's approval. */
+  parentTurnId?: string | null;
   conversationId?: string | null;
   agent?: string;
   summary: string;
@@ -42,6 +44,7 @@ export class EventBus {
       id: id('evt'),
       type: options.type,
       turnId: options.turnId ?? null,
+      parentTurnId: options.parentTurnId ?? null,
       conversationId: options.conversationId ?? null,
       userId: options.userId,
       agent: options.agent ?? 'jarvis',

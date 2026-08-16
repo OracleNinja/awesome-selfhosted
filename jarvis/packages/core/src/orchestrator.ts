@@ -20,7 +20,8 @@ import type {
 } from '@jarvis/shared';
 import { EventBus, truncate } from '@jarvis/shared';
 import type { Store } from '@jarvis/memory';
-import type { ModelProvider } from '@jarvis/providers';
+import type { ModelProvider, ModelRouter, CapabilityName } from '@jarvis/providers';
+import { NoCapableModelError } from '@jarvis/providers';
 import type { ToolRegistry } from '@jarvis/tools';
 import type { ToolExecutor } from './executor.ts';
 import { TurnRegistry, type TurnHandle, type TurnOutcome } from './turns.ts';
@@ -29,6 +30,8 @@ export interface OrchestratorDeps {
   provider: ModelProvider;
   /** Owns the cancellation boundary for every turn this orchestrator runs. */
   turns: TurnRegistry;
+  /** Chooses a model by capability. Falls back to `provider` when absent. */
+  router?: ModelRouter;
   registry: ToolRegistry;
   executor: ToolExecutor;
   store: Store;
@@ -62,6 +65,67 @@ export class Orchestrator {
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.historyLimit = deps.historyLimit ?? MAX_HISTORY;
+  }
+
+  /** Route by capability, or fall back to the single configured provider. */
+  private route(required: CapabilityName[]) {
+    if (this.deps.router) return this.deps.router.select(required);
+    return {
+      provider: this.deps.provider,
+      providerId: this.deps.provider.id,
+      model: this.deps.provider.model,
+      requested: required,
+      fallbackUsed: false,
+      reason: 'no router configured; using the single configured provider',
+    };
+  }
+
+  /**
+   * Persist what the call cost and how long it took.
+   *
+   * These numbers were already being measured and thrown away. Token counts
+   * stay null when a provider does not report them — a zero would read as
+   * "free", which is a different claim.
+   *
+   * Attribution comes from the provider that actually served the call, not from
+   * the routing slot it was selected under. The two are the same in a normal
+   * deployment; when they diverge the row should name what really ran, and the
+   * slot survives in `routingReason` either way.
+   */
+  private recordUsage(
+    turn: TurnHandle,
+    userId: string,
+    agent: string,
+    route: {
+      provider: { id: string; model: string };
+      requested: string[];
+      fallbackUsed: boolean;
+      reason: string;
+    },
+    startedAt: number,
+    response: { usage?: { promptTokens: number; completionTokens: number }; latencyMs?: number } | null,
+    outcome: 'ok' | 'error' | 'cancelled',
+    error?: string,
+  ): void {
+    try {
+      this.deps.store.usage.record({
+        turnId: turn.turnId,
+        userId,
+        agent,
+        provider: route.provider.id,
+        model: route.provider.model,
+        requested: route.requested,
+        fallbackUsed: route.fallbackUsed,
+        routingReason: route.reason,
+        inputTokens: response?.usage?.promptTokens ?? null,
+        outputTokens: response?.usage?.completionTokens ?? null,
+        latencyMs: response?.latencyMs ?? Date.now() - startedAt,
+        outcome,
+        ...(error ? { error } : {}),
+      });
+    } catch {
+      /* accounting must never break the request path */
+    }
   }
 
   /** Memories relevant to a piece of text. Shared with the delegation path. */
@@ -169,15 +233,51 @@ export class Orchestrator {
         }
         iterations += 1;
 
+        // Capability-based routing: offering tools means the model must be
+        // able to call them. Nothing here inspects what the user asked for.
+        const required: CapabilityName[] = specs.length > 0 ? ['toolUse'] : [];
+        let route;
+        try {
+          route = this.route(required);
+        } catch (error) {
+          if (error instanceof NoCapableModelError) {
+            const reply = `I can't answer that: ${error.message}`;
+            store.messages.append(conversationId, { role: 'assistant', content: reply, agent: 'jarvis' });
+            events.emit({
+              type: 'ERROR',
+              userId,
+              turnId: turn.turnId,
+              conversationId,
+              agent: 'jarvis',
+              summary: `No capable model for ${required.join(' + ')}`,
+              data: { kind: 'provider', requested: required },
+            });
+            return this.result(turn, 'failed', conversationId, reply, collected, toolCalls, iterations, error.message);
+          }
+          throw error;
+        }
+
+        const startedAt = Date.now();
         let response;
         try {
-          response = await provider.chat({
+          response = await route.provider.chat({
             messages,
             tools: specs,
             temperature: 0.4,
             signal: turn.signal,
           });
+          this.recordUsage(turn, userId, 'jarvis', route, startedAt, response, 'ok');
         } catch (error) {
+          this.recordUsage(
+            turn,
+            userId,
+            'jarvis',
+            route,
+            startedAt,
+            null,
+            turn.signal.aborted ? 'cancelled' : 'error',
+            (error as Error).message,
+          );
           // A model call that failed because the turn was cancelled is a
           // cancellation, not a provider failure.
           if (turn.signal.aborted) {
@@ -295,6 +395,8 @@ export class Orchestrator {
     fallback: string;
     /** The turn the approval decision belongs to, so the follow-up correlates to it. */
     turnId?: string;
+    /** The turn that originally requested the approval. */
+    parentTurnId?: string | null;
   }): Promise<TurnResult> {
     const { store, events, provider } = this.deps;
     const { userId, conversationId, note, fallback } = input;
@@ -303,6 +405,7 @@ export class Orchestrator {
       userId,
       conversationId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
+      ...(input.parentTurnId ? { parentTurnId: input.parentTurnId } : {}),
     });
 
     const collected: JarvisEvent[] = [];
@@ -355,6 +458,7 @@ export class Orchestrator {
         type: 'MODEL_RESPONSE',
         userId,
         turnId: turn.turnId,
+        parentTurnId: turn.parentTurnId,
         conversationId,
         agent: 'jarvis',
         summary: truncate(reply, 140),

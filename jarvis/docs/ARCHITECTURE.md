@@ -92,6 +92,71 @@ The id reaches `events`, `audit_events` and `tool_calls`, which is what makes
 rather than three timestamp scans. Columns are nullable: rows written before
 v0.2 have no turn, and reading a null is a better trade than destroying history.
 
+### Parent turns
+
+A turn started by resolving an approval records `parentTurnId` — the turn that
+originally asked. This closes the one correlation gap turn ids alone could not:
+an approved action runs minutes later, in a new turn, and without the link the
+audit trail shows an execution with no visible cause.
+
+The link survives a restart because it is recovered from the approval record
+(`AuditRepo.turnForApproval`) rather than held in memory. It is written on
+`events` and `audit_events` and is nullable, so an ordinary turn simply has no
+parent.
+
+`parentTurnId` is **correlation metadata and nothing else**. It grants no
+authority, is never read by the permission or approval gates, and a turn that
+claimed a parent it did not have would gain exactly nothing by it.
+
+## Capabilities
+
+A *capability* is anything the model can invoke. Local tools and remote MCP
+tools are the same kind of thing to every layer above the registry — the point
+of the design is that there is no second inventory to consult and no second
+code path to secure.
+
+[`ToolRegistry`](../packages/tools/src/registry.ts) holds a `CapabilityRecord`
+per capability: the definition, its provenance (`{kind:'local'}` or
+`{kind:'mcp', server, remoteName}`), whether it is enabled, and why not when it
+is not. Disabling is deliberately distinct from removing — a disconnected MCP
+server's capabilities stay visible with a reason attached, so a model asking for
+one gets "unavailable because …" rather than "no such tool".
+
+Remote capabilities are namespaced `mcp__<server>__<tool>`, which is enforced at
+registration in both directions: an MCP capability must carry the prefix, and a
+local one may not. A remote server therefore cannot shadow, replace or collide
+with a local capability no matter what it names its tools.
+
+### MCP
+
+[`packages/mcp`](../packages/mcp) speaks JSON-RPC 2.0 over newline-delimited
+JSON on stdio, written directly rather than pulled in as a dependency — the
+protocol surface JARVIS uses is small, and a client is where the trust boundary
+lives, so it is worth owning.
+
+```
+McpManager ── per server ──▶ McpClient (child process, stdio)
+     │                            │
+     │                            └─ listTools / callTool, bounded and shape-checked
+     └─ adapter ──▶ ToolDefinition ──▶ ToolRegistry ──▶ the same executor as a local tool
+```
+
+Three properties matter:
+
+- **Failure is per-server.** A server that will not start, hangs during the
+  handshake, or returns nonsense from `tools/list` disables its own capabilities
+  and nothing else. `connectAll()` never throws.
+- **Remote metadata is data.** Names, descriptions, schemas and annotations are
+  bounded, sanitised and — crucially — never consulted for authority. See
+  [SECURITY](SECURITY.md#mcp-and-remote-capabilities).
+- **JARVIS owns the clock.** The per-call timeout is the runtime's, injected
+  into the client; a remote server cannot extend it. Cancellation sends
+  `notifications/cancelled` as a courtesy and stops waiting regardless.
+
+Servers are declared in configuration (`MCP_SERVERS`). There is no endpoint,
+tool or model-reachable path that connects to a new server: configuration
+establishes availability, and nothing at runtime can add to it.
+
 ## The executor
 
 [`packages/core/src/executor.ts`](../packages/core/src/executor.ts) is the single
@@ -175,6 +240,26 @@ interface ModelProvider {
   matter (top-level system, `tool_use` blocks, `tool_result` inside a user
   message) so the orchestrator never learns about them.
 
+### Capability-based routing
+
+The orchestrator asks for *capabilities*, not vendors: offering tools on a turn
+means the call requires `toolUse`, so that is what it requests.
+[`ModelRouter`](../packages/providers/src/routing.ts) answers with the first
+provider in a declared order that is both available and capable — configured
+default first, then `MODEL_ROUTING_FALLBACK`.
+
+This is deliberately **not** difficulty routing. Deciding "this question is
+hard" before answering it costs either a second model call or a heuristic that
+is wrong in both directions, and a wrong route is worse than no route.
+Capabilities are facts about a model; difficulty is a guess about a request.
+
+Capabilities are declared per provider (`<PROVIDER>_CAPABILITIES`) because they
+depend on which model is configured, and JARVIS cannot interrogate a remote model
+to find out. An undeclared capability is treated as absent. When nothing can
+serve a request the router throws `NoCapableModelError` listing what it
+considered — a clear failure rather than a quiet downgrade to a model that will
+answer confidently and wrongly.
+
 The same pattern covers voice, image, image editing, video, vision and search.
 Every one of them answers `isAvailable()` honestly and, when unconfigured,
 throws `ProviderUnavailableError` with the reason — which the API surfaces as
@@ -183,7 +268,7 @@ result to fill a gap.
 
 ## Data model
 
-Ten tables, one migration, `user_version` tracking.
+Eleven tables, three append-only migrations, `user_version` tracking.
 
 | Table | Holds |
 |---|---|
@@ -197,9 +282,21 @@ Ten tables, one migration, `user_version` tracking.
 | `approvals` | Human approval requests and decisions |
 | `audit_events` | The audit log |
 | `events` | Persisted activity stream |
+| `model_usage` | Per-call tokens, latency and routing decision |
 
 `ORDER BY` clauses on time columns always carry a `rowid` tiebreaker: two rows
 written in the same millisecond would otherwise come back in arbitrary order.
+
+Migrations only add. `turn_correlation` (v2) added nullable `turn_id` columns;
+`usage_and_parent_turn` (v3) added `model_usage` and nullable `parent_turn_id`.
+Nothing rewrites or drops existing rows, so an older database keeps its history
+and simply reads null for what it never recorded.
+
+`model_usage` stores tokens, latency, outcome and the routing decision that
+produced the call. Token columns are nullable and the total is derived only when
+both halves are known — a zero would read as "free", which is a different claim
+from "not reported". There is no cost column: pricing changes outside the
+runtime and hard-coding it would produce confident, stale numbers.
 
 ## Composition root
 

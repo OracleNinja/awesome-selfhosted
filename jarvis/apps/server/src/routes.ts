@@ -219,18 +219,49 @@ export function createRouter(jarvis: Jarvis): Router {
     ctx.json(201, { task });
   });
 
-  // ----------------------------------------------------------------- tools
+  // ---------------------------------------------------------- capabilities
   router.get('/api/tools', (ctx) => {
-    const infos = jarvis.registry.infos((tool) => {
-      // A tool is "available" when its backing capability is configured.
-      if (tool.name === 'web_search' && !jarvis.search.isAvailable()) {
-        return { available: false, reason: jarvis.search.status().reason ?? 'search not configured' };
-      }
-      return { available: true };
-    });
     ctx.json(200, {
-      tools: infos,
+      tools: jarvis.capabilityInfos(),
       approvalRequiredLevels: [...jarvis.policy.requiredLevels],
+    });
+  });
+
+  /**
+   * The whole capability picture: what JARVIS can do, where each capability
+   * came from, which models can serve which requests, and the state of every
+   * configured MCP server.
+   *
+   * Read-only. Nothing here lets a client enable a capability, connect a
+   * server or change a risk floor — those are configuration, not requests.
+   */
+  router.get('/api/capabilities', (ctx) => {
+    const capabilities = jarvis.capabilityInfos();
+    ctx.json(200, {
+      capabilities,
+      counts: {
+        total: capabilities.length,
+        enabled: capabilities.filter((capability) => capability.enabled).length,
+        local: capabilities.filter((capability) => capability.source.kind === 'local').length,
+        remote: capabilities.filter((capability) => capability.source.kind === 'mcp').length,
+        approvalGated: capabilities.filter((capability) => capability.requiresApproval).length,
+      },
+      approvalRequiredLevels: [...jarvis.policy.requiredLevels],
+      models: jarvis.router.inventory(),
+      mcpServers: jarvis.mcp.status(),
+    });
+  });
+
+  // ----------------------------------------------------------------- usage
+  /**
+   * Recorded model usage. Tokens and latency only — JARVIS does not price
+   * anything, so there is no cost field to be wrong about.
+   */
+  router.get('/api/usage', (ctx) => {
+    const limit = Math.min(Number(ctx.query.get('limit') ?? 100) || 100, 500);
+    ctx.json(200, {
+      summary: jarvis.store.usage.summary(ctx.userId),
+      calls: jarvis.store.usage.list(ctx.userId, limit),
     });
   });
 

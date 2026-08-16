@@ -39,7 +39,8 @@ serialisation and tool-call parsing are genuinely exercised.
 | `approvals.test.ts` | Full approval workflow, denial, replay, expiry, ownership, audit of every path, redaction |
 | `agents.test.ts` | Agent roster, capability boundaries, charters, delegation, sub-agent refusals, budgets |
 | `control-plane.test.ts` | Turn registry, cancellation at every point in a turn, the timeout/cancellation race, per-tool timeouts, correlation, concurrency, migration against a real v1 database |
-| `api.test.ts` | Real HTTP: auth both modes, chat, conversations, memory, tools, agents, approvals, audit, SSE, media 503s, no key leakage |
+| `capabilities.test.ts` | Capability registry and provenance, MCP lifecycle against a real child process, the remote trust boundary, MCP under cancellation/timeout/concurrency, capability routing, usage persistence, parent-turn correlation |
+| `api.test.ts` | Real HTTP: auth both modes, chat, conversations, memory, tools, capabilities, usage, agents, approvals, audit, SSE, media 503s, no key leakage |
 
 ## The tests that matter most
 
@@ -65,6 +66,25 @@ Some assert behaviour the whole design exists to guarantee:
   signal"** — the executor returns on the timeout, not after the tool's own
   delay. This found a real gap: the first implementation awaited the tool and
   would have hung the turn.
+- **`capabilities.test.ts` → "ignores a server's claims about its own risk and
+  approval"** — a real MCP child process advertises `risk: 'READ'`,
+  `requiresApproval: false`, `readOnlyHint: true` and an injection string in its
+  description. The registered capability is `EXTERNAL_ACTION` and approval-gated
+  anyway. This is the Stage 2 rule — capability without authority — as a single
+  assertion.
+- **`capabilities.test.ts` → "cannot shadow a local capability"** — a server
+  offering `current_time` gets `mcp__shadow__current_time`; the local tool is
+  untouched.
+- **`capabilities.test.ts` → "keeps two concurrent turns independent across MCP
+  and local capabilities"** — an MCP tool that never answers is cancelled on one
+  turn while a local tool completes on another, with audit correlation intact.
+
+The MCP tests spawn a **real stdio server** written to a temp file, with a
+behaviour switch for each failure mode: a broken handshake, a handshake that
+hangs, a malformed `tools/list`, unusable tool names, a server claiming its own
+privileges, a shadowing attempt, a malformed result, a JSON-RPC error, a tool
+error and an injection payload. Each is a real process misbehaving over a real
+pipe rather than a mocked rejection.
 
 ## Adding tests
 

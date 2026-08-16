@@ -79,7 +79,14 @@ describe('API (local mode, no token)', () => {
     harness.jarvis.config.nvidia.apiKey = 'nvapi-super-secret-value-9999';
     harness.jarvis.config.anthropic.apiKey = 'sk-ant-super-secret-8888';
 
-    for (const path of ['/api/system/status', '/api/system/config', '/api/tools', '/api/agents']) {
+    for (const path of [
+      '/api/system/status',
+      '/api/system/config',
+      '/api/tools',
+      '/api/capabilities',
+      '/api/usage',
+      '/api/agents',
+    ]) {
       const { body } = await api.request('GET', path);
       const serialised = JSON.stringify(body);
       expect(serialised, path).not.toContain('nvapi-super-secret-value-9999');
@@ -166,6 +173,29 @@ describe('API (local mode, no token)', () => {
     expect(byName.web_search.available).toBe(false);
     expect(byName.web_search.unavailableReason).toBeTruthy();
     expect(body.approvalRequiredLevels).toEqual(['EXTERNAL_ACTION', 'DESTRUCTIVE']);
+  });
+
+  it('reports the whole capability picture on one endpoint', async () => {
+    const { body } = await api.request('GET', '/api/capabilities');
+    expect(body.counts.total).toBe(body.capabilities.length);
+    // No MCP server is configured in the test environment, and the report says
+    // so rather than inventing one.
+    expect(body.counts.remote).toBe(0);
+    expect(body.mcpServers).toEqual([]);
+    expect(body.capabilities.every((capability: { source: { kind: string } }) => capability.source.kind === 'local')).toBe(true);
+    expect(body.models.length).toBeGreaterThan(0);
+    expect(body.models.some((model: { isDefault: boolean }) => model.isDefault)).toBe(true);
+    expect(body.approvalRequiredLevels).toEqual(['EXTERNAL_ACTION', 'DESTRUCTIVE']);
+  });
+
+  it('reports usage without inventing a price', async () => {
+    await api.request('POST', '/api/chat', { message: 'hello' });
+    const { body } = await api.request('GET', '/api/usage');
+    expect(body.summary.calls).toBeGreaterThan(0);
+    expect(body.calls[0].latencyMs).toBeGreaterThanOrEqual(0);
+    expect(body.calls[0].turnId).toBeTruthy();
+    // Cost accounting is explicitly out of scope; nothing here should imply one.
+    expect(JSON.stringify(body)).not.toMatch(/cost|price|usd|\$/i);
   });
 
   it('lists agents with their permitted tools', async () => {

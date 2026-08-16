@@ -171,4 +171,43 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_tool_calls_turn   ON tool_calls(turn_id);
     `,
   },
+  {
+    version: 3,
+    name: 'usage_and_parent_turn',
+    sql: /* sql */ `
+      -- Provider usage and latency were already measured on every call and then
+      -- discarded. This records them. Token columns are nullable because not
+      -- every provider reports them, and a null is the honest answer — a zero
+      -- would read as "this call was free".
+      CREATE TABLE model_usage (
+        id            TEXT PRIMARY KEY,
+        turn_id       TEXT,
+        timestamp     TEXT NOT NULL,
+        user_id       TEXT NOT NULL,
+        agent         TEXT NOT NULL,
+        provider      TEXT NOT NULL,
+        model         TEXT NOT NULL,
+        -- What the caller asked the router for, and what it did about it.
+        requested     TEXT NOT NULL DEFAULT '[]',
+        fallback_used INTEGER NOT NULL DEFAULT 0,
+        routing_reason TEXT,
+        input_tokens  INTEGER,
+        output_tokens INTEGER,
+        total_tokens  INTEGER,
+        latency_ms    INTEGER NOT NULL DEFAULT 0,
+        outcome       TEXT NOT NULL CHECK (outcome IN ('ok','error','cancelled')),
+        error         TEXT
+      );
+      CREATE INDEX idx_usage_turn ON model_usage(turn_id);
+      CREATE INDEX idx_usage_time ON model_usage(user_id, timestamp DESC);
+
+      -- An approved action executes in its own turn, started by a human
+      -- decision rather than by the original message. parent_turn_id keeps the
+      -- causal link without changing what turn_id means.
+      ALTER TABLE events       ADD COLUMN parent_turn_id TEXT;
+      ALTER TABLE audit_events ADD COLUMN parent_turn_id TEXT;
+      CREATE INDEX idx_events_parent_turn ON events(parent_turn_id);
+      CREATE INDEX idx_audit_parent_turn  ON audit_events(parent_turn_id);
+    `,
+  },
 ];

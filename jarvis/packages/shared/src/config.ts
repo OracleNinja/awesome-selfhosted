@@ -22,6 +22,23 @@ export interface ModelEndpointConfig {
   model: string;
 }
 
+/**
+ * What a configured model can do.
+ *
+ * Declared per provider because capability is a property of the *model*, not
+ * the vendor — the same provider serves vision and non-vision models. Mirrored
+ * in @jarvis/providers as ModelCapability; declared here because it is
+ * configuration.
+ */
+export interface ModelCapabilityConfig {
+  toolUse: boolean;
+  vision: boolean;
+  structuredOutput: boolean;
+  streaming: boolean;
+  coding: boolean;
+  longContext: boolean;
+}
+
 export interface JarvisConfig {
   port: number;
   apiToken: string;
@@ -51,6 +68,41 @@ export interface JarvisConfig {
 
   approvalRequiredLevels: RiskLevel[];
   approvalTimeoutSeconds: number;
+
+  /** Declared capabilities per provider, for capability-based routing. */
+  capabilities: Record<ModelProviderId, ModelCapabilityConfig>;
+  /** Deterministic order tried when the default provider cannot serve a request. */
+  routingFallback: ModelProviderId[];
+
+  /** Configured MCP servers. Only these may supply capabilities. */
+  mcpServers: McpServerConfig[];
+}
+
+/**
+ * A configured MCP server.
+ *
+ * Servers are declared here and nowhere else: there is no interface for a
+ * remote server to register itself, because "connect to anything" is how a
+ * capability system becomes an attack surface.
+ */
+export interface McpServerConfig {
+  /** JARVIS-assigned id. Forms the capability namespace; never taken from the server. */
+  id: string;
+  /** Stdio is the only transport in v0.2. */
+  transport: 'stdio';
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  enabled: boolean;
+  /**
+   * Risk floor for every tool this server offers.
+   *
+   * JARVIS decides this, not the server. Defaults to EXTERNAL_ACTION: a remote
+   * capability reaches outside the runtime by definition, so it is
+   * approval-gated unless an operator deliberately lowers it.
+   */
+  riskFloor: RiskLevel;
+  timeoutMs: number;
 }
 
 /** The subset of configuration the browser is allowed to know about. */
@@ -132,6 +184,82 @@ export function resolveDatabasePath(databaseUrl: string, root = repoRoot()): str
   return resolve(root, raw);
 }
 
+const DEFAULT_CAPABILITY_FLAGS: Record<ModelProviderId, ModelCapabilityConfig> = {
+  nvidia: { toolUse: true, vision: false, structuredOutput: true, streaming: true, coding: true, longContext: false },
+  anthropic: { toolUse: true, vision: true, structuredOutput: true, streaming: true, coding: true, longContext: true },
+  openai: { toolUse: true, vision: true, structuredOutput: true, streaming: true, coding: true, longContext: true },
+  // A local runtime could be anything; claim nothing until told otherwise.
+  local: { toolUse: false, vision: false, structuredOutput: false, streaming: false, coding: false, longContext: false },
+};
+
+const CAPABILITY_KEYS: (keyof ModelCapabilityConfig)[] = [
+  'toolUse',
+  'vision',
+  'structuredOutput',
+  'streaming',
+  'coding',
+  'longContext',
+];
+
+/** `toolUse,vision` → a capability set. Unknown names are ignored. */
+export function parseCapabilityFlags(
+  raw: string,
+  fallback: ModelCapabilityConfig,
+): ModelCapabilityConfig {
+  if (!raw.trim()) return { ...fallback };
+  const declared = new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean));
+  const result = { ...fallback };
+  for (const key of CAPABILITY_KEYS) result[key] = declared.has(key);
+  return result;
+}
+
+/**
+ * Parse MCP server declarations from the environment.
+ *
+ * Format: `MCP_SERVERS=id:command arg arg;other:command`. Anything more
+ * elaborate belongs in a config file, which is a Stage 3 concern; this keeps
+ * declaration explicit and auditable in one place.
+ */
+export function parseMcpServers(env: NodeJS.ProcessEnv): McpServerConfig[] {
+  const raw = str(env, 'MCP_SERVERS');
+  if (!raw.trim()) return [];
+
+  const servers: McpServerConfig[] = [];
+  for (const entry of raw.split(';')) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const colon = trimmed.indexOf(':');
+    if (colon <= 0) continue;
+
+    const id = trimmed.slice(0, colon).trim();
+    const commandLine = trimmed.slice(colon + 1).trim();
+    if (!id || !commandLine) continue;
+    // The id becomes a capability namespace, so it must be a safe identifier.
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(id)) continue;
+
+    const parts = commandLine.split(/\s+/);
+    const command = parts[0]!;
+    const upper = id.toUpperCase();
+
+    servers.push({
+      id,
+      transport: 'stdio',
+      command,
+      args: parts.slice(1),
+      env: {},
+      enabled: str(env, `MCP_${upper}_ENABLED`, 'true') !== 'false',
+      riskFloor: (() => {
+        const declared = str(env, `MCP_${upper}_RISK_FLOOR`, 'EXTERNAL_ACTION').toUpperCase();
+        return (RISK_LEVELS as readonly string[]).includes(declared)
+          ? (declared as RiskLevel)
+          : 'EXTERNAL_ACTION';
+      })(),
+      timeoutMs: num(env, `MCP_${upper}_TIMEOUT_MS`, 30_000),
+    });
+  }
+  return servers;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): JarvisConfig {
   const root = repoRoot();
   const approvalLevels = str(env, 'APPROVAL_REQUIRED_LEVELS', 'EXTERNAL_ACTION,DESTRUCTIVE')
@@ -208,6 +336,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JarvisConfig {
 
     approvalRequiredLevels: approvalLevels,
     approvalTimeoutSeconds: num(env, 'APPROVAL_TIMEOUT_SECONDS', 900),
+
+    capabilities: {
+      nvidia: parseCapabilityFlags(str(env, 'NVIDIA_CAPABILITIES'), DEFAULT_CAPABILITY_FLAGS.nvidia),
+      anthropic: parseCapabilityFlags(str(env, 'ANTHROPIC_CAPABILITIES'), DEFAULT_CAPABILITY_FLAGS.anthropic),
+      openai: parseCapabilityFlags(str(env, 'OPENAI_CAPABILITIES'), DEFAULT_CAPABILITY_FLAGS.openai),
+      local: parseCapabilityFlags(str(env, 'LOCAL_CAPABILITIES'), DEFAULT_CAPABILITY_FLAGS.local),
+    },
+    routingFallback: str(env, 'MODEL_ROUTING_FALLBACK')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry): entry is ModelProviderId =>
+        ['nvidia', 'anthropic', 'openai', 'local'].includes(entry),
+      ),
+
+    mcpServers: parseMcpServers(env),
   };
 }
 

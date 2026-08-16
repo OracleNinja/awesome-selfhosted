@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createJarvis, type Jarvis } from '@jarvis/core';
+import { createJarvis, type Jarvis, type TurnContext } from '@jarvis/core';
 import { loadConfig, type ChatMessage, type JarvisConfig, type ProviderStatus, type ToolCall } from '@jarvis/shared';
 import type { ChatRequest, ChatResponse, ModelProvider } from '@jarvis/providers';
 
@@ -115,8 +115,8 @@ export class ScriptedProvider implements ModelProvider {
  * A standalone turn context, for tests that drive the runner or executor
  * directly rather than through the orchestrator (which makes its own).
  */
-export function testTurn(turnId = 'turn_test'): { turnId: string; signal: AbortSignal } {
-  return { turnId, signal: new AbortController().signal };
+export function testTurn(turnId = 'turn_test'): TurnContext {
+  return { turnId, signal: new AbortController().signal, parentTurnId: null };
 }
 
 export interface TestHarness {

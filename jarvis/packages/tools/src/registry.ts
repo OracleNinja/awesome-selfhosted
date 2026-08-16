@@ -1,10 +1,38 @@
-import type { AgentDefinition, ToolDefinition, ToolInfo } from '@jarvis/shared';
-import { DEFAULT_TOOL_TIMEOUT_MS } from '@jarvis/shared';
+import type {
+  AgentDefinition,
+  CapabilityRecord,
+  CapabilitySource,
+  ToolDefinition,
+  ToolInfo,
+} from '@jarvis/shared';
+import { DEFAULT_TOOL_TIMEOUT_MS, now } from '@jarvis/shared';
 import type { PermissionPolicy } from '@jarvis/security';
 import type { ToolSpec } from '@jarvis/providers';
 
+/** Namespace prefix for capabilities supplied by an MCP server. */
+export const MCP_NAMESPACE = 'mcp';
+
 /**
- * The tool registry.
+ * The canonical name for an MCP capability.
+ *
+ * Assigned by JARVIS from the *configured* server id and the remote tool name,
+ * so a remote server cannot choose a name that shadows a built-in: every remote
+ * capability is structurally confined to the `mcp__<server>__` namespace.
+ */
+export function mcpCapabilityName(server: string, remoteName: string): string {
+  return `${MCP_NAMESPACE}__${server}__${remoteName}`;
+}
+
+export class CapabilityDisabledError extends Error {
+  readonly code = 'capability_disabled';
+  constructor(name: string, reason: string) {
+    super(`capability "${name}" is disabled: ${reason}`);
+    this.name = 'CapabilityDisabledError';
+  }
+}
+
+/**
+ * The capability registry.
  *
  * Holds every tool JARVIS knows about and answers two questions:
  * "what exists?" and "what may *this agent* use?". The second question is
@@ -13,39 +41,136 @@ import type { ToolSpec } from '@jarvis/providers';
  * escalation.
  */
 export class ToolRegistry {
-  private tools = new Map<string, ToolDefinition>();
+  private records = new Map<string, CapabilityRecord>();
 
   constructor(private readonly policy: PermissionPolicy) {}
 
-  register(tool: ToolDefinition): void {
-    if (this.tools.has(tool.name)) {
-      throw new Error(`tool "${tool.name}" is already registered`);
+  /**
+   * Register a capability.
+   *
+   * `source` is supplied by the caller that knows where the capability came
+   * from — the composition root for local tools, the MCP adapter for remote
+   * ones. It is never read from the capability itself.
+   *
+   * Duplicate names are refused outright rather than overwritten: two providers
+   * silently claiming the same capability is exactly the collision the
+   * namespace exists to prevent, and the loud failure is the point.
+   */
+  register(
+    tool: ToolDefinition,
+    options: { source?: CapabilitySource; enabled?: boolean } = {},
+  ): void {
+    if (this.records.has(tool.name)) {
+      throw new Error(`capability "${tool.name}" is already registered`);
     }
     if (!/^[a-z][a-z0-9_]{1,63}$/.test(tool.name)) {
       throw new Error(
-        `invalid tool name "${tool.name}": use lowercase letters, digits and underscores`,
+        `invalid capability name "${tool.name}": use lowercase letters, digits and underscores`,
       );
     }
     if (tool.inputSchema.type !== 'object') {
-      throw new Error(`tool "${tool.name}" must declare an object input schema`);
+      throw new Error(`capability "${tool.name}" must declare an object input schema`);
     }
-    this.tools.set(tool.name, tool);
+
+    const source: CapabilitySource = options.source ?? { kind: 'local' };
+    // Only the adapter may claim the mcp namespace, and everything it registers
+    // must be inside it. This is what makes shadowing structurally impossible.
+    if (source.kind === 'mcp' && tool.name !== mcpCapabilityName(source.server, source.remoteName)) {
+      throw new Error(
+        `MCP capability "${tool.name}" must be namespaced as ${mcpCapabilityName(source.server, source.remoteName)}`,
+      );
+    }
+    if (source.kind === 'local' && tool.name.startsWith(`${MCP_NAMESPACE}__`)) {
+      throw new Error(`local capability "${tool.name}" may not use the reserved mcp namespace`);
+    }
+
+    this.records.set(tool.name, {
+      definition: tool,
+      source,
+      enabled: options.enabled ?? true,
+      registeredAt: now(),
+    });
   }
 
-  registerAll(tools: ToolDefinition[]): void {
-    for (const tool of tools) this.register(tool);
+  registerAll(tools: ToolDefinition[], options: { source?: CapabilitySource } = {}): void {
+    for (const tool of tools) this.register(tool, options);
+  }
+
+  /** Remove a capability — used when an MCP server disconnects. */
+  unregister(name: string): boolean {
+    return this.records.delete(name);
+  }
+
+  /** Remove every capability from one MCP server. Returns how many went. */
+  unregisterSource(server: string): number {
+    let removed = 0;
+    for (const [name, record] of [...this.records]) {
+      if (record.source.kind === 'mcp' && record.source.server === server) {
+        this.records.delete(name);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Enable or disable a capability.
+   *
+   * A disabled capability is hidden from models and refused by the executor —
+   * it is not merely undocumented.
+   */
+  setEnabled(name: string, enabled: boolean, reason?: string): void {
+    const record = this.records.get(name);
+    if (!record) return;
+    record.enabled = enabled;
+    if (!enabled && reason) record.unavailableReason = reason;
+    if (enabled) delete record.unavailableReason;
+  }
+
+  /** Disable every capability from one server, keeping them visible as unavailable. */
+  setSourceEnabled(server: string, enabled: boolean, reason?: string): number {
+    let changed = 0;
+    for (const [name, record] of this.records) {
+      if (record.source.kind === 'mcp' && record.source.server === server) {
+        this.setEnabled(name, enabled, reason);
+        changed += 1;
+      }
+    }
+    return changed;
+  }
+
+  record(name: string): CapabilityRecord | undefined {
+    return this.records.get(name);
+  }
+
+  /** Every registered capability, including disabled ones. */
+  capabilities(): CapabilityRecord[] {
+    return [...this.records.values()].sort((a, b) =>
+      a.definition.name.localeCompare(b.definition.name),
+    );
   }
 
   has(name: string): boolean {
-    return this.tools.has(name);
+    return this.records.has(name);
   }
 
   get(name: string): ToolDefinition | undefined {
-    return this.tools.get(name);
+    return this.records.get(name)?.definition;
   }
 
+  /** Enabled capabilities only. Disabled ones are never offered to a model. */
   list(): ToolDefinition[] {
-    return [...this.tools.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return this.capabilities()
+      .filter((record) => record.enabled)
+      .map((record) => record.definition);
+  }
+
+  /** Why a capability cannot run, or null if it can. */
+  disabledReason(name: string): string | null {
+    const record = this.records.get(name);
+    if (!record) return null;
+    if (record.enabled) return null;
+    return record.unavailableReason ?? 'capability is disabled';
   }
 
   /** Tools this agent is permitted to call, after policy filtering. */
@@ -76,8 +201,9 @@ export class ToolRegistry {
 
   /** Serialisable list for the UI. Never includes `execute`. */
   infos(availability: (tool: ToolDefinition) => { available: boolean; reason?: string }): ToolInfo[] {
-    return this.list().map((tool) => {
-      const state = availability(tool);
+    return this.capabilities().map((record) => {
+      const tool = record.definition;
+      const state = record.enabled ? availability(tool) : { available: false, reason: this.disabledReason(tool.name) ?? undefined };
       const info: ToolInfo = {
         name: tool.name,
         description: tool.description,
@@ -86,13 +212,21 @@ export class ToolRegistry {
         requiresApproval: this.policy.approvalFor(tool).required,
         timeoutMs: tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
         available: state.available,
+        source: record.source,
+        enabled: record.enabled,
       };
       if (state.reason) info.unavailableReason = state.reason;
       return info;
     });
   }
 
+  /** Count of enabled capabilities. */
   get size(): number {
-    return this.tools.size;
+    return this.list().length;
+  }
+
+  /** Count of everything registered, enabled or not. */
+  get total(): number {
+    return this.records.size;
   }
 }

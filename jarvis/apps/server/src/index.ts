@@ -16,6 +16,10 @@ async function main(): Promise<void> {
   const jarvis = createJarvis({ config });
   // Periodic housekeeping (approval expiry) runs only in the server process.
   jarvis.startBackgroundTasks();
+  // Remote capabilities are attached before listening so the first request sees
+  // the same inventory as the hundredth. A server that fails to connect is
+  // reported below and does not stop startup.
+  const mcpStatus = await jarvis.connectMcpServers();
   const status = jarvis.status();
 
   const webDir = join(repoRoot(), 'apps', 'web', 'dist');
@@ -46,6 +50,16 @@ async function main(): Promise<void> {
     console.log(`\n  not configured — these capabilities are unavailable and JARVIS will say so:`);
     for (const provider of unavailable) {
       console.log(`    · ${provider.id}: ${provider.reason ?? 'not configured'}`);
+    }
+  }
+  if (mcpStatus.length > 0) {
+    console.log(`\n  MCP servers (remote capabilities, approval-gated at the configured risk floor):`);
+    for (const server of mcpStatus) {
+      const mark = server.state === 'ready' ? '✓' : '·';
+      console.log(`    ${mark} ${server.id}: ${server.state} — ${server.detail} [floor ${server.riskFloor}]`);
+      for (const rejected of server.rejected) {
+        console.log(`        refused "${rejected.name}": ${rejected.reason}`);
+      }
     }
   }
   if (status.charterErrors.length > 0) {

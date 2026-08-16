@@ -56,6 +56,71 @@ export interface SystemStatus {
   counts: { memories: number; auditRecords?: number; auditEvents: number; pendingApprovals: number };
 }
 
+/** One MCP server as the runtime sees it. Reported, never controlled from here. */
+export interface McpServerInfo {
+  id: string;
+  transport: string;
+  command: string;
+  enabled: boolean;
+  state: 'disconnected' | 'connecting' | 'ready' | 'failed';
+  detail: string;
+  tools: string[];
+  riskFloor: RiskLevel;
+  timeoutMs: number;
+  rejected: { name: string; reason: string }[];
+}
+
+export interface ModelCapabilityInfo {
+  providerId: string;
+  model: string;
+  available: boolean;
+  reason?: string;
+  capabilities: Record<string, boolean>;
+  isDefault: boolean;
+}
+
+export interface CapabilityReport {
+  capabilities: ToolInfo[];
+  counts: { total: number; enabled: number; local: number; remote: number; approvalGated: number };
+  approvalRequiredLevels: RiskLevel[];
+  models: ModelCapabilityInfo[];
+  mcpServers: McpServerInfo[];
+}
+
+/**
+ * Recorded model usage. Tokens and latency only — the runtime prices nothing,
+ * so there is no cost figure here to be wrong about.
+ */
+export interface UsageReport {
+  summary: {
+    calls: number;
+    callsWithTokens: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+    averageLatencyMs: number | null;
+    errors: number;
+    cancelled: number;
+  };
+  calls: {
+    id: string;
+    turnId: string | null;
+    timestamp: string;
+    agent: string;
+    provider: string;
+    model: string;
+    requested: string[];
+    fallbackUsed: boolean;
+    routingReason: string;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+    latencyMs: number;
+    outcome: 'ok' | 'error' | 'cancelled';
+    error: string | null;
+  }[];
+}
+
 export interface AuditEntry {
   id: string;
   timestamp: string;
@@ -202,6 +267,8 @@ export const api = {
 
   tools: () =>
     request<{ tools: ToolInfo[]; approvalRequiredLevels: RiskLevel[] }>('GET', '/api/tools'),
+  capabilities: () => request<CapabilityReport>('GET', '/api/capabilities'),
+  usage: (limit = 100) => request<UsageReport>('GET', `/api/usage?limit=${limit}`),
   agents: () => request<{ agents: AgentInfo[]; charterErrors: string[] }>('GET', '/api/agents'),
   runAgent: (name: string, task: string, conversationId?: string | null) =>
     request<{ result: { agent: string; output: string; iterations: number; stoppedBecause: string } }>(
