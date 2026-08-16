@@ -1,0 +1,39 @@
+{
+  "name": "jarvis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JARVIS — a modular personal AI operating system.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "tsx watch apps/server/src/index.ts",
+    "dev:web": "npm run dev --workspace @jarvis/web",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "node scripts/build-server.mjs",
+    "build:web": "npm run build --workspace @jarvis/web",
+    "start": "node apps/server/dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace @jarvis/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:reset": "node scripts/db-reset.mjs",
+    "verify": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.24.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0"
+  }
+}

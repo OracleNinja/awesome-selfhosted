@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+
+# Local configuration and secrets — never commit real credentials.
+.env
+.env.local
+.env.*.local
+
+# Runtime data
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.jarvis/
+
+.DS_Store
+.vscode/
+.idea/
+*.tsbuildinfo
+
+# The agent workspace is runtime data, not source.
+/workspace/

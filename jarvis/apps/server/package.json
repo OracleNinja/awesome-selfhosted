@@ -1,0 +1,18 @@
+{
+  "name": "@jarvis/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@jarvis/agents": "*",
+    "@jarvis/core": "*",
+    "@jarvis/memory": "*",
+    "@jarvis/providers": "*",
+    "@jarvis/security": "*",
+    "@jarvis/shared": "*",
+    "@jarvis/tools": "*",
+    "@jarvis/voice": "*",
+    "better-sqlite3": "^11.7.0"
+  }
+}

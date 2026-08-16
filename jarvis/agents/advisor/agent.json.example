@@ -1,0 +1,4 @@
+{
+  "_comment": "Rename this file to agent.json to override the built-in advisor definition. Any subset of keys is accepted; omitted keys keep their built-in value.",
+  "maxIterations": 6
+}

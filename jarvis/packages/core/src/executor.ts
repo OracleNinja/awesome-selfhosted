@@ -1,0 +1,376 @@
+/**
+ * The tool executor — the single choke point for every action JARVIS takes.
+ *
+ * Order of operations, and none of it is skippable:
+ *
+ *   1. resolve the tool        → unknown tools fail closed
+ *   2. agent permission        → the agent's declared ceiling, checked in code
+ *   3. argument validation     → against the tool's published JSON Schema
+ *   4. approval gate           → EXTERNAL_ACTION / DESTRUCTIVE stop here
+ *   5. execute                 → timed, with errors caught
+ *   6. audit                   → always, including refusals and failures
+ *
+ * Every path writes an audit row. A tool that was never allowed to run leaves
+ * as much evidence as one that did.
+ */
+import type {
+  AgentDefinition,
+  ApprovalRequest,
+  JsonSchema,
+  ToolDefinition,
+  ToolResult,
+} from '@jarvis/shared';
+import { EventBus, redact, truncate, validateInput } from '@jarvis/shared';
+import type { Store } from '@jarvis/memory';
+import type { PermissionPolicy } from '@jarvis/security';
+import type { ToolRegistry } from '@jarvis/tools';
+import type { ExecutionOutcome } from '@jarvis/agents';
+
+export interface ExecuteRequest {
+  tool: string;
+  args: Record<string, unknown>;
+  agent: AgentDefinition;
+  userId: string;
+  conversationId: string | null;
+  signal?: AbortSignal;
+}
+
+export interface ToolExecutorDeps {
+  registry: ToolRegistry;
+  policy: PermissionPolicy;
+  store: Store;
+  events: EventBus;
+  approvalTimeoutSeconds: number;
+}
+
+/** A short human sentence describing what a call will do, shown on the approval card. */
+export function describeAction(tool: ToolDefinition, args: Record<string, unknown>): string {
+  const rendered = Object.entries(args)
+    .map(([key, value]) => `${key}=${truncate(JSON.stringify(value) ?? String(value), 60)}`)
+    .join(', ');
+  return rendered ? `${tool.name}(${rendered})` : `${tool.name}()`;
+}
+
+export class ToolExecutor {
+  constructor(private readonly deps: ToolExecutorDeps) {}
+
+  async execute(request: ExecuteRequest): Promise<ExecutionOutcome> {
+    const { registry, policy, store, events } = this.deps;
+    const { tool: toolName, agent, userId, conversationId } = request;
+    const startedAt = Date.now();
+
+    // 1. Resolve.
+    const tool = registry.get(toolName);
+    if (!tool) {
+      const message = `Tool "${toolName}" does not exist. Available: ${registry
+        .listForAgent(agent)
+        .map((t) => t.name)
+        .join(', ')}.`;
+      store.audit.record({
+        userId,
+        agent: agent.name,
+        tool: toolName,
+        arguments: request.args,
+        approvalState: 'not_required',
+        error: message,
+        durationMs: Date.now() - startedAt,
+        risk: 'READ',
+        conversationId,
+      });
+      events.emit({
+        type: 'ERROR',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: `Unknown tool: ${toolName}`,
+        data: { tool: toolName },
+      });
+      return { status: 'error', result: null, message };
+    }
+
+    events.emit({
+      type: 'TOOL_REQUEST',
+      userId,
+      conversationId,
+      agent: agent.name,
+      summary: `${agent.name} → ${tool.name}`,
+      data: { tool: tool.name, risk: tool.risk, arguments: redact(request.args) },
+    });
+
+    // 2. Permission.
+    const permission = policy.canAgentUseTool(agent, tool);
+    if (!permission.allowed) {
+      const message = `Refused: ${permission.reason}. This action did not run.`;
+      store.audit.record({
+        userId,
+        agent: agent.name,
+        tool: tool.name,
+        arguments: request.args,
+        approvalState: 'denied',
+        error: permission.reason,
+        durationMs: Date.now() - startedAt,
+        risk: tool.risk,
+        conversationId,
+      });
+      events.emit({
+        type: 'ERROR',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: `Permission denied: ${tool.name}`,
+        data: { tool: tool.name, reason: permission.reason },
+      });
+      return { status: 'denied', result: null, message };
+    }
+
+    // 3. Validate.
+    const validation = validateInput(request.args, tool.inputSchema as JsonSchema);
+    if (!validation.ok) {
+      const message = `Invalid arguments for ${tool.name}: ${validation.errors.join('; ')}. The tool did not run — fix the arguments and try again.`;
+      store.audit.record({
+        userId,
+        agent: agent.name,
+        tool: tool.name,
+        arguments: request.args,
+        approvalState: 'not_required',
+        error: validation.errors.join('; '),
+        durationMs: Date.now() - startedAt,
+        risk: tool.risk,
+        conversationId,
+      });
+      events.emit({
+        type: 'ERROR',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: `Invalid arguments for ${tool.name}`,
+        data: { tool: tool.name, errors: validation.errors },
+      });
+      return { status: 'error', result: null, message };
+    }
+
+    // 4. Approval.
+    const approval = policy.approvalFor(tool);
+    if (approval.required) {
+      const request_ = store.approvals.create({
+        userId,
+        conversationId,
+        agent: agent.name,
+        tool: tool.name,
+        description: describeAction(tool, validation.value),
+        risk: tool.risk,
+        arguments: validation.value,
+        timeoutSeconds: this.deps.approvalTimeoutSeconds,
+      });
+
+      store.audit.record({
+        userId,
+        agent: agent.name,
+        tool: tool.name,
+        arguments: validation.value,
+        approvalState: 'pending',
+        approvalId: request_.id,
+        result: 'awaiting human approval',
+        durationMs: Date.now() - startedAt,
+        risk: tool.risk,
+        conversationId,
+      });
+
+      events.emit({
+        type: 'APPROVAL_REQUEST',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: `Approval required: ${request_.description}`,
+        data: {
+          approvalId: request_.id,
+          tool: tool.name,
+          risk: tool.risk,
+          arguments: redact(validation.value),
+          expiresAt: request_.expiresAt,
+        },
+      });
+
+      return {
+        status: 'awaiting_approval',
+        result: null,
+        approvalId: request_.id,
+        message:
+          `APPROVAL REQUIRED. "${tool.name}" is classified ${tool.risk} and has NOT been executed. ` +
+          `Request ${request_.id} is waiting for the user's decision. ` +
+          `Tell the user what you are asking permission to do and stop. Do not retry and do not describe this as done.`,
+      };
+    }
+
+    // 5. Execute.
+    return this.runTool(tool, validation.value, request, startedAt, null);
+  }
+
+  /**
+   * Execute a tool call that a human has approved.
+   *
+   * Re-checks state at execution time: only a request that is currently
+   * `approved` runs. Expired, denied or already-resolved requests are refused,
+   * so an approval cannot be replayed.
+   */
+  async executeApproved(
+    approval: ApprovalRequest,
+    agent: AgentDefinition,
+    signal?: AbortSignal,
+  ): Promise<ExecutionOutcome> {
+    const { registry, store, events } = this.deps;
+    const startedAt = Date.now();
+
+    if (approval.state !== 'approved') {
+      const message = `Approval ${approval.id} is ${approval.state}; the action was not executed.`;
+      store.audit.record({
+        userId: approval.userId,
+        agent: approval.agent,
+        tool: approval.tool,
+        arguments: approval.arguments,
+        approvalState: approval.state,
+        approvalId: approval.id,
+        error: message,
+        durationMs: 0,
+        risk: approval.risk,
+        conversationId: approval.conversationId,
+      });
+      return { status: 'denied', result: null, approvalId: approval.id, message };
+    }
+
+    const tool = registry.get(approval.tool);
+    if (!tool) {
+      const message = `Tool "${approval.tool}" is no longer registered; the approved action was not executed.`;
+      events.emit({
+        type: 'ERROR',
+        userId: approval.userId,
+        conversationId: approval.conversationId,
+        agent: approval.agent,
+        summary: message,
+        data: { approvalId: approval.id },
+      });
+      return { status: 'error', result: null, approvalId: approval.id, message };
+    }
+
+    return this.runTool(
+      tool,
+      approval.arguments,
+      {
+        tool: tool.name,
+        args: approval.arguments,
+        agent,
+        userId: approval.userId,
+        conversationId: approval.conversationId,
+        ...(signal ? { signal } : {}),
+      },
+      startedAt,
+      approval.id,
+    );
+  }
+
+  private async runTool(
+    tool: ToolDefinition,
+    args: Record<string, unknown>,
+    request: ExecuteRequest,
+    startedAt: number,
+    approvalId: string | null,
+  ): Promise<ExecutionOutcome> {
+    const { store, events } = this.deps;
+    const { agent, userId, conversationId } = request;
+
+    let result: ToolResult;
+    try {
+      result = await tool.execute(args, {
+        userId,
+        conversationId,
+        agent: agent.name,
+        ...(request.signal ? { signal: request.signal } : {}),
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      store.audit.record({
+        userId,
+        agent: agent.name,
+        tool: tool.name,
+        arguments: args,
+        approvalState: approvalId ? 'approved' : 'not_required',
+        approvalId,
+        error: message,
+        durationMs: Date.now() - startedAt,
+        risk: tool.risk,
+        conversationId,
+      });
+      events.emit({
+        type: 'ERROR',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: `${tool.name} threw: ${truncate(message, 120)}`,
+        data: { tool: tool.name, error: message },
+      });
+      return {
+        status: 'error',
+        result: null,
+        approvalId,
+        message: `${tool.name} failed with an error: ${message}. The action did not complete.`,
+      };
+    }
+
+    const durationMs = Date.now() - startedAt;
+    store.audit.record({
+      userId,
+      agent: agent.name,
+      tool: tool.name,
+      arguments: args,
+      approvalState: approvalId ? 'approved' : 'not_required',
+      approvalId,
+      result: result.ok ? JSON.stringify({ summary: result.summary, data: result.data }) : null,
+      error: result.ok ? null : (result.error ?? result.summary),
+      durationMs,
+      risk: tool.risk,
+      conversationId,
+    });
+
+    events.emit({
+      type: 'TOOL_RESULT',
+      userId,
+      conversationId,
+      agent: agent.name,
+      summary: `${tool.name}: ${truncate(result.summary, 120)}`,
+      data: { tool: tool.name, ok: result.ok, durationMs, error: result.error },
+    });
+
+    if (result.ok && tool.risk !== 'READ') {
+      events.emit({
+        type: 'ACTION_EXECUTED',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: `${tool.risk}: ${truncate(result.summary, 120)}`,
+        data: { tool: tool.name, risk: tool.risk, approvalId },
+      });
+    }
+
+    if (tool.name === 'memory_write' && result.ok) {
+      events.emit({
+        type: 'MEMORY_WRITE',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: truncate(result.summary, 140),
+        data: result.data as Record<string, unknown>,
+      });
+    }
+
+    const message = result.ok
+      ? JSON.stringify({ ok: true, summary: result.summary, data: result.data ?? null })
+      : JSON.stringify({
+          ok: false,
+          summary: result.summary,
+          error: result.error ?? 'unknown error',
+          note: 'This action did NOT succeed. Report the failure; do not describe it as done.',
+        });
+
+    return { status: result.ok ? 'executed' : 'error', result, approvalId, message };
+  }
+}
