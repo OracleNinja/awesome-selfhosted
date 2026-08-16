@@ -64,6 +64,22 @@ export function createRouter(jarvis: Jarvis): Router {
     ctx.json(200, jarvis.publicConfig());
   });
 
+  /**
+   * One consistent snapshot of live runtime state, for control surfaces.
+   *
+   * Composition of systems that already exist — no new logic, same auth, same
+   * redaction. A client rendering live state gets one atomic answer instead of
+   * six round-trips that can disagree with each other.
+   */
+  router.get('/api/runtime/state', (ctx) => {
+    ctx.json(200, jarvis.runtimeState(ctx.userId));
+  });
+
+  /** Measured process and host metrics. Unavailable fields are null, never invented. */
+  router.get('/api/system/telemetry', (ctx) => {
+    ctx.json(200, jarvis.telemetry.sample());
+  });
+
   /** Live probe of the active model provider. Costs one tiny completion. */
   router.post('/api/system/provider-check', async (ctx) => {
     const result = await jarvis.provider.healthCheck();
@@ -297,18 +313,42 @@ export function createRouter(jarvis: Jarvis): Router {
     ctx.json(200, { events: jarvis.store.events.list(ctx.userId, options) });
   });
 
-  /** Live activity feed. */
+  /**
+   * The live stream. One connection carries three frame types:
+   *
+   *   `state`     — a full runtime snapshot, sent on connect and on reconnect,
+   *                 so a client resynchronises without a separate fetch and
+   *                 without inferring state it missed while disconnected.
+   *   `jarvis`    — every event on the bus, as it happens.
+   *   `telemetry` — a periodic measured sample. Not persisted to the event log:
+   *                 it is a reading, not something that happened.
+   */
   router.get('/api/events/stream', (ctx) => {
     const send = ctx.sse();
+
+    send('state', jarvis.runtimeState(ctx.userId));
     for (const event of jarvis.events.recent(25)) send('jarvis', event);
 
     const unsubscribe = jarvis.events.subscribe((event) => send('jarvis', event));
+
+    const telemetryTick = setInterval(() => {
+      if (ctx.res.writableEnded) return;
+      // Sweeping here means an expiry is announced on the same stream that
+      // delivered the request, rather than waiting for the next page load.
+      jarvis.sweepExpiredApprovals();
+      send('telemetry', {
+        telemetry: jarvis.telemetry.sample(),
+        activity: jarvis.monitor.snapshot(),
+      });
+    }, 5_000);
+
     const keepAlive = setInterval(() => {
       if (!ctx.res.writableEnded) ctx.res.write(': keep-alive\n\n');
     }, 25_000);
 
     const close = () => {
       clearInterval(keepAlive);
+      clearInterval(telemetryTick);
       unsubscribe();
       if (!ctx.res.writableEnded) ctx.res.end();
     };

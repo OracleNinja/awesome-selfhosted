@@ -16,7 +16,9 @@ import {
   resolveDatabasePath,
   truncate,
   type AgentDefinition,
+  type ApprovalRequest,
   type JarvisConfig,
+  type JarvisEvent,
   type ProviderStatus,
 } from '@jarvis/shared';
 import { Store } from '@jarvis/memory';
@@ -51,6 +53,8 @@ import {
 } from '@jarvis/agents';
 import { ToolExecutor } from './executor.ts';
 import { Orchestrator, type TurnResult } from './orchestrator.ts';
+import { RuntimeMonitor, type RuntimeActivity } from './monitor.ts';
+import { TelemetryCollector, type SystemTelemetry } from './telemetry.ts';
 
 export interface JarvisSystemStatus {
   version: string;
@@ -61,6 +65,45 @@ export interface JarvisSystemStatus {
   database: { ok: boolean; schemaVersion: number; tables: string[] };
   tools: { total: number; requiringApproval: number };
   agents: string[];
+  charterErrors: string[];
+}
+
+/**
+ * One consistent snapshot of everything a control surface needs.
+ *
+ * Composed from systems that already exist — the monitor, the store, the
+ * registry, the provider registry — so a client can render live state without
+ * six round-trips that disagree with each other. It adds no logic of its own.
+ */
+export interface RuntimeStateSnapshot {
+  version: string;
+  sampledAt: string;
+  activity: RuntimeActivity;
+  telemetry: SystemTelemetry;
+  providers: ProviderStatus[];
+  activeModel: { provider: string; model: string; available: boolean; reason?: string };
+  voice: {
+    stt: ProviderStatus & { mode: string };
+    tts: ProviderStatus & { mode: string };
+  };
+  media: { image: ProviderStatus; imageEdit: ProviderStatus; video: ProviderStatus; vision: ProviderStatus };
+  agents: {
+    name: string;
+    title: string;
+    purpose: string;
+    maxRisk: string;
+    readOnly: boolean;
+    maxIterations: number;
+    tools: string[];
+    runCount: number;
+    lastRunAt: string | null;
+    running: boolean;
+  }[];
+  approvals: ApprovalRequest[];
+  tools: { total: number; requiringApproval: number; names: string[] };
+  database: { ok: boolean; schemaVersion: number; tables: string[] };
+  counts: { memories: number; auditEvents: number; pendingApprovals: number; conversations: number };
+  recentEvents: JarvisEvent[];
   charterErrors: string[];
 }
 
@@ -91,6 +134,9 @@ export class Jarvis {
   readonly video: VideoGenerationProvider;
   readonly vision: VisionProvider;
   readonly charterErrors: string[];
+  readonly monitor: RuntimeMonitor;
+  readonly telemetry: TelemetryCollector;
+  private approvalSweep: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: {
     config: JarvisConfig;
@@ -115,6 +161,15 @@ export class Jarvis {
     this.imageEdit = createImageEditingProvider(config);
     this.video = createVideoProvider(config);
     this.vision = createVisionProvider(config);
+
+    // Live runtime state and telemetry. The monitor is a pure subscriber: it
+    // observes the bus and never calls back into execution.
+    this.monitor = new RuntimeMonitor(this.events);
+    this.telemetry = new TelemetryCollector();
+
+    // Expiry can be triggered by any approval read, so the announcement is
+    // attached to the repository rather than to a periodic sweep.
+    this.store.approvals.onExpire = (expired) => this.announceExpiredApprovals(expired);
 
     // Persist the event stream so activity survives a restart.
     this.events.subscribe((event) => {
@@ -322,11 +377,167 @@ export class Jarvis {
     };
   }
 
+  /**
+   * Expire timed-out approvals and announce each one.
+   *
+   * Expiry used to happen silently inside a SQL UPDATE, so a request could time
+   * out with nothing observable: no event, no audit row, and a card left on
+   * screen offering to approve something that could no longer run. Every
+   * expiry now produces the same evidence a human decision does.
+   */
+  sweepExpiredApprovals(): ApprovalRequest[] {
+    return this.store.approvals.expireStale();
+  }
+
+  /**
+   * Announce expired approvals.
+   *
+   * Wired to the repository's hook rather than called from a sweep: expiry is
+   * triggered by ordinary reads (`listPending`, `get`, `resolve`), so a sweep
+   * would almost always find the rows already quietly expired.
+   */
+  private announceExpiredApprovals(expired: ApprovalRequest[]): void {
+    for (const approval of expired) {
+      this.store.audit.record({
+        userId: approval.userId,
+        agent: approval.agent,
+        tool: approval.tool,
+        arguments: approval.arguments,
+        approvalState: 'expired',
+        approvalId: approval.id,
+        error: 'approval expired before a decision was made',
+        durationMs: 0,
+        risk: approval.risk,
+        conversationId: approval.conversationId,
+      });
+      this.events.emit({
+        type: 'APPROVAL_RESOLVED',
+        userId: approval.userId,
+        conversationId: approval.conversationId,
+        agent: approval.agent,
+        summary: `Expired: ${approval.description}`,
+        data: {
+          approvalId: approval.id,
+          tool: approval.tool,
+          risk: approval.risk,
+          decision: 'expired',
+        },
+      });
+    }
+  }
+
+  /**
+   * Start periodic background work.
+   *
+   * Only the server calls this. Tests construct a Jarvis without timers, so a
+   * suite never leaves a handle open or races a sweep.
+   */
+  startBackgroundTasks(intervalMs = 30_000): void {
+    if (this.approvalSweep) return;
+    this.approvalSweep = setInterval(() => {
+      try {
+        this.sweepExpiredApprovals();
+      } catch {
+        /* a failed sweep must not take the process down */
+      }
+    }, intervalMs);
+    // Never hold the event loop open on account of housekeeping.
+    this.approvalSweep.unref?.();
+  }
+
+  stopBackgroundTasks(): void {
+    if (this.approvalSweep) clearInterval(this.approvalSweep);
+    this.approvalSweep = null;
+  }
+
+  /**
+   * One consistent snapshot of live runtime state.
+   *
+   * Pure composition of existing systems — no logic lives here that is not
+   * already the runtime's answer to the same question.
+   */
+  runtimeState(userId: string): RuntimeStateSnapshot {
+    this.sweepExpiredApprovals();
+
+    const approvals = this.store.approvals.listPending(userId);
+    this.monitor.syncPendingApprovals(approvals.length);
+
+    const activity = this.monitor.snapshot();
+    const runningAgents = new Set(activity.activeAgents.map((run) => run.agent));
+    const records = this.store.agents.list();
+    const providerStatus = this.provider.status();
+
+    return {
+      version: JARVIS_VERSION,
+      sampledAt: new Date().toISOString(),
+      activity,
+      telemetry: this.telemetry.sample(),
+      providers: [
+        ...modelProviderStatuses(this.config),
+        this.stt.status(),
+        this.tts.status(),
+        this.image.status(),
+        this.imageEdit.status(),
+        this.video.status(),
+        this.vision.status(),
+        this.search.status(),
+      ],
+      activeModel: {
+        provider: this.provider.id,
+        model: this.provider.model,
+        available: providerStatus.available,
+        ...(providerStatus.reason ? { reason: providerStatus.reason } : {}),
+      },
+      voice: {
+        stt: { ...this.stt.status(), mode: this.stt.mode },
+        tts: { ...this.tts.status(), mode: this.tts.mode },
+      },
+      media: {
+        image: this.image.status(),
+        imageEdit: this.imageEdit.status(),
+        video: this.video.status(),
+        vision: this.vision.status(),
+      },
+      agents: Object.values(this.agents).map((definition) => {
+        const record = records.find((row) => row.name === definition.name);
+        return {
+          name: definition.name,
+          title: definition.title,
+          purpose: definition.purpose,
+          maxRisk: definition.maxRisk,
+          readOnly: definition.readOnly,
+          maxIterations: definition.maxIterations,
+          tools: this.registry.listForAgent(definition).map((tool) => tool.name),
+          runCount: record?.runCount ?? 0,
+          lastRunAt: record?.lastRunAt ?? null,
+          running: runningAgents.has(definition.name),
+        };
+      }),
+      approvals,
+      tools: {
+        total: this.registry.size,
+        requiringApproval: this.registry.list().filter((tool) => this.policy.approvalFor(tool).required)
+          .length,
+        names: this.registry.list().map((tool) => tool.name),
+      },
+      database: this.store.health(),
+      counts: {
+        memories: this.store.memories.count(userId),
+        auditEvents: this.store.audit.count(userId),
+        pendingApprovals: approvals.length,
+        conversations: this.store.conversations.list(userId, 500).length,
+      },
+      recentEvents: this.store.events.list(userId, { limit: 50 }),
+      charterErrors: this.charterErrors,
+    };
+  }
+
   publicConfig() {
     return publicConfig(this.config);
   }
 
   close(): void {
+    this.stopBackgroundTasks();
     this.store.close();
   }
 }

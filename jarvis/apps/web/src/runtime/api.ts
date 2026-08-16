@@ -6,7 +6,6 @@
  * those stay on the server, and the server has no route that returns one.
  */
 
-export type RiskLevel = 'READ' | 'WRITE' | 'EXTERNAL_ACTION' | 'DESTRUCTIVE';
 
 export interface Conversation {
   id: string;
@@ -15,62 +14,11 @@ export interface Conversation {
   updatedAt: string;
 }
 
-export interface Message {
-  id: string;
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  agent: string | null;
-  createdAt: string;
-  toolCalls?: { id: string; name: string; arguments: Record<string, unknown> }[];
-  toolCallId?: string;
-  name?: string;
-}
+export type Message = StoredMessage;
 
-export interface JarvisEvent {
-  id: string;
-  type: string;
-  conversationId: string | null;
-  agent: string;
-  summary: string;
-  data: Record<string, unknown>;
-  createdAt: string;
-}
 
-export interface Approval {
-  id: string;
-  agent: string;
-  tool: string;
-  description: string;
-  risk: RiskLevel;
-  arguments: Record<string, unknown>;
-  state: string;
-  createdAt: string;
-  expiresAt: string;
-}
 
-export interface Memory {
-  id: string;
-  type: string;
-  content: string;
-  source: string;
-  confidence: number;
-  importance: number;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string | null;
-  score?: number;
-}
 
-export interface ToolInfo {
-  name: string;
-  description: string;
-  risk: RiskLevel;
-  requiresApproval: boolean;
-  available: boolean;
-  unavailableReason?: string;
-  inputSchema: { properties?: Record<string, { type?: string; description?: string }>; required?: string[] };
-}
 
 export interface AgentInfo {
   name: string;
@@ -84,14 +32,6 @@ export interface AgentInfo {
   lastRunAt: string | null;
 }
 
-export interface ProviderStatus {
-  id: string;
-  kind: string;
-  available: boolean;
-  reason?: string;
-  model?: string;
-  endpoint?: string;
-}
 
 export interface SystemStatus {
   version: string;
@@ -134,13 +74,30 @@ export interface TurnResult {
   reply: string;
   messages: Message[];
   toolCalls: { name: string; status: string }[];
-  pendingApprovals: Approval[];
+  pendingApprovals: ApprovalRequest[];
   events: JarvisEvent[];
   model: string;
   provider: string;
   iterations: number;
   error?: string;
 }
+
+// Domain types come from the shared package — see runtime/types.ts. Declaring
+// a second copy here is how a client and a runtime drift apart.
+import type {
+  ApprovalRequest,
+  Memory,
+  MemorySearchResult,
+  ProviderStatus,
+  RiskLevel,
+  JarvisEvent,
+  RuntimeStateSnapshot,
+  StoredMessage,
+  SystemTelemetry,
+  ToolInfo,
+} from './types';
+
+export type { ApprovalRequest, JarvisEvent, Memory, MemorySearchResult, ProviderStatus, RiskLevel, ToolInfo };
 
 const TOKEN_KEY = 'jarvis.apiToken';
 
@@ -171,7 +128,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
   const response = await fetch(path, {
     method,
@@ -186,14 +143,21 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const payload = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
+    // Most failures use the {error:{code,message}} envelope, but the approval
+    // routes return a bare outcome body on 409 (`{ok,state,message}`). Reading
+    // only the envelope turned "this approval already expired" into an empty
+    // error in the UI.
     const error = payload?.error ?? {};
-    throw new ApiError(response.status, error.code ?? 'error', error.message ?? response.statusText);
+    const message = error.message ?? payload?.message ?? response.statusText ?? `HTTP ${response.status}`;
+    throw new ApiError(response.status, error.code ?? payload?.state ?? 'error', message);
   }
   return payload as T;
 }
 
 export const api = {
   health: () => request<{ status: string; version: string }>('GET', '/api/health'),
+  runtimeState: () => request<RuntimeStateSnapshot>('GET', '/api/runtime/state'),
+  telemetry: () => request<SystemTelemetry>('GET', '/api/system/telemetry'),
   status: () => request<SystemStatus>('GET', '/api/system/status'),
   providerCheck: () =>
     request<{ ok: boolean; detail: string; provider: string; model: string }>(
@@ -217,7 +181,8 @@ export const api = {
     if (query) params.set('query', query);
     if (type) params.set('type', type);
     const suffix = params.toString() ? `?${params}` : '';
-    return request<{ memories: Memory[] }>('GET', `/api/memories${suffix}`);
+    // Search results carry a relevance score; plain listing does not.
+    return request<{ memories: (Memory & { score?: number })[] }>('GET', `/api/memories${suffix}`);
   },
   createMemory: (input: { type: string; content: string; importance?: number }) =>
     request<{ memory: Memory }>('POST', '/api/memories', input),
@@ -233,7 +198,7 @@ export const api = {
       { task, conversationId },
     ),
 
-  approvals: () => request<{ approvals: Approval[] }>('GET', '/api/approvals'),
+  approvals: () => request<{ approvals: ApprovalRequest[] }>('GET', '/api/approvals'),
   approve: (id: string, note?: string) =>
     request<{ ok: boolean; state: string; message: string; turn?: TurnResult }>(
       'POST',
@@ -268,41 +233,3 @@ export const api = {
       vision: ProviderStatus;
     }>('GET', '/api/media/status'),
 };
-
-/**
- * Live event stream.
- *
- * EventSource cannot set an Authorization header, so in token mode the token is
- * passed as a query parameter on this one same-origin endpoint. It is the
- * user's own session token, not a provider credential.
- */
-export function subscribeToEvents(onEvent: (event: JarvisEvent) => void): () => void {
-  const token = getToken();
-  const url = token ? `/api/events/stream?token=${encodeURIComponent(token)}` : '/api/events/stream';
-  let source: EventSource | null = null;
-  let closed = false;
-  let retry: ReturnType<typeof setTimeout> | undefined;
-
-  const connect = () => {
-    if (closed) return;
-    source = new EventSource(url);
-    source.addEventListener('jarvis', (message) => {
-      try {
-        onEvent(JSON.parse((message as MessageEvent).data) as JarvisEvent);
-      } catch {
-        /* ignore malformed frame */
-      }
-    });
-    source.onerror = () => {
-      source?.close();
-      if (!closed) retry = setTimeout(connect, 3000);
-    };
-  };
-
-  connect();
-  return () => {
-    closed = true;
-    if (retry) clearTimeout(retry);
-    source?.close();
-  };
-}

@@ -1,22 +1,23 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  api,
-  subscribeToEvents,
-  type Approval,
-  type Conversation,
-  type JarvisEvent,
-  type Message,
-  type SystemStatus,
-} from './api';
-import { ActivityFeed } from './components/ActivityFeed';
-import { ApprovalCard } from './components/ApprovalCard';
+/**
+ * Application shell.
+ *
+ * Creates the one runtime client, provides it, and switches views. It holds no
+ * runtime state: conversation selection and which tab is open are UI concerns,
+ * everything else lives in the runtime store and is written there by the client.
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { JarvisRuntimeClient } from './runtime/client';
+import { RuntimeContext, useRuntime } from './runtime/react';
+import { TopBar } from './components/TopBar';
+import { ControlRoom } from './views/ControlRoom';
 import { ConversationView } from './views/ConversationView';
 import { ActivityView, AgentsView, MemoryView, SettingsView, ToolsView } from './views/PanelViews';
+import { api, type Conversation, type Message } from './runtime/api';
 
-type View = 'chat' | 'activity' | 'memory' | 'agents' | 'tools' | 'settings';
-type MobilePane = 'nav' | 'main' | 'activity';
+type View = 'control' | 'chat' | 'activity' | 'memory' | 'agents' | 'tools' | 'settings';
 
 const VIEWS: { id: View; label: string }[] = [
+  { id: 'control', label: 'Control Room' },
   { id: 'chat', label: 'Conversation' },
   { id: 'activity', label: 'Activity' },
   { id: 'memory', label: 'Memory' },
@@ -26,76 +27,44 @@ const VIEWS: { id: View; label: string }[] = [
 ];
 
 export default function App() {
-  const [view, setView] = useState<View>('chat');
-  const [mobilePane, setMobilePane] = useState<MobilePane>('main');
-  const [status, setStatus] = useState<SystemStatus | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  // One client for the lifetime of the app — one SSE connection, not one per
+  // component.
+  const client = useMemo(() => new JarvisRuntimeClient(), []);
+
+  useEffect(() => {
+    void client.connect();
+    return () => client.disconnect();
+  }, [client]);
+
+  return (
+    <RuntimeContext.Provider value={client}>
+      <Shell />
+    </RuntimeContext.Provider>
+  );
+}
+
+function Shell() {
+  const [view, setView] = useState<View>('control');
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [events, setEvents] = useState<JarvisEvent[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [lastReply, setLastReply] = useState('');
 
-  const refreshStatus = useCallback(async () => {
-    try {
-      const next = await api.status();
-      setStatus(next);
-      setConnected(true);
-      setError('');
-    } catch (cause) {
-      setConnected(false);
-      setError(
-        (cause as { status?: number }).status === 401
-          ? 'Not authorised. Paste your JARVIS_API_TOKEN in Settings.'
-          : `Cannot reach the JARVIS server: ${(cause as Error).message}`,
-      );
-    }
-  }, []);
+  const pendingApprovals = useRuntime((state) => state.approvals.length);
+  const connection = useRuntime((state) => state.connection);
 
-  const refreshApprovals = useCallback(async () => {
-    try {
-      setApprovals((await api.approvals()).approvals);
-    } catch {
-      /* surfaced by status refresh */
-    }
-  }, []);
-
-  const refreshConversations = useCallback(async () => {
+  const refreshConversations = async () => {
     try {
       setConversations((await api.conversations()).conversations);
     } catch {
-      /* surfaced by status refresh */
+      /* connection state already reflects this */
     }
-  }, []);
+  };
 
-  // Initial load.
   useEffect(() => {
-    void (async () => {
-      await refreshStatus();
-      await refreshConversations();
-      await refreshApprovals();
-      try {
-        setEvents((await api.events(120)).events);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [refreshStatus, refreshConversations, refreshApprovals]);
+    if (connection === 'online') void refreshConversations();
+  }, [connection]);
 
-  // Live activity feed.
-  useEffect(() => {
-    return subscribeToEvents((event) => {
-      setEvents((current) => [event, ...current].slice(0, 400));
-      if (event.type === 'APPROVAL_REQUEST' || event.type === 'APPROVAL_RESOLVED') {
-        void refreshApprovals();
-      }
-    });
-  }, [refreshApprovals]);
-
-  // Load messages when the selected conversation changes.
   useEffect(() => {
     if (!conversationId) {
       setMessages([]);
@@ -107,51 +76,15 @@ export default function App() {
       .catch((cause: Error) => setError(cause.message));
   }, [conversationId]);
 
-  const send = async (text: string) => {
-    setBusy(true);
-    setError('');
-    // Optimistic echo so the message appears immediately.
-    setMessages((current) => [
-      ...current,
-      {
-        id: `local_${Date.now()}`,
-        role: 'user',
-        content: text,
-        agent: null,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-
-    try {
-      const turn = await api.chat(text, conversationId);
-      setConversationId(turn.conversationId);
-      setMessages(turn.messages);
-      setLastReply(turn.reply);
-      setApprovals(turn.pendingApprovals);
-      if (turn.error) setError(turn.error);
-      await refreshConversations();
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const decide = async (id: string, decision: 'approve' | 'deny') => {
-    try {
-      const outcome = await (decision === 'approve' ? api.approve(id) : api.deny(id));
-      if (outcome.turn) {
-        setMessages(outcome.turn.messages);
-        setLastReply(outcome.turn.reply);
-      } else if (conversationId) {
-        setMessages((await api.messages(conversationId)).messages);
-      }
-      if (!outcome.ok && outcome.state === 'unavailable') setError(outcome.message);
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      await refreshApprovals();
-    }
+  // The Control Room and the Conversation view share a conversation; when one
+  // advances it, the other reloads the transcript.
+  const adoptConversation = (id: string) => {
+    setConversationId(id);
+    void api
+      .messages(id)
+      .then((result) => setMessages(result.messages))
+      .catch(() => undefined);
+    void refreshConversations();
   };
 
   const newConversation = async () => {
@@ -159,169 +92,97 @@ export default function App() {
       const created = await api.createConversation();
       setConversationId(created.conversation.id);
       setMessages([]);
-      setView('chat');
-      setMobilePane('main');
       await refreshConversations();
     } catch (cause) {
       setError((cause as Error).message);
     }
   };
 
-  const currentAgent =
-    [...events].find((event) => event.type === 'AGENT_DELEGATION')?.agent ?? 'jarvis';
-
   return (
-    <div className="app" data-mobile={mobilePane}>
-      <div className="brand">
-        <span className={`brand-dot ${connected ? '' : 'offline'}`} />
-        JARVIS
-        <span className="muted small" style={{ letterSpacing: 0, marginLeft: 'auto' }}>
-          {status?.version ?? ''}
-        </span>
-      </div>
+    <div className="app-cr">
+      <TopBar />
 
-      <div className="topbar">
+      <nav className="viewbar" data-testid="view-bar">
         {VIEWS.map((item) => (
           <button
             key={item.id}
             className="tab"
             aria-selected={view === item.id}
             onClick={() => setView(item.id)}
+            data-testid={`view-${item.id}`}
           >
             {item.label}
-            {item.id === 'chat' && approvals.length > 0 && ` (${approvals.length})`}
+            {item.id === 'control' && pendingApprovals > 0 && ` (${pendingApprovals})`}
           </button>
         ))}
-        <div className="row grow" style={{ justifyContent: 'flex-end', gap: 10 }}>
-          <span className="small muted truncate">
-            {status ? `${status.activeModelProvider} · ${status.activeModel}` : 'connecting…'}
-          </span>
-        </div>
-      </div>
+        <span className="grow" />
+        <button className="btn btn-sm" onClick={() => void newConversation()}>
+          + Conversation
+        </button>
+      </nav>
 
-      <div className="nav">
-        <div>
-          <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => void newConversation()}>
-            + New conversation
-          </button>
-        </div>
+      {error && <div className="error-banner">{error}</div>}
 
-        <div>
-          <div className="section-label">Views</div>
-          <div className="stack" style={{ gap: 2 }}>
-            {VIEWS.map((item) => (
-              <button
-                key={item.id}
-                className="conv-item"
-                aria-current={view === item.id}
-                onClick={() => {
-                  setView(item.id);
-                  setMobilePane('main');
-                }}
-              >
-                {item.label}
-                {item.id === 'chat' && approvals.length > 0 && ` · ${approvals.length} pending`}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <div className="section-label">Conversations</div>
-          <div className="stack" style={{ gap: 2 }}>
-            {conversations.length === 0 && <div className="muted small" style={{ padding: '0 8px' }}>None yet.</div>}
-            {conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                className="conv-item"
-                aria-current={conversation.id === conversationId}
-                onClick={() => {
-                  setConversationId(conversation.id);
-                  setView('chat');
-                  setMobilePane('main');
-                }}
-                title={conversation.title}
-              >
-                {conversation.title}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 'auto' }}>
-          <div className="section-label">System</div>
-          <div className="small muted" style={{ padding: '0 8px' }}>
-            {status ? (
-              <>
-                {status.tools.total} tools · {status.agents.length} agents
-                <br />
-                {status.counts.memories} memories · {status.counts.auditEvents} audit
-                <br />
-                db schema v{status.database.schemaVersion}
-              </>
-            ) : (
-              'offline'
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="main">
-        {error && <div className="error-banner">{error}</div>}
+      <main className="viewport">
+        {view === 'control' && (
+          <ControlRoom conversationId={conversationId} onConversation={adoptConversation} />
+        )}
         {view === 'chat' && (
-          <ConversationView
+          <ConversationPane
+            conversationId={conversationId}
+            conversations={conversations}
             messages={messages}
-            busy={busy}
-            status={status}
-            onSend={send}
-            lastReply={lastReply}
+            onSelect={adoptConversation}
+            onMessages={setMessages}
           />
         )}
-        {view === 'activity' && <ActivityView events={events} />}
+        {view === 'activity' && <ActivityView />}
         {view === 'memory' && <MemoryView />}
         {view === 'agents' && <AgentsView conversationId={conversationId} />}
         {view === 'tools' && <ToolsView />}
-        {view === 'settings' && <SettingsView status={status} onRefresh={() => void refreshStatus()} />}
-      </div>
+        {view === 'settings' && <SettingsView />}
+      </main>
+    </div>
+  );
+}
 
-      <div className="aside">
-        <div className="section-label" style={{ padding: '0 0 8px' }}>Pending approvals</div>
-        {approvals.length === 0 ? (
-          <div className="muted small" style={{ paddingBottom: 12 }}>Nothing waiting on you.</div>
-        ) : (
-          approvals.map((approval) => (
-            <ApprovalCard
-              key={approval.id}
-              approval={approval}
-              onApprove={(id) => decide(id, 'approve')}
-              onDeny={(id) => decide(id, 'deny')}
-            />
-          ))
-        )}
-
-        <div className="section-label" style={{ padding: '10px 0 8px' }}>System state</div>
-        <div className="card small">
-          <div className="row-between"><span className="muted">Model</span><span className="mono">{status?.activeModel ?? '—'}</span></div>
-          <div className="row-between"><span className="muted">Provider</span><span className="mono">{status?.activeModelProvider ?? '—'}</span></div>
-          <div className="row-between"><span className="muted">Agent</span><span className="mono">{currentAgent}</span></div>
-          <div className="row-between">
-            <span className="muted">Status</span>
-            <span className={`chip ${connected ? 'ok' : 'off'}`}>{connected ? 'online' : 'offline'}</span>
-          </div>
-        </div>
-
-        <div className="section-label" style={{ padding: '10px 0 8px' }}>Live activity</div>
-        <div className="card"><ActivityFeed events={events} limit={40} /></div>
-      </div>
-
-      <div className="mobile-tabs">
-        <button aria-pressed={mobilePane === 'nav'} onClick={() => setMobilePane('nav')}>Menu</button>
-        <button aria-pressed={mobilePane === 'main'} onClick={() => setMobilePane('main')}>
-          {VIEWS.find((item) => item.id === view)?.label ?? 'Main'}
-        </button>
-        <button aria-pressed={mobilePane === 'activity'} onClick={() => setMobilePane('activity')}>
-          Activity{approvals.length > 0 ? ` (${approvals.length})` : ''}
-        </button>
+function ConversationPane({
+  conversationId,
+  conversations,
+  messages,
+  onSelect,
+  onMessages,
+}: {
+  conversationId: string | null;
+  conversations: Conversation[];
+  messages: Message[];
+  onSelect: (id: string) => void;
+  onMessages: (messages: Message[]) => void;
+}) {
+  return (
+    <div className="conversation-pane">
+      <aside className="conv-list">
+        <div className="section-label">Conversations</div>
+        {conversations.length === 0 && <div className="muted small conv-empty">None yet.</div>}
+        {conversations.map((conversation) => (
+          <button
+            key={conversation.id}
+            className="conv-item"
+            aria-current={conversation.id === conversationId}
+            onClick={() => onSelect(conversation.id)}
+            title={conversation.title}
+          >
+            {conversation.title}
+          </button>
+        ))}
+      </aside>
+      <div className="conv-main">
+        <ConversationView
+          conversationId={conversationId}
+          messages={messages}
+          onMessages={onMessages}
+          onConversation={onSelect}
+        />
       </div>
     </div>
   );

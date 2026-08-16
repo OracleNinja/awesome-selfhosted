@@ -6,22 +6,14 @@
  * either.
  */
 import { useEffect, useState } from 'react';
-import {
-  api,
-  getToken,
-  setToken,
-  type AgentInfo,
-  type AuditEntry,
-  type JarvisEvent,
-  type Memory,
-  type SystemStatus,
-  type ToolInfo,
-} from '../api';
+import { api, getToken, setToken, type AuditEntry, type Memory, type ToolInfo } from '../runtime/api';
+import { useRuntime, useRuntimeClient, shallowArrayEqual } from '../runtime/react';
 import { ActivityFeed } from '../components/ActivityFeed';
 
 // --------------------------------------------------------------- Activity
 
-export function ActivityView({ events }: { events: JarvisEvent[] }) {
+export function ActivityView() {
+  const events = useRuntime((state) => state.recentEvents, shallowArrayEqual);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [error, setError] = useState('');
@@ -106,7 +98,7 @@ export function ActivityView({ events }: { events: JarvisEvent[] }) {
 // ----------------------------------------------------------------- Memory
 
 export function MemoryView() {
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memories, setMemories] = useState<(Memory & { score?: number })[]>([]);
   const [query, setQuery] = useState('');
   const [type, setType] = useState('');
   const [content, setContent] = useState('');
@@ -215,18 +207,12 @@ export function MemoryView() {
 // ----------------------------------------------------------------- Agents
 
 export function AgentsView({ conversationId }: { conversationId: string | null }) {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const client = useRuntimeClient();
+  const agents = useRuntime((state) => state.agents, shallowArrayEqual);
   const [task, setTask] = useState('');
   const [running, setRunning] = useState<string | null>(null);
   const [output, setOutput] = useState<{ agent: string; text: string } | null>(null);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    api
-      .agents()
-      .then((result) => setAgents(result.agents))
-      .catch((cause: Error) => setError(cause.message));
-  }, []);
 
   const run = async (name: string) => {
     if (!task.trim()) {
@@ -237,7 +223,7 @@ export function AgentsView({ conversationId }: { conversationId: string | null }
     setRunning(name);
     setOutput(null);
     try {
-      const result = await api.runAgent(name, task.trim(), conversationId);
+      const result = await client.runAgent(name, task.trim(), conversationId);
       setOutput({ agent: name, text: result.result.output });
     } catch (cause) {
       setError((cause as Error).message);
@@ -366,7 +352,9 @@ export function ToolsView() {
 
 // --------------------------------------------------------------- Settings
 
-export function SettingsView({ status, onRefresh }: { status: SystemStatus | null; onRefresh: () => void }) {
+export function SettingsView() {
+  const client = useRuntimeClient();
+  const status = useRuntime((state) => state.snapshot);
   const [token, setTokenState] = useState(getToken());
   const [check, setCheck] = useState<{ ok: boolean; detail: string } | null>(null);
   const [checking, setChecking] = useState(false);
@@ -392,8 +380,8 @@ export function SettingsView({ status, onRefresh }: { status: SystemStatus | nul
         {status ? (
           <>
             <div className="row" style={{ gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <span className="chip ok">{status.activeModelProvider}</span>
-              <span className="mono small">{status.activeModel}</span>
+              <span className={`chip ${status.activeModel.available ? 'ok' : 'off'}`}>{status.activeModel.provider}</span>
+              <span className="mono small">{status.activeModel.model}</span>
             </div>
             <button className="btn btn-sm" onClick={() => void runCheck()} disabled={checking}>
               {checking ? 'Contacting provider…' : 'Test live connection'}
@@ -460,7 +448,7 @@ export function SettingsView({ status, onRefresh }: { status: SystemStatus | nul
             onClick={() => {
               setToken(token);
               setSaved(true);
-              onRefresh();
+              void client.refreshState();
             }}
           >
             {saved ? 'Saved' : 'Save'}

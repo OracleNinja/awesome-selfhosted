@@ -1,85 +1,47 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Message, SystemStatus } from '../api';
-import {
-  speechRecognitionSupported,
-  speechSynthesisSupported,
-  speakInBrowser,
-  startDictation,
-  stopSpeaking,
-  type DictationHandle,
-} from '../voice';
-
 /**
- * The conversation.
+ * The conversation transcript.
  *
- * Tool calls and tool results are shown, collapsed, rather than hidden: if
- * JARVIS did something, the user can see exactly what it did.
+ * Sending goes through the runtime client, the same path the Control Room's
+ * command bar uses — there is one way into the orchestrator from this app.
+ * Tool calls and results are shown collapsed rather than hidden: if JARVIS did
+ * something, the user can see exactly what.
  */
+import { useEffect, useRef, useState } from 'react';
+import { useRuntime, useRuntimeClient } from '../runtime/react';
+import { api, type Message } from '../runtime/api';
+
 export function ConversationView({
+  conversationId,
   messages,
-  busy,
-  status,
-  onSend,
-  lastReply,
+  onMessages,
+  onConversation,
 }: {
+  conversationId: string | null;
   messages: Message[];
-  busy: boolean;
-  status: SystemStatus | null;
-  onSend: (text: string) => Promise<void>;
-  lastReply: string;
+  onMessages: (messages: Message[]) => void;
+  onConversation: (id: string) => void;
 }) {
+  const client = useRuntimeClient();
   const [draft, setDraft] = useState('');
-  const [listening, setListening] = useState(false);
-  const [speakReplies, setSpeakReplies] = useState(false);
-  const [voiceError, setVoiceError] = useState('');
-  const dictation = useRef<DictationHandle | null>(null);
+  const busy = useRuntime((state) => state.commandInFlight);
+  const activeModel = useRuntime((state) => state.snapshot?.activeModel ?? null);
   const bottom = useRef<HTMLDivElement | null>(null);
-  const spokenRef = useRef('');
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, busy]);
 
-  // Speak new replies when voice output is on.
-  useEffect(() => {
-    if (!speakReplies || !lastReply || lastReply === spokenRef.current) return;
-    spokenRef.current = lastReply;
-    if (!speakInBrowser(lastReply)) {
-      setVoiceError('This browser does not support speech synthesis.');
-    }
-  }, [lastReply, speakReplies]);
-
   const send = async () => {
     const text = draft.trim();
     if (!text || busy) return;
     setDraft('');
-    await onSend(text);
-  };
-
-  const toggleMic = () => {
-    setVoiceError('');
-    if (listening) {
-      dictation.current?.stop();
-      return;
+    const result = await client.sendCommand(text, conversationId);
+    if (result.conversationId) {
+      onConversation(result.conversationId);
+      const reloaded = await api.messages(result.conversationId).catch(() => null);
+      if (reloaded) onMessages(reloaded.messages);
     }
-    const handle = startDictation({
-      onPartial: (text) => setDraft(text),
-      onFinal: (text) => setDraft(text),
-      onError: (message) => setVoiceError(message),
-      onEnd: () => setListening(false),
-    });
-    if (!handle) {
-      setVoiceError('Speech recognition is not available in this browser.');
-      return;
-    }
-    dictation.current = handle;
-    setListening(true);
   };
-
-  const sttMode = status?.config.sttProvider ?? 'browser';
-  const ttsMode = status?.config.ttsProvider ?? 'browser';
-  const micUsable = sttMode === 'browser' ? speechRecognitionSupported() : true;
-  const speakerUsable = ttsMode === 'browser' ? speechSynthesisSupported() : true;
 
   const visible = messages.filter((message) => message.role !== 'system');
 
@@ -91,8 +53,8 @@ export function ConversationView({
             JARVIS is online.
             <br />
             <span className="small">
-              {status
-                ? `${status.activeModelProvider} · ${status.activeModel} · ${status.tools.total} tools · ${status.agents.length} agents`
+              {activeModel
+                ? `${activeModel.provider} · ${activeModel.model}${activeModel.available ? '' : ' · NOT CONFIGURED'}`
                 : 'Connecting…'}
             </span>
           </div>
@@ -104,12 +66,8 @@ export function ConversationView({
               <div className="msg toolcall" key={message.id}>
                 <span className="msg-role">tool call</span>
                 <details className="msg-body">
-                  <summary>
-                    {message.toolCalls.map((call) => call.name).join(', ')}
-                  </summary>
-                  <pre style={{ margin: '6px 0 0' }}>
-                    {JSON.stringify(message.toolCalls, null, 2)}
-                  </pre>
+                  <summary>{message.toolCalls.map((call) => call.name).join(', ')}</summary>
+                  <pre style={{ margin: '6px 0 0' }}>{JSON.stringify(message.toolCalls, null, 2)}</pre>
                 </details>
               </div>
             );
@@ -142,14 +100,12 @@ export function ConversationView({
         <div ref={bottom} />
       </div>
 
-      {voiceError && <div className="error-banner">{voiceError}</div>}
-
       <div className="composer">
         <div className="composer-row">
           <textarea
             className="textarea grow"
             rows={2}
-            placeholder={listening ? 'Listening…' : 'Message JARVIS…'}
+            placeholder="Message JARVIS…"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -159,43 +115,12 @@ export function ConversationView({
               }
             }}
           />
-          <button
-            className={`btn ${listening ? 'mic-on' : ''}`}
-            onClick={toggleMic}
-            disabled={!micUsable}
-            title={
-              micUsable
-                ? listening
-                  ? 'Stop listening'
-                  : 'Speak your message'
-                : 'Speech recognition is not available here'
-            }
-            aria-pressed={listening}
-          >
-            {listening ? '■' : '🎙'}
-          </button>
           <button className="btn btn-primary" onClick={() => void send()} disabled={busy || !draft.trim()}>
             Send
           </button>
         </div>
-        <div className="row small muted" style={{ gap: 12 }}>
-          <label className="row" style={{ gap: 6, cursor: speakerUsable ? 'pointer' : 'not-allowed' }}>
-            <input
-              type="checkbox"
-              checked={speakReplies}
-              disabled={!speakerUsable}
-              onChange={(event) => {
-                setSpeakReplies(event.target.checked);
-                if (!event.target.checked) stopSpeaking();
-              }}
-            />
-            Speak replies
-          </label>
-          <span>
-            voice in: {sttMode}
-            {!micUsable && ' (unavailable in this browser)'} · voice out: {ttsMode}
-            {!speakerUsable && ' (unavailable in this browser)'}
-          </span>
+        <div className="small muted">
+          Voice controls live in the Control Room command bar.
         </div>
       </div>
     </>

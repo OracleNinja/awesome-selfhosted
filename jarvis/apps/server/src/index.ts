@@ -14,6 +14,8 @@ async function main(): Promise<void> {
   loadDotEnv();
   const config = loadConfig();
   const jarvis = createJarvis({ config });
+  // Periodic housekeeping (approval expiry) runs only in the server process.
+  jarvis.startBackgroundTasks();
   const status = jarvis.status();
 
   const webDir = join(repoRoot(), 'apps', 'web', 'dist');

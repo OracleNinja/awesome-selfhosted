@@ -20,7 +20,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from '@jarvis/shared';
-import { EventBus, redact, truncate, validateInput } from '@jarvis/shared';
+import { EventBus, id, redact, truncate, validateInput } from '@jarvis/shared';
 import type { Store } from '@jarvis/memory';
 import type { PermissionPolicy } from '@jarvis/security';
 import type { ToolRegistry } from '@jarvis/tools';
@@ -58,6 +58,10 @@ export class ToolExecutor {
     const { registry, policy, store, events } = this.deps;
     const { tool: toolName, agent, userId, conversationId } = request;
     const startedAt = Date.now();
+    // Correlates TOOL_REQUEST with its TOOL_RESULT. Without it, a client
+    // watching the stream has to guess which result belongs to which call when
+    // the same tool is invoked twice in one turn.
+    const callId = id('exec');
 
     // 1. Resolve.
     const tool = registry.get(toolName);
@@ -94,7 +98,7 @@ export class ToolExecutor {
       conversationId,
       agent: agent.name,
       summary: `${agent.name} → ${tool.name}`,
-      data: { tool: tool.name, risk: tool.risk, arguments: redact(request.args) },
+      data: { callId, tool: tool.name, risk: tool.risk, arguments: redact(request.args) },
     });
 
     // 2. Permission.
@@ -118,7 +122,7 @@ export class ToolExecutor {
         conversationId,
         agent: agent.name,
         summary: `Permission denied: ${tool.name}`,
-        data: { tool: tool.name, reason: permission.reason },
+        data: { kind: 'permission', tool: tool.name, reason: permission.reason },
       });
       return { status: 'denied', result: null, message };
     }
@@ -144,7 +148,7 @@ export class ToolExecutor {
         conversationId,
         agent: agent.name,
         summary: `Invalid arguments for ${tool.name}`,
-        data: { tool: tool.name, errors: validation.errors },
+        data: { kind: 'tool', tool: tool.name, errors: validation.errors },
       });
       return { status: 'error', result: null, message };
     }
@@ -183,6 +187,7 @@ export class ToolExecutor {
         agent: agent.name,
         summary: `Approval required: ${request_.description}`,
         data: {
+          callId,
           approvalId: request_.id,
           tool: tool.name,
           risk: tool.risk,
@@ -203,7 +208,7 @@ export class ToolExecutor {
     }
 
     // 5. Execute.
-    return this.runTool(tool, validation.value, request, startedAt, null);
+    return this.runTool(tool, validation.value, request, startedAt, null, callId);
   }
 
   /**
@@ -265,6 +270,7 @@ export class ToolExecutor {
       },
       startedAt,
       approval.id,
+      id('exec'),
     );
   }
 
@@ -274,6 +280,7 @@ export class ToolExecutor {
     request: ExecuteRequest,
     startedAt: number,
     approvalId: string | null,
+    callId: string,
   ): Promise<ExecutionOutcome> {
     const { store, events } = this.deps;
     const { agent, userId, conversationId } = request;
@@ -306,7 +313,7 @@ export class ToolExecutor {
         conversationId,
         agent: agent.name,
         summary: `${tool.name} threw: ${truncate(message, 120)}`,
-        data: { tool: tool.name, error: message },
+        data: { kind: 'tool', callId, tool: tool.name, error: message },
       });
       return {
         status: 'error',
@@ -337,7 +344,7 @@ export class ToolExecutor {
       conversationId,
       agent: agent.name,
       summary: `${tool.name}: ${truncate(result.summary, 120)}`,
-      data: { tool: tool.name, ok: result.ok, durationMs, error: result.error },
+      data: { callId, tool: tool.name, ok: result.ok, durationMs, error: result.error },
     });
 
     if (result.ok && tool.risk !== 'READ') {
@@ -347,7 +354,22 @@ export class ToolExecutor {
         conversationId,
         agent: agent.name,
         summary: `${tool.risk}: ${truncate(result.summary, 120)}`,
-        data: { tool: tool.name, risk: tool.risk, approvalId },
+        data: { callId, tool: tool.name, risk: tool.risk, approvalId },
+      });
+    }
+
+    if (tool.name === 'memory_search' && result.ok) {
+      // Retrieval is a memory operation, not just a tool call. Emitting it as
+      // one lets a client show memory activity without knowing which tool
+      // names happen to touch memory.
+      const found = (result.data as { results?: unknown[] } | undefined)?.results?.length ?? 0;
+      events.emit({
+        type: 'MEMORY_READ',
+        userId,
+        conversationId,
+        agent: agent.name,
+        summary: truncate(result.summary, 140),
+        data: { via: 'memory_search', matches: found },
       });
     }
 

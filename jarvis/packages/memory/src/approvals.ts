@@ -50,6 +50,13 @@ export interface ApprovalCreateInput {
 }
 
 export class ApprovalRepo {
+  /**
+   * Called with the requests that just expired. Set by the composition root so
+   * an expiry emits an event and an audit row; the repository itself stays
+   * ignorant of both.
+   */
+  onExpire: ((expired: ApprovalRequest[]) => void) | null = null;
+
   constructor(private db: Db) {}
 
   create(input: ApprovalCreateInput): ApprovalRequest {
@@ -144,13 +151,41 @@ export class ApprovalRepo {
     return rows.map(toApproval);
   }
 
-  /** Mark timed-out pending approvals as expired. An expired request can never execute. */
-  expireStale(reference: string = now()): number {
-    return this.db
+  /**
+   * Mark timed-out pending approvals as expired, and announce them.
+   *
+   * Expiry is triggered from four different read paths, so a caller cannot
+   * reliably observe it by polling — by the time a sweep ran, an ordinary
+   * `listPending()` had usually already expired the row silently. Instead the
+   * rows are selected before the update and handed to `onExpire`, so every
+   * expiry produces the same evidence a human decision does, whichever path
+   * happened to trigger it.
+   */
+  expireStale(reference: string = now()): ApprovalRequest[] {
+    const doomed = this.db
+      .prepare(`SELECT * FROM approvals WHERE state = 'pending' AND expires_at <= ?`)
+      .all(reference) as ApprovalRow[];
+    if (doomed.length === 0) return [];
+
+    this.db
       .prepare(
         `UPDATE approvals SET state = 'expired', resolved_at = ?
          WHERE state = 'pending' AND expires_at <= ?`,
       )
-      .run(reference, reference).changes;
+      .run(reference, reference);
+
+    const expired = doomed.map((row) =>
+      toApproval({ ...row, state: 'expired', resolved_at: reference }),
+    );
+
+    if (this.onExpire) {
+      try {
+        this.onExpire(expired);
+      } catch {
+        /* an observer must never break expiry itself */
+      }
+    }
+    return expired;
   }
+
 }
