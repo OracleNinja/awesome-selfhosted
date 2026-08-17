@@ -1,0 +1,37 @@
+{
+  // Runs JARVIS in GitHub Codespaces — a browser tab, nothing installed locally.
+  //
+  // Codespaces forwards port 8787 and hands back an https://*.app.github.dev
+  // URL. That URL is PRIVATE to your GitHub account by default, which is why
+  // this configuration does not set a JARVIS_API_TOKEN: GitHub is already
+  // authenticating you in front of the port. If you change the port's
+  // visibility to Public, set a token first — see jarvis/README.md.
+  //
+  // This repository holds several projects; every command below is scoped to
+  // jarvis/ so opening a Codespace does not try to build the others.
+  "name": "JARVIS",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+
+  // better-sqlite3 is a native module. The image already carries python3 and a
+  // C++ toolchain, so npm can compile it if no glibc prebuild matches.
+  "postCreateCommand": "cd jarvis && npm install && npm run build",
+
+  "forwardPorts": [8787],
+  "portsAttributes": {
+    "8787": {
+      "label": "JARVIS Control Room",
+      // Opens the forwarded URL in a browser tab as soon as the server listens.
+      "onAutoForward": "openBrowser"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  },
+
+  "postAttachCommand": {
+    "hint": "bash -lc 'echo \"\\nJARVIS: run  cd jarvis && npm start  then open the forwarded port 8787 (Ports tab).\\nNo API key needed to look around — the UI will say which providers are unconfigured.\\n\"'"
+  }
+}

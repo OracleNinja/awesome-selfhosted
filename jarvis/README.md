@@ -61,6 +61,64 @@ the Control Room shows `UNAUTHORIZED` and tells you so. The token is kept in
 To reach it from outside your network, put it behind a reverse proxy with TLS —
 see [docs/PRODUCTION.md](docs/PRODUCTION.md). Do not expose port 8787 directly.
 
+---
+
+## Running it on the web, without installing anything
+
+### Option A — GitHub Codespaces (nothing local, fastest)
+
+On this repository: **Code → Codespaces → Create codespace on this branch.**
+
+The devcontainer installs and builds on creation. When it finishes:
+
+```bash
+cd jarvis && npm start
+```
+
+Codespaces forwards port 8787 and opens it as an `https://*.app.github.dev`
+URL. That URL is **private to your GitHub account** by default, which is the
+only reason no token is needed — GitHub authenticates you in front of the port.
+If you switch the port to Public, set `JARVIS_API_TOKEN` in `jarvis/.env`
+first, or you have published an unauthenticated tool executor.
+
+Codespaces is a development machine: it stops when idle, and the container is
+disposable. Anything you want to keep lives in the database file, so treat it as
+scratch.
+
+### Option B — Fly.io (a real, always-on URL)
+
+[`Dockerfile`](Dockerfile) and [`fly.toml`](fly.toml) are here, matching the
+pattern already used elsewhere in this repo. One machine, one volume at `/data`
+holding the SQLite database and the workspace.
+
+```bash
+fly launch --no-deploy        # creates the app; keep the generated names
+fly volumes create jarvis_data --size 1
+fly secrets set JARVIS_API_TOKEN=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+fly secrets set NVIDIA_API_KEY=nvapi-...   # optional
+fly deploy
+```
+
+Then open the app URL and paste that token into **Settings**.
+
+`JARVIS_API_TOKEN` is not advice here, it is structural: with no token the
+server binds `127.0.0.1`, and fly-proxy reaches the machine on its private
+address — so an untokened deploy is simply unreachable. There is no way to
+expose this publicly without authentication, which is the point.
+
+**Do not `fly scale count` above 1.** SQLite is a single-writer file on a single
+volume; a second machine would get its own volume and its own silently
+divergent database.
+
+### Deploying without a local CLI either
+
+[`.github/workflows/deploy-jarvis.yml`](../.github/workflows/deploy-jarvis.yml)
+runs the deploy on GitHub. Add a `FLY_API_TOKEN` repository secret, then
+**Actions → Deploy JARVIS → Run workflow**. It typechecks and runs the suite
+before publishing, and is manual on purpose — deploying puts an approval-gated
+tool executor on a public URL, so it should be a decision, not a side effect of
+a push.
+
 ### Other commands
 
 | Command | What it does |

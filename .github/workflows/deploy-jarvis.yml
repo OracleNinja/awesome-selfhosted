@@ -1,0 +1,68 @@
+# Deploy JARVIS to Fly.io from GitHub, so publishing never needs a local CLI.
+#
+# Deliberately manual (workflow_dispatch only). Deploying puts a tool executor
+# with filesystem access and approval-gated actions on a public URL, so it
+# happens when you press the button — not on every push.
+#
+# One-time setup, all in a browser:
+#   1. Create the app and its volume once (Fly dashboard, or `fly launch
+#      --no-deploy` if you do have the CLI). The names must match fly.toml:
+#      app "jarvis-os", volume "jarvis_data".
+#   2. Fly dashboard → Tokens → create a deploy token.
+#   3. This repo → Settings → Secrets and variables → Actions → New secret:
+#        FLY_API_TOKEN   = the deploy token
+#   4. Add the runtime secrets Fly itself will inject (Fly dashboard → Secrets,
+#      or the step below): JARVIS_API_TOKEN is REQUIRED — without it the server
+#      binds 127.0.0.1 and fly-proxy cannot reach it, so the deploy would be
+#      unreachable by design. NVIDIA_API_KEY is optional; JARVIS runs without a
+#      model provider and says so.
+name: Deploy JARVIS
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why this deploy is happening (recorded in the run log)
+        required: false
+        default: manual deploy
+
+# The token can push a new release; nothing here needs write access to the repo.
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy at a time: this app is a single machine on a single SQLite
+  # volume, and overlapping releases would fight over it.
+  group: deploy-jarvis
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy to Fly
+    runs-on: ubuntu-latest
+    # A deploy target is an environment; this is the hook for adding a required
+    # reviewer in repo settings if you ever want approval before publishing.
+    environment: production
+    defaults:
+      run:
+        working-directory: jarvis
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify before publishing. A red suite should never reach a public URL.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Fly builds the image remotely from jarvis/Dockerfile, so this runner
+      # needs no Docker daemon of its own.
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
