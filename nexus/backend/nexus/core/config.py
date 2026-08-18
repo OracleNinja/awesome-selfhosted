@@ -30,6 +30,7 @@ Design notes
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 from enum import Enum
 from functools import lru_cache
@@ -37,7 +38,8 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings.exceptions import SettingsError
 
 # Environment variables are read with this prefix, e.g. NEXUS_DATABASE_URL.
 ENV_PREFIX = "NEXUS_"
@@ -144,7 +146,12 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = True
 
     # --------------------------------------------------------------- http ---
-    cors_origins: list[str] = Field(default_factory=list)
+    # NoDecode: pydantic-settings would otherwise try to JSON-decode any
+    # list-typed field read from the environment *before* validators run, so
+    # `NEXUS_CORS_ORIGINS=http://a,http://b` would fail with a JSON parse error
+    # instead of reaching the splitter below. NoDecode hands the raw string to
+    # the validator, which accepts both the comma-separated and JSON forms.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     # Requests larger than this are rejected before the body is buffered, so a
     # single client cannot exhaust memory by streaming an enormous JSON body.
     max_request_body_bytes: Annotated[int, Field(ge=1024, le=64 * 1024 * 1024)] = 1 * 1024 * 1024
@@ -156,7 +163,7 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------- monitoring --
     # CIDR blocks the operator asserts they own. Quarantine and active probing
     # refuse to touch anything outside these ranges; see SECURITY.md.
-    monitored_networks: list[str] = Field(default_factory=list)
+    monitored_networks: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # ---------------------------------------------------------- retention ---
     event_retention_days: Annotated[int, Field(ge=1, le=3650)] = 90
@@ -213,7 +220,13 @@ class Settings(BaseSettings):
             if not stripped:
                 return []
             if stripped.startswith("["):
-                return value
+                # The JSON form still has to work: it is what a generated
+                # manifest or a config-management tool is most likely to emit.
+                # With NoDecode set on these fields, nothing else parses it.
+                try:
+                    return json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"looks like JSON but is not valid: {exc}") from exc
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return value
 
@@ -382,6 +395,16 @@ def load_settings(**overrides: Any) -> Settings:
         return Settings(**overrides)
     except ValidationError as exc:
         raise ConfigurationError(_format_validation_error(exc)) from exc
+    except SettingsError as exc:
+        # Raised by the environment source itself — a malformed value it could
+        # not even hand to a validator. Still the operator's problem to fix, so
+        # it gets the same treatment rather than a traceback through
+        # pydantic-settings internals.
+        raise ConfigurationError(
+            "NEXUS cannot start: a configuration value could not be parsed.\n\n"
+            f"  {exc}\n\n"
+            "See nexus/backend/.env.example for the expected format."
+        ) from exc
 
 
 @lru_cache(maxsize=1)

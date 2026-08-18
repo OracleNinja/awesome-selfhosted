@@ -175,5 +175,72 @@ class TestErrorReporting:
         assert "cannot start" in message.lower()
 
 
+class TestEnvironmentVariableParsing:
+    """Configuration read the way an operator actually supplies it.
+
+    Every other test in this file passes values as keyword arguments, which
+    bypasses the environment source entirely. That gap hid a real bug: list
+    fields were JSON-decoded by the settings source *before* the splitting
+    validator ran, so the documented `NEXUS_CORS_ORIGINS=a,b` form raised a
+    JSON parse error. These tests exercise the path the documentation
+    describes.
+    """
+
+    def test_comma_separated_cors_origins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_CORS_ORIGINS", "https://a.example,https://b.example")
+        config = load_settings(_env_file=None)
+        assert config.cors_origins == ["https://a.example", "https://b.example"]
+
+    def test_comma_separated_monitored_networks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_MONITORED_NETWORKS", "192.168.1.0/24, 10.0.0.0/8")
+        config = load_settings(_env_file=None)
+        assert config.monitored_networks == ["192.168.1.0/24", "10.0.0.0/8"]
+        assert config.is_monitored_address("10.1.2.3") is True
+
+    def test_json_list_form_is_also_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_MONITORED_NETWORKS", '["192.168.1.0/24"]')
+        assert load_settings(_env_file=None).monitored_networks == ["192.168.1.0/24"]
+
+    def test_single_value_needs_no_separator(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_CORS_ORIGINS", "https://only.example")
+        assert load_settings(_env_file=None).cors_origins == ["https://only.example"]
+
+    def test_empty_value_means_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_MONITORED_NETWORKS", "")
+        assert load_settings(_env_file=None).monitored_networks == []
+
+    def test_scalars_come_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NEXUS_PORT", "9443")
+        monkeypatch.setenv("NEXUS_LOG_LEVEL", "debug")
+        config = load_settings(_env_file=None)
+        assert config.port == 9443
+        assert config.log_level == "DEBUG"
+
+    def test_invalid_value_from_env_is_a_configuration_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not a traceback through pydantic internals."""
+        monkeypatch.setenv("NEXUS_PORT", "not-a-port")
+        with pytest.raises(ConfigurationError) as exc:
+            load_settings(_env_file=None)
+        assert "NEXUS_PORT" in str(exc.value)
+
+    def test_invalid_network_from_env_is_a_configuration_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NEXUS_MONITORED_NETWORKS", "192.168.1.0/99")
+        with pytest.raises(ConfigurationError):
+            load_settings(_env_file=None)
+
+    def test_production_rules_apply_to_environment_configuration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The safety rules must hold on the real path, not just on kwargs."""
+        monkeypatch.setenv("NEXUS_ENVIRONMENT", "production")
+        with pytest.raises(ConfigurationError) as exc:
+            load_settings(_env_file=None)
+        assert "SECRET_KEY" in str(exc.value)
+
+
 def test_settings_type_is_exported() -> None:
     assert isinstance(load_settings(), Settings)

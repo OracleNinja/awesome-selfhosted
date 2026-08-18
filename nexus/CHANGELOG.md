@@ -108,6 +108,38 @@ change is listed here with its migration path.
 - `User.role` is typed as `str` in the ORM and converted to `Role` at the
   boundary, matching the `VARCHAR` + `CHECK` storage decision.
 
+### Added — M3: continuous integration and API documentation
+
+- **CI** (`.github/workflows/nexus-ci.yml`), path-scoped to `nexus/**`:
+  formatting, linting (with bandit security rules), type checking, the full
+  test suite against PostgreSQL 16 and 17, a migration round-trip with
+  `alembic check`, a `pip-audit` dependency audit, and startup-safety checks
+  proving production refuses the development signing key while still accepting
+  a correctly configured production environment.
+- **docs/API.md**: versioning policy, the authentication and CSRF flow, the
+  full error-code table, correlation ids, keyset pagination and why it is not
+  offset, rate limits, and the three health endpoints.
+
+### Fixed
+
+- **List settings could not be supplied through the environment.**
+  `NEXUS_CORS_ORIGINS=a,b` and `NEXUS_MONITORED_NETWORKS=a,b` — the format
+  `.env.example` documents — raised a JSON parse error, because
+  pydantic-settings decodes list-typed fields *before* field validators run.
+  The fields are now annotated `NoDecode`, the validator accepts both the
+  comma-separated and JSON forms, and any remaining parse failure is reported
+  as a `ConfigurationError` naming the variable rather than as a traceback.
+
+  The bug survived 206 tests because every one of them passed configuration as
+  keyword arguments, never through the environment. Tests now cover the path
+  operators actually use, including the production safety rules.
+
+### Security
+
+- Raised the lower bounds on `pytest` (>=9.0.3) and `setuptools` (>=83.0.0),
+  which carried published advisories, and added `pip-audit` to the dev
+  dependencies and to CI.
+
 ### Not yet implemented
 
 Sensors, ingestion, detection, threat intelligence, workers, real-time

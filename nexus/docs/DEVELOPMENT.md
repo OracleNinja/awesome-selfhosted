@@ -64,6 +64,31 @@ Useful variations:
 which is how CI runs and a good way to check that a change does not depend on
 your machine's configuration.
 
+## Continuous integration
+
+`.github/workflows/nexus-ci.yml` runs on every push and pull request that
+touches `nexus/**`:
+
+| Job | Gate |
+|---|---|
+| `quality` | `ruff format --check`, `ruff check` (including bandit security rules), `mypy` |
+| `test` | The full suite against PostgreSQL 16 **and** 17 |
+| `migrations` | `upgrade head`, `alembic check` (models must match the schema), then `downgrade base` and re-apply |
+| `security` | `pip-audit --strict` over runtime *and* dev dependencies |
+| `startup` | Production must refuse the development signing key, and must accept a correctly configured production environment |
+
+Two of these deserve explanation:
+
+- **`alembic check`** catches the most common migration mistake: changing a
+  model and forgetting to generate the migration. Autogenerate compares the
+  models against the live schema, and any difference fails the build.
+- **`pip-audit`** fails on a dependency with a known advisory. This is why
+  `requirements-dev.txt` carries lower bounds that look arbitrary
+  (`pytest>=9.0.3`, `setuptools>=83.0.0`) — they are the first patched
+  versions. When the audit fails, upgrade the package and run the suite; do not
+  add an ignore unless the advisory genuinely does not apply, and say why in
+  the file.
+
 ## Testing strategy
 
 - Tests use a **real PostgreSQL database**, never SQLite and rarely mocks. The

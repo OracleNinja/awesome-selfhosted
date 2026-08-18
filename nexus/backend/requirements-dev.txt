@@ -1,7 +1,11 @@
 -r requirements.txt
 
-pytest>=8.2,<9.0
-pytest-asyncio>=0.23,<1.2
+# Lower bounds are set by known vulnerabilities as well as by features:
+# pytest <9.0.3 and setuptools <83.0.0 carry advisories that the CI
+# dependency-audit job fails on. See docs/DEVELOPMENT.md.
+pytest>=9.0.3,<10.0
+pytest-asyncio>=1.0,<2.0
+setuptools>=83.0.0
 ruff>=0.5,<0.15
 mypy>=1.10,<2.0
-types-psycopg2>=2.9
+pip-audit>=2.7

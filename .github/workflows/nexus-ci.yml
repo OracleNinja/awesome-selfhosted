@@ -1,0 +1,229 @@
+# NEXUS continuous integration.
+#
+# This repository hosts several independent projects, so every job is scoped to
+# `nexus/**` by the path filter below. A change to another project does not
+# queue this workflow, and a change here does not queue theirs.
+#
+# The jobs are deliberately separate rather than one long script: a failure
+# tells you *which* gate failed from the job list alone, and independent jobs
+# run in parallel, so the slowest gate sets the wall-clock time rather than the
+# sum of all of them.
+
+name: NEXUS CI
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "nexus/**"
+      - ".github/workflows/nexus-ci.yml"
+  pull_request:
+    paths:
+      - "nexus/**"
+      - ".github/workflows/nexus-ci.yml"
+
+# A new push to the same branch cancels the previous run: CI feedback on a
+# commit nobody is looking at any more is wasted compute and a longer queue.
+concurrency:
+  group: nexus-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. A workflow that can write to the repository is a
+# workflow that a malicious pull request would like to influence.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: nexus/backend
+
+env:
+  PYTHON_VERSION: "3.11"
+  # CI must not depend on a developer's .env file existing or not existing.
+  NEXUS_ENV_FILE: /dev/null
+
+jobs:
+  quality:
+    name: Format, lint, types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: nexus/backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Formatting first: a formatting failure is trivially fixable, and
+      # finding out about it after a five-minute test run is annoying.
+      - name: Check formatting
+        run: ruff format --check .
+
+      # Includes the bandit security rules (S), so hardcoded credentials,
+      # unsafe subprocess use, and insecure defaults fail the build.
+      - name: Lint
+        run: ruff check --output-format=github .
+
+      - name: Type check
+        run: mypy nexus
+
+  test:
+    name: Tests (PostgreSQL ${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 16 is the deployment target; 17 catches breakage before an operator
+        # upgrades their database and discovers it in production.
+        postgres: ["16", "17"]
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: nexus
+          POSTGRES_PASSWORD: nexus
+          POSTGRES_DB: nexus_test
+        ports:
+          - 5432:5432
+        # Without a health check the test step can start before the database
+        # accepts connections, producing a flake that looks like a code bug.
+        options: >-
+          --health-cmd "pg_isready -U nexus -d nexus_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NEXUS_TEST_DATABASE_URL: postgresql+asyncpg://nexus:nexus@127.0.0.1:5432/nexus_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: nexus/backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
+
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nexus
+          POSTGRES_PASSWORD: nexus
+          POSTGRES_DB: nexus_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus -d nexus_migrations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NEXUS_DATABASE_URL: postgresql+asyncpg://nexus:nexus@127.0.0.1:5432/nexus_migrations
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: nexus/backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Apply migrations to an empty database
+        run: alembic upgrade head
+
+      # The check that catches the most common migration mistake: changing a
+      # model and forgetting to generate the migration. Autogenerate compares
+      # the models against the live schema; any difference fails the build.
+      - name: Models must match the schema
+        run: alembic check
+
+      # A migration you cannot reverse is a deployment you cannot roll back.
+      - name: Downgrade and re-apply
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: nexus/backend/requirements-dev.txt
+
+      # Dev dependencies too, not just runtime: the build toolchain runs on the
+      # same machines and in CI, and a compromised test runner or packaging
+      # tool is a supply-chain problem even though it never ships.
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Checks installed packages against the Python Advisory Database. This
+      # fails the build on a known-vulnerable dependency, which is the point:
+      # most real-world compromises of applications like this one arrive
+      # through a dependency, not through the application's own code.
+      - name: Audit dependencies for known vulnerabilities
+        run: pip-audit --strict --progress-spinner off
+
+  startup:
+    name: Startup and configuration safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: nexus/backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # The application must refuse to start in production with the
+      # development signing key. This is the single most important
+      # configuration guarantee in the project, so CI proves it on every push
+      # rather than trusting that the unit test still covers it.
+      - name: Production refuses the development signing key
+        env:
+          NEXUS_ENVIRONMENT: production
+        run: |
+          if python -c "from nexus.core.config import load_settings; load_settings()" 2>/dev/null; then
+            echo "::error::Production started with the development signing key."
+            exit 1
+          fi
+          echo "Correctly refused to start."
+
+      # And a properly configured production environment must still build,
+      # so the check above cannot be satisfied by refusing everything.
+      - name: A valid production configuration is accepted
+        env:
+          NEXUS_ENVIRONMENT: production
+          NEXUS_SECRET_KEY: ${{ github.sha }}-${{ github.run_id }}-ci-only-not-a-real-deployment-key
+          NEXUS_CORS_ORIGINS: https://nexus.example.org
+        run: python -c "from nexus.core.config import load_settings; load_settings(); print('Configuration accepted.')"

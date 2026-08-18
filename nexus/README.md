@@ -49,6 +49,7 @@ Milestones 1–2 — platform foundation, authentication and audit:
 | Audit log | Hash-chained, transaction-bound, tamper-evident, with verification via API and CLI |
 | User administration | Create, update, role change, deactivate, password reset, unlock — each audited, each guarded |
 | CLI | `create-admin`, `verify-audit`, `show-config` |
+| CI | Format, lint, types, tests on PostgreSQL 16 and 17, migration round-trip, dependency audit, and startup-safety checks |
 | Tests | 206 tests against a real PostgreSQL instance, including failure and attack paths |
 
 ## Not yet implemented
@@ -114,11 +115,11 @@ start otherwise.
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Subsystem boundaries, data flow, and the reasoning behind each major decision |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, every control, and what each control does *not* protect against |
+| [docs/API.md](docs/API.md) | API conventions: versioning, auth, error codes, pagination |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, workflow, testing strategy, adding a migration |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
-`DEPLOYMENT.md`, `OPERATIONS.md`, `TROUBLESHOOTING.md` and
-`API.md` are written as the subsystems they describe are built, so that no
+`DEPLOYMENT.md`, `OPERATIONS.md` and `TROUBLESHOOTING.md` are written as the subsystems they describe are built, so that no
 document describes functionality that does not exist.
 
 ## Licence
