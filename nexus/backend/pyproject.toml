@@ -1,0 +1,82 @@
+[project]
+name = "nexus-platform"
+version = "0.1.0"
+description = "NEXUS — self-hosted network security monitoring and cybersecurity laboratory platform"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["nexus*"]
+
+# --------------------------------------------------------------------- tests --
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# `auto` means async test functions run without an explicit marker on each one.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q --strict-markers"
+markers = [
+    "integration: requires a live PostgreSQL instance",
+    "slow: takes more than a second",
+]
+filterwarnings = [
+    "error::DeprecationWarning:nexus.*",
+]
+
+# ---------------------------------------------------------------------- lint --
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear: likely bugs, not style
+    "UP",   # pyupgrade: modern syntax
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+    "ASYNC",# blocking calls inside async functions
+    "S",    # bandit security checks
+    "RUF",
+]
+ignore = [
+    "B008",  # FastAPI declares dependencies as call defaults by design
+    "E501",  # line length is handled by the formatter
+    "S101",  # assert is fine in tests and in internal invariants
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use hardcoded credentials and sleep.
+"tests/*" = ["S105", "S106", "S311", "ASYNC251"]
+"migrations/*" = ["I001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nexus"]
+
+# --------------------------------------------------------------------- types --
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+# Not `strict` yet: SQLAlchemy's declarative typing and FastAPI's dependency
+# magic produce false positives that would drown real findings. These flags are
+# the subset that catches genuine bugs without noise, and the bar is raised as
+# modules are annotated.
+disallow_untyped_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+module = ["migrations.*", "tests.*"]
+ignore_errors = true

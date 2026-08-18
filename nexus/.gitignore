@@ -1,0 +1,27 @@
+# Secrets and local state — never commit these.
+.env
+.env.*
+!.env.example
+backend/var/
+backend/.venv/
+backend/*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+
+# Editor and OS noise
+.DS_Store
+*.swp
