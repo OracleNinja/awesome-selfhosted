@@ -19,7 +19,6 @@ from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from nexus.core.rbac import Role
 from nexus.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -54,7 +53,11 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Boolean, nullable=False, server_default=text("false")
     )
 
-    role: Mapped[Role] = mapped_column(String(16), nullable=False)
+    # Stored as the enum's *value*, not as a native PostgreSQL enum — see
+    # ARCHITECTURE.md on why ALTER TYPE is a migration hazard. Callers convert
+    # to `Role` at the boundary (AuthenticatedIdentity.role), and both the
+    # CHECK constraint and the Python enum police the vocabulary.
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
 
     # Disabling is preferred over deleting: audit rows reference the user, and
     # an incident investigation months later needs to resolve who did what.

@@ -22,12 +22,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import uuid
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -35,6 +38,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from nexus.app import create_app
 from nexus.core.config import Environment, LogFormat, Settings, load_settings
 from nexus.core.context import AppContext
+from nexus.core.passwords import PasswordService
+from nexus.core.rbac import Role
+from nexus.db.models.user import User
 from nexus.db.session import Database
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -73,6 +79,13 @@ def settings() -> Settings:
         # Fail fast: a test run should not spend 30 seconds retrying a database
         # that is not there. The error message tells the developer what to start.
         db_connect_retries=0,
+        # Argon2 at production cost would make this suite take minutes: every
+        # login test would pay ~50ms twice. These are the library's minimums.
+        # The *code path* is identical — only the work factor differs — so the
+        # tests still exercise real hashing, verification, and rehash detection.
+        password_hash_time_cost=1,
+        password_hash_memory_kib=8,
+        password_hash_parallelism=1,
     )
 
 
@@ -184,18 +197,129 @@ async def context(settings: Settings, database: Database) -> AsyncIterator[AppCo
 
 
 @pytest.fixture
-async def client(settings: Settings, context: AppContext) -> AsyncIterator[AsyncClient]:
+def app(settings: Settings, context: AppContext) -> FastAPI:
+    """The real application, wired to the test database."""
+    application = create_app(settings)
+    application.state.context = context  # reuse the migrated, truncated database
+    return application
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """HTTP client wired to the app in-process.
 
     ``ASGITransport`` calls the application directly — no socket, no port, no
     race between "server started" and "test ran". The request path is otherwise
     identical: middleware, dependencies, and exception handlers all run.
     """
-    app = create_app(settings)
-    app.state.context = context  # reuse the migrated, truncated database
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
         yield http_client
+
+
+@pytest.fixture
+async def second_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """A second, independent browser against the same application.
+
+    Needed to test anything involving more than one session: "changing my
+    password signs out my other devices" cannot be tested with one cookie jar.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+        yield http_client
+
+
+# ---------------------------------------------------------------------------
+# Identity fixtures
+#
+# Tests act as real users through the real login endpoint rather than by
+# faking a dependency. That keeps password hashing, session issuance, cookie
+# attributes, and CSRF in the path being tested — the parts most likely to
+# break, and the parts a stubbed `current_user` would hide.
+# ---------------------------------------------------------------------------
+
+TEST_PASSWORD = "correct-horse-battery-staple"
+
+
+async def create_test_user(
+    database: Database,
+    settings: Settings,
+    *,
+    username: str,
+    role: Role,
+    password: str = TEST_PASSWORD,
+    is_active: bool = True,
+) -> uuid.UUID:
+    """Insert a user directly, hashing the password the same way login does."""
+    passwords = PasswordService(settings)
+    password_hash = await passwords.hash(password)
+    async with database.session() as db_session:
+        user = User(
+            username=username,
+            display_name=username.title(),
+            role=role.value,
+            password_hash=password_hash,
+            is_active=is_active,
+            must_change_password=False,
+        )
+        db_session.add(user)
+        await db_session.flush()
+        return user.id
+
+
+@dataclass
+class LoggedInClient:
+    """An HTTP client with a live session, plus what the tests need from it."""
+
+    client: AsyncClient
+    user_id: uuid.UUID
+    username: str
+    role: Role
+    csrf_token: str
+
+    def headers(self, *, csrf: bool = True) -> dict[str, str]:
+        """Headers for a write request. ``csrf=False`` simulates a forged one."""
+        return {"X-CSRF-Token": self.csrf_token} if csrf else {}
+
+
+async def login_as(
+    client: AsyncClient,
+    database: Database,
+    settings: Settings,
+    *,
+    username: str,
+    role: Role,
+    password: str = TEST_PASSWORD,
+) -> LoggedInClient:
+    user_id = await create_test_user(
+        database, settings, username=username, role=role, password=password
+    )
+    response = await client.post(
+        "/api/v1/auth/login", json={"username": username, "password": password}
+    )
+    assert response.status_code == 200, response.text
+    return LoggedInClient(
+        client=client,
+        user_id=user_id,
+        username=username,
+        role=role,
+        csrf_token=response.json()["csrf_token"],
+    )
+
+
+@pytest.fixture
+async def admin(client: AsyncClient, database: Database, settings: Settings) -> LoggedInClient:
+    return await login_as(client, database, settings, username="admin_user", role=Role.ADMIN)
+
+
+@pytest.fixture
+async def operator(client: AsyncClient, database: Database, settings: Settings) -> LoggedInClient:
+    return await login_as(client, database, settings, username="operator_user", role=Role.OPERATOR)
+
+
+@pytest.fixture
+async def viewer(client: AsyncClient, database: Database, settings: Settings) -> LoggedInClient:
+    return await login_as(client, database, settings, username="viewer_user", role=Role.VIEWER)
 
 
 @pytest.fixture

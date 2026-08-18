@@ -126,6 +126,15 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------- crypto --
     secret_key: SecretStr = SecretStr(DEV_SECRET_KEY)
 
+    # Argon2id cost parameters. Defaults follow the OWASP recommendation
+    # (m=64 MiB, t=3, p=2) and are configurable for two reasons: costs must rise
+    # as hardware gets faster, and the test suite would otherwise spend minutes
+    # hashing. Raising them does not invalidate existing hashes — the parameters
+    # are encoded in each stored hash, and accounts are upgraded at next login.
+    password_hash_time_cost: Annotated[int, Field(ge=1, le=20)] = 3
+    password_hash_memory_kib: Annotated[int, Field(ge=8, le=1024 * 1024)] = 64 * 1024
+    password_hash_parallelism: Annotated[int, Field(ge=1, le=16)] = 2
+
     # ------------------------------------------------------------ sessions --
     session_cookie_name: str = "nexus_session"
     session_absolute_ttl_minutes: Annotated[int, Field(ge=5, le=60 * 24 * 30)] = 720
@@ -153,6 +162,15 @@ class Settings(BaseSettings):
     event_retention_days: Annotated[int, Field(ge=1, le=3650)] = 90
     audit_retention_days: Annotated[int, Field(ge=30, le=3650)] = 365
 
+    # ---------------------------------------------------------------- audit --
+    # Optional off-database mirror of the audit log, as line-delimited JSON.
+    # Its value is that it can live on a different filesystem, be owned by a
+    # different user, or sit on append-only storage — so tampering with history
+    # requires compromising two places rather than one. Unset means the audit
+    # log has no external anchor, and the system reports that rather than
+    # implying protection it does not have.
+    audit_mirror_path: Path | None = None
+
     # ------------------------------------------------------------ workers ---
     worker_concurrency: Annotated[int, Field(ge=1, le=64)] = 4
     worker_poll_interval_seconds: Annotated[float, Field(gt=0, le=60)] = 1.0
@@ -162,6 +180,13 @@ class Settings(BaseSettings):
     # -------------------------------------------------------- rate limits ---
     login_rate_limit_per_minute: Annotated[int, Field(ge=1, le=1000)] = 10
     api_rate_limit_per_minute: Annotated[int, Field(ge=1, le=100_000)] = 600
+
+    # Per-account lockout. Unlike the rate limit above (which is per process and
+    # best-effort), this counter lives on the user row, so it survives restarts
+    # and is shared by every worker — an attacker cannot reset their budget by
+    # waiting for a deploy.
+    login_max_failed_attempts: Annotated[int, Field(ge=3, le=100)] = 8
+    login_lockout_minutes: Annotated[int, Field(ge=1, le=1440)] = 15
 
     # ------------------------------------------------------------ validators --
 

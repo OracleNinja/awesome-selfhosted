@@ -25,6 +25,8 @@ from typing import Any
 
 from nexus.core.config import Settings
 from nexus.core.logging import get_logger
+from nexus.core.passwords import PasswordService
+from nexus.core.ratelimit import SlidingWindowRateLimiter
 from nexus.db.session import Database
 
 logger = get_logger(__name__)
@@ -65,6 +67,22 @@ class AppContext:
         # Injectable so tests can supply a database pointed at a scratch schema
         # without touching the environment or a global.
         self.database = database or Database(settings)
+
+        # Built once per process, not per request: constructing a PasswordService
+        # computes a dummy Argon2 hash (tens of milliseconds by design), and
+        # paying that on every login would double the cost of the endpoint we
+        # most want to keep responsive under attack.
+        self.passwords = PasswordService(settings)
+
+        # Rate limiters are per process and in memory by design; see
+        # nexus.core.ratelimit for why that is the right trade here.
+        self.login_rate_limiter = SlidingWindowRateLimiter(
+            limit=settings.login_rate_limit_per_minute, window_seconds=60.0
+        )
+        self.api_rate_limiter = SlidingWindowRateLimiter(
+            limit=settings.api_rate_limit_per_minute, window_seconds=60.0
+        )
+
         self._started_at: float | None = None
         self._ready = False
 

@@ -30,7 +30,7 @@ These are non-negotiable constraints on the whole codebase:
 
 ## Implemented
 
-Milestone 1 — platform foundation:
+Milestones 1–2 — platform foundation, authentication and audit:
 
 | Area | What works |
 |---|---|
@@ -43,15 +43,18 @@ Milestone 1 — platform foundation:
 | Authorization model | `ADMIN` / `OPERATOR` / `VIEWER` roles resolving to explicit permission sets |
 | HTTP | Security headers, body-size limits, CORS, correlation ids, OpenAPI docs |
 | Health | `/health/live`, `/health/ready`, `/health` with per-component status |
-| Tests | 85 tests against a real PostgreSQL instance, including failure paths |
+| Authentication | Argon2id passwords, opaque revocable server-side sessions, per-account lockout, login rate limiting, no default credentials |
+| Authorization | Permission checks enforced as dependencies; denials audited; role changes revoke sessions immediately |
+| CSRF | `SameSite=Strict` cookie, hashed double-submit token, constant-time comparison, enforced for every authenticated write |
+| Audit log | Hash-chained, transaction-bound, tamper-evident, with verification via API and CLI |
+| User administration | Create, update, role change, deactivate, password reset, unlock — each audited, each guarded |
+| CLI | `create-admin`, `verify-audit`, `show-config` |
+| Tests | 206 tests against a real PostgreSQL instance, including failure and attack paths |
 
 ## Not yet implemented
 
 Listed so nothing here reads as a promise that the code already keeps:
 
-- Login, sessions, CSRF enforcement (schema exists; the endpoints do not)
-- Audit writing service (the table and its hash-chain design exist; the
-  service that appends to it does not)
 - Network sensors, event ingestion, normalisation
 - Detection engine, risk scoring, threat intelligence
 - Background workers and the job queue
@@ -78,6 +81,9 @@ createdb -O nexus nexus_test
 
 cp .env.example .env             # then edit NEXUS_DATABASE_URL if needed
 .venv/bin/alembic upgrade head
+
+# Create the first administrator. There is no default account.
+.venv/bin/python -m nexus.cli create-admin --username ian
 
 .venv/bin/python -m nexus.main
 ```
@@ -107,10 +113,11 @@ start otherwise.
 | Document | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Subsystem boundaries, data flow, and the reasoning behind each major decision |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, every control, and what each control does *not* protect against |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local setup, workflow, testing strategy, adding a migration |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 
-`SECURITY.md`, `DEPLOYMENT.md`, `OPERATIONS.md`, `TROUBLESHOOTING.md` and
+`DEPLOYMENT.md`, `OPERATIONS.md`, `TROUBLESHOOTING.md` and
 `API.md` are written as the subsystems they describe are built, so that no
 document describes functionality that does not exist.
 

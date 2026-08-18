@@ -57,6 +57,9 @@ ignore = [
 # Tests legitimately use hardcoded credentials and sleep.
 "tests/*" = ["S105", "S106", "S311", "ASYNC251"]
 "migrations/*" = ["I001"]
+# Audit action names contain the word PASSWORD (USER_PASSWORD_RESET). They are
+# identifiers in an enum, not credentials.
+"nexus/services/audit.py" = ["S105"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["nexus"]

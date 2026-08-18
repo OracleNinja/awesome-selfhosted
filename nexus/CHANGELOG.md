@@ -60,8 +60,56 @@ change is listed here with its migration path.
   returned verbatim from the unauthenticated `/health` endpoints. Free-text
   scrubbing is now applied at that boundary as well as in the logger.
 
+### Added — M2: authentication, authorization enforcement, audit logging
+
+- **Argon2id password hashing** (`nexus/core/passwords.py`) with configurable
+  cost parameters, transparent rehashing at next login when parameters rise,
+  and hashing performed in a worker thread so it cannot stall the event loop.
+- **Password policy**: length-first (12 character minimum), a small breach
+  blocklist, an upper bound so an oversized password cannot tie up a worker,
+  and CSPRNG-generated passwords for bootstrap and admin resets.
+- **Opaque server-side sessions** (`nexus/services/auth.py`): 256-bit tokens
+  stored only as SHA-256 digests, absolute and idle expiry, fresh session per
+  login (defeating session fixation), and immediate revocation on logout,
+  password change, password reset, role change, and deactivation.
+- **Login defences**: uniform failure responses, dummy hashing on the
+  not-found path so timing cannot enumerate accounts, durable per-account
+  lockout, and a per-process login rate limit documented as best-effort.
+- **CSRF protection** (`nexus/api/security.py`): `SameSite=Strict` cookie plus
+  a hashed double-submit token compared in constant time, enforced inside the
+  identity dependency so no authenticated write endpoint can omit it.
+- **Authorization enforcement**: `require(Permission.X)` dependencies; denials
+  are audited and the audit survives the rejection.
+- **Audit service** (`nexus/services/audit.py`): hash-chained append-only
+  entries written in the same transaction as the action they describe,
+  serialised by a PostgreSQL transaction-scoped advisory lock, with detail
+  sanitisation, size limits, chain verification, and an optional
+  off-database mirror (`NEXUS_AUDIT_MIRROR_PATH`, off by default).
+- **User administration** (`/api/v1/users`): create, update, role change,
+  activate/deactivate, password reset, unlock. Sensitive changes require a
+  written reason. Guards prevent self-demotion, self-deactivation, and removal
+  of the last active administrator.
+- **Audit API** (`/api/v1/audit`): keyset-paginated queries with filters, and
+  `POST /audit/verify` which reports whether an external anchor is configured
+  rather than implying protection the deployment does not have.
+- **Operator CLI** (`nexus/cli.py`): `create-admin`, `verify-audit`,
+  `show-config`. There is no default account and no bootstrap endpoint; the
+  first administrator is created by someone with shell access, and passwords
+  are never accepted as command-line arguments.
+- **docs/SECURITY.md**: threat model, every control, and an explicit statement
+  of what each control does *not* protect against.
+
+### Changed
+
+- Three audit/log field names were chosen to survive the redaction filters
+  (`signing_key_configured`, `credential_generated`,
+  `force_credential_change`). The filters stay deliberately blunt; the field
+  names move out of their way so the log keeps the fact it exists to record.
+- `User.role` is typed as `str` in the ORM and converted to `Role` at the
+  boundary, matching the `VARCHAR` + `CHECK` storage decision.
+
 ### Not yet implemented
 
-Authentication endpoints, the audit-writing service, sensors, ingestion,
-detection, threat intelligence, workers, real-time streaming, the frontend, the
-laboratory, quarantine, and backup tooling. See the README for the current list.
+Sensors, ingestion, detection, threat intelligence, workers, real-time
+streaming, the frontend, the laboratory, quarantine, and backup tooling. See
+the README for the current list.

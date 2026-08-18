@@ -319,7 +319,55 @@ scrubbed before they leave the process.
 
 ---
 
-## 10. Testing strategy
+## 10. Authentication and sessions — `nexus/services/auth.py`
+
+**Problem.** Prove who a caller is on every request, and be able to stop
+believing them at any moment.
+
+**Abstraction.** Opaque server-side sessions: a random 256-bit token in an
+`HttpOnly` cookie, its SHA-256 in `user_sessions`.
+
+**Alternative considered: JWT.** Self-contained, so validation needs no
+database round trip — the reason stateless APIs prefer them. The cost is that
+they cannot be revoked: a stolen token remains valid until it expires, and
+"sign out everywhere" needs a denylist, which reintroduces the lookup you were
+avoiding. On a console that can quarantine devices, immediate revocation is
+worth one indexed query per request.
+
+**Underneath.** Login hashes the cookie value and probes a unique index, then
+checks four things: revoked, absolutely expired, idle-expired, account still
+active. `last_seen_at` is only written when it is more than a minute stale —
+otherwise every API call would be a database write.
+
+**Why the hash is fast (SHA-256) but passwords are slow (Argon2id).** Slow
+hashing exists to make *guessing* expensive, and guessing only matters when the
+input is guessable. A password is; 256 bits of CSPRNG output is not. Paying
+50 ms of Argon2 per request to look up a session would be a self-inflicted
+denial of service.
+
+**Security implications.** Documented in full in SECURITY.md §2: uniform
+failure responses, dummy hashing on the not-found path so timing does not leak
+account existence, durable per-account lockout, and a per-process rate limit
+that is explicitly labelled best-effort.
+
+---
+
+## 11. The commit-boundary exception
+
+The unit-of-work rule (§6) says callers never commit. Authentication failure is
+the one deliberate exception, and it is worth understanding why.
+
+A failed login raises, and an exception rolls back the request's transaction —
+which would erase the incremented failure counter *and* the audit row recording
+the attempt. The evidence of an attack would be destroyed by the mechanism that
+rejects it. So the failure path commits explicitly before raising. It is safe
+precisely because nothing else is pending in that transaction at that point.
+
+The same reasoning applies to audited permission denials.
+
+---
+
+## 12. Testing strategy
 
 Tests run against a **real PostgreSQL database**. The schema uses JSONB, INET,
 `GENERATED ALWAYS AS IDENTITY`, and `ON DELETE` behaviour — none of which SQLite
@@ -341,4 +389,5 @@ check return 200 when everything works.
 
 ## Change log for this document
 
-- **M1** — established sections 1–10 with the foundation subsystems.
+- **M1** — established sections 1–9 and the testing strategy.
+- **M2** — added §10 (sessions) and §11 (the commit-boundary exception).
