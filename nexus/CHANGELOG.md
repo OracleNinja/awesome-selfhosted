@@ -140,6 +140,81 @@ change is listed here with its migration path.
   which carried published advisories, and added `pip-audit` to the dev
   dependencies and to CI.
 
+### Added — M4: sensors, ingestion, and background processing
+
+- **Sensor framework** (`nexus/sensors/`): a driver interface whose
+  availability check runs before start and reports `NOT_AVAILABLE` or
+  `NOT_CONFIGURED` with a human remedy, and whose `produces_simulated_data`
+  class attribute is what stamps `is_simulation` at ingestion — so a
+  laboratory driver cannot produce data that looks observed.
+- **`arp_discovery`**: reads `/proc/net/arp`, the kernel's own neighbour cache.
+  No privileges, no packets sent. Emits on change (discovered, address changed)
+  plus an hourly presence heartbeat, so a stable network does not produce tens
+  of thousands of identical rows a day.
+- **`syslog`**: UDP receiver parsing RFC 3164 and RFC 5424. Records the source
+  address from the packet rather than the message, strips control characters,
+  and drops with a counter under flood rather than growing without bound.
+- **`packet_capture`**: passive `AF_PACKET` capture with a hand-written
+  Ethernet/VLAN/IPv4/IPv6/TCP/UDP/ICMP parser, folding frames into flows.
+  Requires `CAP_NET_RAW`, never transmits, never stores payload bytes, and
+  bounds its flow table so a host spraying random ports cannot exhaust memory.
+- **`lab_synthetic`**: the only source of fabricated data in the system.
+  Scenarios use RFC 5737 documentation addresses that can never collide with a
+  real device, are seeded for reproducibility, and are finite.
+- **Sensor manager**: per-sensor supervision with exponential backoff, parking
+  after repeated failures, live reload without restarting NEXUS, and a
+  30-second reconcile loop for convergence.
+- **Ingestion** (`nexus/services/ingest.py`): UUIDv5 deduplication derived from
+  each observation's content, MAC-first device identity with a partial unique
+  index covering MAC-less devices, batch inserts with `ON CONFLICT DO NOTHING`,
+  and counted rejections rather than silent coercion.
+- **Job queue** (`nexus/services/jobs.py`): PostgreSQL `FOR UPDATE SKIP LOCKED`
+  claim, priorities, per-job timeouts, jittered exponential backoff, DEAD jobs
+  for exhausted retries, cooperative cancellation, orphan reclamation using the
+  database's clock, and partial-unique dedupe keys.
+- **Workers** (`nexus/workers/`): handler registry, in-process or standalone
+  (`python -m nexus.worker`), graceful shutdown, heartbeat-extended locks, and
+  a leaderless recurring scheduler built on the queue's dedupe index.
+- **Maintenance handlers**: batched event retention, audit retention that
+  refuses to empty the chain, job purging that keeps failures, and device idle
+  reconciliation that never touches a quarantined device.
+- **Schema** (migration `0002`): `devices`, `security_events`, `sensors`,
+  `jobs` — with a BRIN index on the append-only timestamp, partial indexes for
+  the queue claim and for real-network event queries, and a GIN index on event
+  attributes.
+- **Monitoring API**: `/events` (keyset-paginated, filtered), `/devices`
+  (inventory, profile, operator annotation), `/sensors` (catalogue with live
+  availability, CRUD with reasons), `/jobs` (listing, stats, cancel, retry).
+  **Simulated data is excluded from every real-network view by default.**
+
+### Fixed
+
+- **Sensor configuration changes never took effect.** The API reloaded the
+  sensor manager inline, which reads the database in its own session before the
+  request's transaction has committed — so it never saw the row it was meant to
+  start. A FastAPI background task does not fix this either: background tasks
+  run *before* yield-dependency teardown, which is where the commit happens.
+  The API now signals the manager, which re-reads on its own schedule after a
+  short debounce, and reconciles on a timer regardless.
+- **A completed laboratory scenario reported the whole system as unavailable.**
+  Finite sensors now finish in a distinct `COMPLETED` state, which the health
+  endpoint treats as healthy along with `STOPPED`. A dashboard that shows red
+  for "the thing you asked for finished" teaches people to ignore red.
+- **`Secure` session cookies made local development impossible.** The flag now
+  follows the environment (on in production, off elsewhere) instead of
+  defaulting on everywhere; production still rejects an explicit `false`. The
+  previous default meant the workaround for local login was disabling it
+  globally.
+- **INET columns crashed serialisation.** asyncpg returns `IPv4Address`
+  objects; every schema exposing an address now coerces through one shared
+  annotated type rather than scattered `str()` calls.
+- **A dedupe collision poisoned the caller's transaction.** The enqueue
+  savepoint now wraps the `add` as well as the flush, and expunges the doomed
+  object so a later autoflush cannot resurrect it.
+- **`claim()` returned stale ORM state.** A bulk `UPDATE … RETURNING` left
+  objects already in the identity map showing pre-claim values, so a caller
+  claiming and failing a job in one session never exhausted its retries.
+
 ### Not yet implemented
 
 Sensors, ingestion, detection, threat intelligence, workers, real-time

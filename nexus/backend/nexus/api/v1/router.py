@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from nexus.api.v1.routes import audit, auth, health, users
+from nexus.api.v1.routes import audit, auth, devices, events, health, jobs, sensors, users
 
 api_router = APIRouter()
 
@@ -22,3 +22,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(audit.router)
+api_router.include_router(events.router)
+api_router.include_router(devices.router)
+api_router.include_router(sensors.router)
+api_router.include_router(jobs.router)

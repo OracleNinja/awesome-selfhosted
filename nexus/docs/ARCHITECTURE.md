@@ -367,7 +367,124 @@ The same reasoning applies to audited permission denials.
 
 ---
 
-## 12. Testing strategy
+## 12. Sensors — `nexus/sensors/`
+
+**Problem.** Observe a network without inventing anything.
+
+**Abstraction.** A driver interface with four methods: check availability,
+yield observations, stop, describe. Everything downstream sees one shape and
+never learns which driver produced an event.
+
+**The drivers that exist today**
+
+| Driver | What it actually does | Privilege |
+|---|---|---|
+| `arp_discovery` | Reads `/proc/net/arp` — the kernel's own neighbour cache | none |
+| `syslog` | UDP listener parsing RFC 3164 and RFC 5424 | none (port >1024) |
+| `packet_capture` | `AF_PACKET` raw socket, frames folded into flows | `CAP_NET_RAW` |
+| `lab_synthetic` | Generates laboratory scenarios — **the only source of fabricated data** | none |
+
+**Honesty enforced structurally, not by convention.** Two mechanisms:
+
+* `check_availability()` runs *before* a sensor starts and returns
+  `NOT_AVAILABLE` (this host cannot) or `NOT_CONFIGURED` (you have not set it
+  up) with a human remedy — the exact `setcap` command, the list of real
+  interface names. A sensor that cannot run says so, instead of reporting no
+  events, which would read as "your network is quiet".
+* `produces_simulated_data` is a **class attribute**, and ingestion stamps
+  `is_simulation` from the driver class rather than from the observation or the
+  sensor row. A laboratory driver therefore cannot produce data that looks
+  real, even if a caller passes the wrong argument.
+
+**Packet capture, underneath.** `socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))`
+asks the kernel for a copy of every frame on an interface. That is why it needs
+a capability: a process that can read every frame can read every unencrypted
+password on the segment. NEXUS asks for `CAP_NET_RAW` alone rather than running
+as root — the whole point of capabilities — and the socket is never written to.
+Frames are folded into flows (source, destination, protocol, port, counters)
+because one event per packet would be hundreds of millions of rows a day and
+useless. Payload bytes are never stored.
+
+**Parsing is hostile-input handling.** Every parser checks its length before
+unpacking and returns `None` on anything unrecognised. A malformed frame is a
+discarded frame, never an exception — a crash in the sensor is a monitoring
+outage, which is precisely what an attacker would want.
+
+**Supervision.** Each sensor runs in its own task; a crash restarts it with
+exponential backoff, and after a burst of failures it is parked in `FAILED`
+with the reason on its row. Silently retrying forever is how an operator ends
+up believing they are monitored when they are not.
+
+**Configuration changes.** The manager owns the timing. An API handler that
+changes a sensor *signals* the manager, which re-reads the table in its own
+session after a short debounce, and also reconciles on a 30-second timer.
+Reloading inline reads the database before the request's transaction commits
+and misses the row that was just written — and a FastAPI background task does
+not fix it either, because background tasks run *before* yield-dependency
+teardown, which is where the commit happens. This was a real bug, caught by
+running the thing.
+
+---
+
+## 13. Ingestion — `nexus/services/ingest.py`
+
+The seam between "what a sensor saw" and "what the system reasons about". Four
+jobs: deduplicate, resolve the device, normalise, stamp provenance.
+
+**Deduplication** uses a UUIDv5 derived from the observation's own content, so
+a sensor restarting and re-reading the same kernel table produces the same ids
+and the unique index discards them. Without it, every restart re-imports
+history and inflates every count, rate, and detection threshold downstream.
+
+**Device identity** is MAC first, IP second. A MAC survives a DHCP lease
+change, so keying on it keeps one device as one device; keying on IP would make
+every lease renewal look like a new host. Resolution is an upsert, because two
+workers can ingest observations about the same device concurrently — and
+devices with no visible MAC are covered by a *partial* unique index on the
+address.
+
+**A device is an inference, not a fact.** Phones randomise MACs, DHCP reassigns
+addresses, NAT hides many hosts behind one. `vendor` stays NULL unless a real
+OUI database is loaded, because a guess would be indistinguishable from
+evidence. `risk_score` stays NULL until the risk engine has run, because "not
+assessed" is a different claim from "assessed and found safe".
+
+---
+
+## 14. The job queue — `nexus/db/models/job.py`, `nexus/services/jobs.py`
+
+**Why not Redis/Celery.** The decisive property is **transactional enqueue**:
+storing an event and enqueuing the work it triggers happen in one transaction,
+so there is no window where the data exists and the work was never scheduled.
+With an external broker that gap needs an outbox table and idempotency keys —
+more machinery than the broker saved.
+
+**The claim.** One statement: select eligible rows `FOR UPDATE SKIP LOCKED`,
+mark them RUNNING, return them. `SKIP LOCKED` is what makes it a queue rather
+than a bottleneck — a second worker skips rows the first has locked instead of
+blocking behind them, so workers scale with no coordination. Without it they
+serialise; without `FOR UPDATE` they double-process.
+
+**Delivery is at least once.** A worker can do the work and die before
+recording success. Handlers must therefore be idempotent, and every handler
+says in its docstring how it achieves that. Exactly-once is not available: the
+work and the record of the work are two systems.
+
+**Recurring work without a scheduler daemon.** Each schedule entry floors the
+clock into a bucket and enqueues with `dedupe_key = f"{kind}|{bucket}"`. Every
+worker computes the same key and tries; the partial unique index means exactly
+one insert wins. No leader election, no lock, no single point of failure.
+
+**Transaction shape in the worker.** The handler's work and the job's
+completion commit *together*, so a crash between them is impossible. A failure
+takes the opposite path: the handler's transaction is rolled back, and the
+failure is recorded in a second, fresh transaction — recording it in the
+rolled-back one would roll back the failure too, and the job would look as
+though it had never run.
+
+---
+
+## 15. Testing strategy
 
 Tests run against a **real PostgreSQL database**. The schema uses JSONB, INET,
 `GENERATED ALWAYS AS IDENTITY`, and `ON DELETE` behaviour — none of which SQLite
@@ -391,3 +508,4 @@ check return 200 when everything works.
 
 - **M1** — established sections 1–9 and the testing strategy.
 - **M2** — added §10 (sessions) and §11 (the commit-boundary exception).
+- **M4** — added §12 (sensors), §13 (ingestion) and §14 (the job queue).

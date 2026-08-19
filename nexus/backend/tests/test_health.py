@@ -50,7 +50,10 @@ class TestReadiness:
         body = response.json()
         assert body["ready"] is True
         assert body["status"] == "ok"
-        assert {component["name"] for component in body["components"]} == {"database"}
+        names = {component["name"] for component in body["components"]}
+        # The database is required; the queue and worker are reported alongside
+        # it, and sensors appear per configured sensor.
+        assert {"database", "job_queue", "worker"} <= names
 
     async def test_returns_503_when_the_database_is_unreachable(
         self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch

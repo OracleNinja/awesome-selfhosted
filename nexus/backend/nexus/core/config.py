@@ -141,9 +141,16 @@ class Settings(BaseSettings):
     session_cookie_name: str = "nexus_session"
     session_absolute_ttl_minutes: Annotated[int, Field(ge=5, le=60 * 24 * 30)] = 720
     session_idle_timeout_minutes: Annotated[int, Field(ge=1, le=60 * 24 * 7)] = 60
-    # Set false only when NEXUS is reached over plain HTTP on a trusted link
-    # (a lab bench). Defaults to true, and production may not turn it off.
-    session_cookie_secure: bool = True
+    # Whether the session cookie carries the Secure attribute, which makes the
+    # browser refuse to send it over plain HTTP.
+    #
+    # Left unset, it follows the environment: on in production, off elsewhere.
+    # That is not a weakened default — it is the only one that is correct in
+    # both places. Forcing it on everywhere would mean local development over
+    # http://localhost simply cannot log in, and the usual workaround for that
+    # is a developer turning it off *in production too*. Production still
+    # refuses an explicit false (see the production rules below).
+    session_cookie_secure: bool | None = None
 
     # --------------------------------------------------------------- http ---
     # NoDecode: pydantic-settings would otherwise try to JSON-decode any
@@ -179,6 +186,12 @@ class Settings(BaseSettings):
     audit_mirror_path: Path | None = None
 
     # ------------------------------------------------------------ workers ---
+    # Whether this process runs background workers and sensors in-process.
+    # A single-box deployment leaves both on and runs one process. A larger
+    # one runs the API with both off and separate `python -m nexus.worker`
+    # processes, so a runaway job cannot starve the API's event loop.
+    run_workers: bool = True
+    run_sensors: bool = True
     worker_concurrency: Annotated[int, Field(ge=1, le=64)] = 4
     worker_poll_interval_seconds: Annotated[float, Field(gt=0, le=60)] = 1.0
     job_default_timeout_seconds: Annotated[int, Field(ge=1, le=3600)] = 120
@@ -258,6 +271,24 @@ class Settings(BaseSettings):
             )
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _default_cookie_security(cls, data: Any) -> Any:
+        """Resolve `session_cookie_secure` from the environment when unset.
+
+        Runs in "before" mode because the model is frozen: an "after" validator
+        could read the value but not fill it in.
+        """
+        if isinstance(data, dict) and data.get("session_cookie_secure") is None:
+            environment = data.get("environment", Environment.DEVELOPMENT)
+            if isinstance(environment, str):
+                try:
+                    environment = Environment(environment)
+                except ValueError:
+                    environment = Environment.DEVELOPMENT
+            data["session_cookie_secure"] = environment is Environment.PRODUCTION
+        return data
+
     @model_validator(mode="after")
     def _validate_production_rules(self) -> Settings:
         """Rules that are only enforced when it matters.
@@ -301,6 +332,17 @@ class Settings(BaseSettings):
         return self
 
     # -------------------------------------------------------------- helpers --
+
+    @property
+    def cookie_secure(self) -> bool:
+        """Resolved Secure flag, always a bool.
+
+        The field is ``bool | None`` so "unset" can be distinguished from an
+        explicit choice; the before-validator fills it in from the environment.
+        Call sites use this property so they never have to handle a None that
+        cannot actually occur.
+        """
+        return bool(self.session_cookie_secure)
 
     @property
     def monitored_ip_networks(self) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:

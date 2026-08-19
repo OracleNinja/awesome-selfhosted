@@ -30,7 +30,7 @@ These are non-negotiable constraints on the whole codebase:
 
 ## Implemented
 
-Milestones 1–2 — platform foundation, authentication and audit:
+Milestones 1–4 — foundation, authentication, CI, and the observation pipeline:
 
 | Area | What works |
 |---|---|
@@ -50,16 +50,24 @@ Milestones 1–2 — platform foundation, authentication and audit:
 | User administration | Create, update, role change, deactivate, password reset, unlock — each audited, each guarded |
 | CLI | `create-admin`, `verify-audit`, `show-config` |
 | CI | Format, lint, types, tests on PostgreSQL 16 and 17, migration round-trip, dependency audit, and startup-safety checks |
+| Sensors | `arp_discovery` (kernel neighbour cache), `syslog` (RFC 3164/5424 over UDP), `packet_capture` (raw `AF_PACKET`, flow aggregation), `lab_synthetic` (SIMULATION only) |
+| Sensor supervision | Availability checks with remedies, restart with backoff, park-on-repeated-failure, live reload without restarting NEXUS |
+| Ingestion | Deterministic deduplication, MAC-first device identity, normalisation, per-batch upserts, rejection counting |
+| Job queue | PostgreSQL `SKIP LOCKED` queue with priorities, retries with jittered backoff, per-job timeouts, cooperative cancellation, orphan reclamation, dedupe keys |
+| Workers | In-process or standalone (`python -m nexus.worker`), graceful shutdown, leaderless recurring schedule |
+| Retention | Batched event pruning, audit pruning that refuses to empty the chain, device idle reconciliation |
+| Monitoring API | Events (keyset-paginated), devices, sensors, jobs — with simulated data excluded from real views by default |
+| Tests | 365 tests against a real PostgreSQL instance, including failure and attack paths |
 | Tests | 206 tests against a real PostgreSQL instance, including failure and attack paths |
 
 ## Not yet implemented
 
 Listed so nothing here reads as a promise that the code already keeps:
 
-- Network sensors, event ingestion, normalisation
-- Detection engine, risk scoring, threat intelligence
-- Background workers and the job queue
+- Detection engine, risk scoring, threat intelligence (devices report
+  `risk_score: null` / `UNKNOWN` until it exists — not zero)
 - Real-time streaming to the UI
+- Vendor lookup (no OUI database is shipped, so `vendor` is always null)
 - The frontend
 - The cybersecurity laboratory
 - Quarantine

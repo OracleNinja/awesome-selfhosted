@@ -259,7 +259,7 @@ def _set_session_cookie(response: Response, context: ContextDep, issued: IssuedS
         value=issued.session_token,
         max_age=settings.session_absolute_ttl_minutes * 60,
         httponly=True,
-        secure=settings.session_cookie_secure,
+        secure=settings.cookie_secure,
         samesite="strict",
         path="/",
     )
@@ -277,6 +277,6 @@ def _clear_session_cookie(response: Response, context: ContextDep) -> None:
         key=settings.session_cookie_name,
         path="/",
         httponly=True,
-        secure=settings.session_cookie_secure,
+        secure=settings.cookie_secure,
         samesite="strict",
     )

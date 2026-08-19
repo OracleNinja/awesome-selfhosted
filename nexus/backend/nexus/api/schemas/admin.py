@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from nexus.api.schemas.auth import UserSummary
+from nexus.api.schemas.common import IPAddressStr
 from nexus.core.passwords import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
 from nexus.core.rbac import Role
 
@@ -89,7 +90,7 @@ class AuditEntry(BaseModel):
     outcome: str
     reason: str | None = None
     request_id: str | None = None
-    source_ip: str | None = None
+    source_ip: IPAddressStr = None
     details: dict[str, Any] = Field(default_factory=dict)
     entry_hash: str = Field(description="This entry's position in the hash chain.")
     prev_hash: str

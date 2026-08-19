@@ -13,11 +13,40 @@ These exist for two reasons beyond runtime validation:
 
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+import ipaddress
+from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 T = TypeVar("T")
+
+
+def _stringify_address(value: Any) -> Any:
+    """Render a PostgreSQL INET value as a string.
+
+    asyncpg maps INET to ``ipaddress.IPv4Address``/``IPv6Address``, which is the
+    right type to compute with and the wrong one to serialise: pydantic would
+    reject it against a ``str`` field, and JSON has no address type anyway.
+    Converting once, here, keeps every schema that exposes an address from
+    needing its own conversion — and from silently omitting one.
+    """
+    if isinstance(
+        value,
+        (
+            ipaddress.IPv4Address,
+            ipaddress.IPv6Address,
+            ipaddress.IPv4Network,
+            ipaddress.IPv6Network,
+            ipaddress.IPv4Interface,
+            ipaddress.IPv6Interface,
+        ),
+    ):
+        return str(value)
+    return value
+
+
+# Use for any field backed by an INET column.
+IPAddressStr = Annotated[str | None, BeforeValidator(_stringify_address)]
 
 
 class ErrorDetail(BaseModel):

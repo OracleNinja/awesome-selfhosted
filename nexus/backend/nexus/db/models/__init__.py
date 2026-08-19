@@ -8,13 +8,28 @@ here.
 """
 
 from nexus.db.models.audit import GENESIS_HASH, AuditEvent
+from nexus.db.models.device import DEVICE_STATES, RISK_LEVELS, Device
+from nexus.db.models.event import EVENT_CATEGORIES, SEVERITIES, SecurityEvent
+from nexus.db.models.job import JOB_STATUSES, TERMINAL_STATUSES, Job
+from nexus.db.models.sensor import SENSOR_STATUSES, Sensor
 from nexus.db.models.setting import AppSetting
 from nexus.db.models.user import User, UserSession
 
 __all__ = [
+    "DEVICE_STATES",
+    "EVENT_CATEGORIES",
     "GENESIS_HASH",
+    "JOB_STATUSES",
+    "RISK_LEVELS",
+    "SENSOR_STATUSES",
+    "SEVERITIES",
+    "TERMINAL_STATUSES",
     "AppSetting",
     "AuditEvent",
+    "Device",
+    "Job",
+    "SecurityEvent",
+    "Sensor",
     "User",
     "UserSession",
 ]

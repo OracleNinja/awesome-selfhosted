@@ -7,6 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nexus.api.schemas.common import IPAddressStr
 from nexus.core.passwords import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
 from nexus.core.rbac import Permission, Role
 
@@ -59,7 +60,7 @@ class SessionSummary(BaseModel):
     created_at: datetime
     last_seen_at: datetime
     expires_at: datetime
-    ip_address: str | None = None
+    ip_address: IPAddressStr = None
     user_agent: str | None = None
     current: bool = Field(default=False, description="True for the session making this request.")
 

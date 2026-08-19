@@ -171,7 +171,7 @@ database outage into a restart storm.
 
 ## Endpoints
 
-Current as of M2. Descriptions, schemas, and per-endpoint error lists are in
+Current as of M4. Descriptions, schemas, and per-endpoint error lists are in
 the OpenAPI document.
 
 ### Health
@@ -213,14 +213,68 @@ question you will have six months later.
 | GET | `/audit` | `audit:read` |
 | POST | `/audit/verify` | `audit:read` |
 
+### Events
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/events` | `events:read` |
+| GET | `/events/{event_id}` | `events:read` |
+
+### Devices
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/devices` | `devices:read` |
+| GET | `/devices/{device_id}` | `devices:read` |
+| PATCH | `/devices/{device_id}` | `devices:annotate` |
+
+### Sensors
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/sensors` | `sensors:read` |
+| GET | `/sensors/drivers` | `sensors:read` |
+| POST | `/sensors/{sensor_id}/check` | `sensors:read` |
+| POST | `/sensors` | `sensors:manage` |
+| PATCH | `/sensors/{sensor_id}` | `sensors:manage` |
+| DELETE | `/sensors/{sensor_id}` | `sensors:manage` |
+
+### Jobs
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/jobs` | `jobs:read` |
+| GET | `/jobs/stats` | `jobs:read` |
+| GET | `/jobs/{job_id}` | `jobs:read` |
+| POST | `/jobs/{job_id}/cancel` | `jobs:manage` |
+| POST | `/jobs/{job_id}/retry` | `jobs:manage` |
+
 `POST /audit/verify` returns `external_anchor: CONFIGURED | NOT_CONFIGURED`.
 A passing verification with `NOT_CONFIGURED` proves internal consistency only —
 see SECURITY.md §6.
 
 ---
 
+## Simulated data
+
+Laboratory events and devices carry `is_simulation: true` and are **excluded
+from every listing by default**. Pass `include_simulation=true` to see both, or
+`only_simulation=true` for the laboratory view.
+
+This is not a display preference. Laboratory data is real data about an
+isolated environment, but it is not an observation of your network, and a
+client must never present the two as the same thing.
+
+Related honesty rules visible in the API:
+
+- `vendor: null` on a device means no OUI database is loaded — not "unknown
+  manufacturer".
+- `risk_score: null` with `risk_level: "UNKNOWN"` means the risk engine has not
+  assessed the device. That is not a score of zero.
+- A sensor's `NOT_AVAILABLE` (this host cannot run the driver) and
+  `NOT_CONFIGURED` (you have not set it up) are distinct from `FAILED`, and
+  each carries a `remedy` naming what to do.
+- An unknown filter value is a `422`, never an empty result — an empty list for
+  a typo reads as "your network is quiet".
+
 ## Not yet implemented
 
-No endpoints exist yet for events, devices, detections, sensors, jobs, the
-laboratory, or quarantine. They are absent from the OpenAPI document too: this
-project does not publish an endpoint before it works.
+No endpoints exist yet for detections, threat intelligence, the laboratory, or
+quarantine. They are absent from the OpenAPI document too: this project does
+not publish an endpoint before it works.

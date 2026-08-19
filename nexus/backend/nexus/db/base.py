@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import DateTime, MetaData, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -60,6 +61,16 @@ class Base(DeclarativeBase):
     """
 
     metadata = metadata
+
+
+def affected_rows(result: Any) -> int:
+    """Rows touched by a DML statement.
+
+    SQLAlchemy declares ``execute`` as returning ``Result``, while DML actually
+    returns a ``CursorResult`` that carries ``rowcount``. This helper keeps the
+    narrowing in one place instead of a cast at every call site.
+    """
+    return int(getattr(result, "rowcount", 0) or 0)
 
 
 def utcnow() -> datetime:

@@ -79,6 +79,12 @@ def settings() -> Settings:
         # Fail fast: a test run should not spend 30 seconds retrying a database
         # that is not there. The error message tells the developer what to start.
         db_connect_retries=0,
+        # No ambient background work. A worker and scheduler started by the
+        # fixture would enqueue maintenance jobs into every test's database and
+        # race with whatever the test is asserting. Tests that need a worker
+        # construct one explicitly (see tests/test_worker.py).
+        run_workers=False,
+        run_sensors=False,
         # Argon2 at production cost would make this suite take minutes: every
         # login test would pay ~50ms twice. These are the library's minimums.
         # The *code path* is identical — only the work factor differs — so the

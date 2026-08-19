@@ -19,15 +19,21 @@ this size.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nexus.core.config import Settings
 from nexus.core.logging import get_logger
 from nexus.core.passwords import PasswordService
 from nexus.core.ratelimit import SlidingWindowRateLimiter
 from nexus.db.session import Database
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance
+    from nexus.sensors.manager import SensorManager
+    from nexus.workers.worker import Worker
 
 logger = get_logger(__name__)
 
@@ -83,6 +89,13 @@ class AppContext:
             limit=settings.api_rate_limit_per_minute, window_seconds=60.0
         )
 
+        # Started during `startup` only when configuration enables them, so a
+        # deployment can split the API and the workers into separate processes
+        # without a different codebase.
+        self.sensors: SensorManager | None = None
+        self.worker: Worker | None = None
+        self._worker_task: asyncio.Task | None = None
+
         self._started_at: float | None = None
         self._ready = False
 
@@ -96,14 +109,60 @@ class AppContext:
         matters to an orchestrator — a container that exits is restarted in a
         loop, whereas a container that reports unready is left alone to recover
         and can still serve its health endpoint to explain itself.
+
+        Sensors and workers start only after the database is confirmed
+        reachable. Starting a sensor with nowhere to store its observations
+        would discard real data and report success.
         """
         self._started_at = time.monotonic()
         database_ok = await self.database.connect()
         self._ready = database_ok
+
+        if database_ok:
+            await self._start_background()
+
         logger.info(
             "context_started",
-            extra={"ready": self._ready, "database_ok": database_ok},
+            extra={
+                "ready": self._ready,
+                "database_ok": database_ok,
+                "sensors": self.sensors is not None,
+                "worker": self.worker is not None,
+            },
         )
+
+    async def _start_background(self) -> None:
+        """Start sensors and the worker, each failing independently.
+
+        Imported here rather than at module scope: `nexus.sensors.manager`
+        imports the ingestion service, which imports models, which import this
+        module. A local import keeps the dependency one-directional at import
+        time while still letting the context own the objects.
+        """
+        if self.settings.run_sensors:
+            from nexus.sensors.manager import SensorManager
+
+            try:
+                self.sensors = SensorManager(self)
+                await self.sensors.start()
+            except Exception:
+                # A broken sensor configuration must not prevent the API from
+                # serving — an operator needs the UI in order to fix it.
+                logger.exception("sensor_manager_start_failed")
+                self.sensors = None
+
+        if self.settings.run_workers:
+            from nexus.workers.worker import Worker
+
+            try:
+                # Importing the handlers package is what registers job kinds.
+                import nexus.workers.handlers  # noqa: F401
+
+                self.worker = Worker(self)
+                self._worker_task = asyncio.create_task(self.worker.run(), name="worker")
+            except Exception:
+                logger.exception("worker_start_failed")
+                self.worker = None
 
     async def shutdown(self) -> None:
         """Release resources in reverse order of acquisition.
@@ -112,6 +171,22 @@ class AppContext:
         shutting down the database first would break anything still draining.
         """
         self._ready = False
+
+        if self.worker is not None:
+            self.worker.stop()
+        if self._worker_task is not None:
+            # Bounded wait: in-flight jobs get a chance to finish, but a stuck
+            # job must not prevent the process from exiting — its lock will
+            # expire and another worker will retry it.
+            with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._worker_task, timeout=35)
+            self._worker_task = None
+
+        if self.sensors is not None:
+            with contextlib.suppress(Exception):
+                await self.sensors.stop()
+            self.sensors = None
+
         await self.database.dispose()
         logger.info("context_stopped")
 
@@ -164,8 +239,100 @@ class AppContext:
                 )
             )
             self._ready = False
+            # Nothing below can be probed without a database, and probing them
+            # would produce a cascade of misleading failures.
+            return components
 
+        components.extend(await self._queue_health())
+
+        if self.sensors is not None:
+            components.extend(self.sensors.health())
+        elif self.settings.run_sensors:
+            components.append(
+                ComponentHealth(
+                    name="sensors",
+                    status="unavailable",
+                    detail="The sensor manager failed to start; see the logs.",
+                )
+            )
+
+        components.append(self._worker_health())
         return components
+
+    async def _queue_health(self) -> list[ComponentHealth]:
+        """Queue depth, and whether work is actually moving.
+
+        The number that matters is not the backlog size but the age of the
+        oldest waiting job: a big queue draining fast is a busy system, while a
+        small queue with an hour-old job is a stopped one.
+        """
+        from nexus.services.jobs import JobQueue
+
+        try:
+            async with self.database.session() as session:
+                stats = await JobQueue(session).stats()
+        except Exception as exc:
+            return [
+                ComponentHealth(
+                    name="job_queue",
+                    status="unavailable",
+                    detail=f"Queue statistics unavailable: {exc.__class__.__name__}",
+                )
+            ]
+
+        detail = None
+        status = "ok"
+        if stats.dead:
+            status = "degraded"
+            detail = f"{stats.dead} job(s) exhausted their retries and need attention."
+        elif not stats.is_healthy:
+            status = "degraded"
+            detail = (
+                f"Oldest pending job is {int(stats.oldest_pending_age_seconds or 0)}s old; "
+                "workers may be stopped or overloaded."
+            )
+
+        return [
+            ComponentHealth(
+                name="job_queue",
+                status=status,
+                detail=detail,
+                data={
+                    "pending": stats.pending,
+                    "running": stats.running,
+                    "dead": stats.dead,
+                    "oldest_pending_age_seconds": stats.oldest_pending_age_seconds,
+                },
+            )
+        ]
+
+    def _worker_health(self) -> ComponentHealth:
+        if self.worker is None:
+            if not self.settings.run_workers:
+                # A deliberate choice, not a fault: this process serves the API
+                # and separate worker processes do the work.
+                return ComponentHealth(
+                    name="worker",
+                    status="not_configured",
+                    detail="Workers are disabled in this process (NEXUS_RUN_WORKERS=false).",
+                )
+            return ComponentHealth(
+                name="worker", status="unavailable", detail="The worker failed to start."
+            )
+
+        stats = self.worker.stats
+        return ComponentHealth(
+            name="worker",
+            status="ok",
+            data={
+                "worker_id": self.worker.worker_id,
+                "in_flight": stats.in_flight,
+                "succeeded": stats.succeeded,
+                "failed": stats.failed,
+                "timed_out": stats.timed_out,
+                "reclaimed": stats.reclaimed,
+            },
+        )
 
     async def overall_status(self) -> tuple[str, list[ComponentHealth]]:
         """Aggregate component health into one word.

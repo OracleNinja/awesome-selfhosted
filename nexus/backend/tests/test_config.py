@@ -71,6 +71,23 @@ class TestProductionRules:
         )
         assert config.environment.is_production
 
+    def test_secure_cookies_default_on_in_production_and_off_elsewhere(self) -> None:
+        """The default has to be right in both places. Forcing Secure on
+        everywhere means local HTTP development cannot log in, and the usual
+        workaround for that is disabling it in production too."""
+        assert (
+            load_settings(
+                environment=Environment.PRODUCTION, secret_key="x" * 48
+            ).session_cookie_secure
+            is True
+        )
+        assert load_settings(environment=Environment.DEVELOPMENT).session_cookie_secure is False
+        assert load_settings(environment=Environment.TESTING).session_cookie_secure is False
+
+    def test_explicit_secure_is_respected_outside_production(self) -> None:
+        config = load_settings(environment=Environment.DEVELOPMENT, session_cookie_secure=True)
+        assert config.session_cookie_secure is True
+
     def test_development_keeps_the_defaults_that_production_refuses(self) -> None:
         """The relaxed rules must be reachable *only* outside production."""
         config = load_settings(environment=Environment.DEVELOPMENT, session_cookie_secure=False)
