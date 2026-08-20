@@ -171,7 +171,7 @@ database outage into a restart storm.
 
 ## Endpoints
 
-Current as of M4. Descriptions, schemas, and per-endpoint error lists are in
+Current as of M5. Descriptions, schemas, and per-endpoint error lists are in
 the OpenAPI document.
 
 ### Health
@@ -225,6 +225,53 @@ question you will have six months later.
 | GET | `/devices` | `devices:read` |
 | GET | `/devices/{device_id}` | `devices:read` |
 | PATCH | `/devices/{device_id}` | `devices:annotate` |
+| GET | `/devices/{device_id}/risk` | `devices:read` |
+| GET | `/devices/{device_id}/risk/assessments` | `devices:read` |
+
+`GET /devices/{device_id}/risk` returns the score together with **every factor
+the model evaluated**, including those that contributed nothing, the evidence
+window covered, and the findings that contributed. The score is a weighted sum
+of the listed factors and nothing else, so the arithmetic in the response can be
+checked by hand. No model is involved.
+
+`/risk/assessments` is the history. An assessment is written only when the
+result changes, so it records actual movement rather than the scheduler ticking;
+each row carries the score it replaced, which is how "why did this go up?" gets
+answered.
+
+
+### Detections
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/detections` | `detections:read` |
+| GET | `/detections/status` | `detections:read` |
+| GET | `/detections/{finding_id}` | `detections:read` |
+| GET | `/detections/{finding_id}/evidence` | `detections:read` |
+| POST | `/detections/{finding_id}/status` | `detections:triage` |
+| GET | `/detections/config` | `rules:read` |
+| PUT | `/detections/config` | `rules:write` |
+
+A **detection** is a rule firing; the object it returns is a **finding**, the
+persisted record of that firing. Findings use offset pagination with a `total`,
+not the event feed's cursor: they are bounded (one per device per rule per
+distinct subject), so page counts stay small and jumping to the last page is
+meaningful.
+
+`severity` and `confidence` are separate fields and the server never combines
+them. Severity is how bad the finding would be if the conclusion is correct;
+confidence is how likely the conclusion is to be correct. A `HIGH`/`35` finding
+is normal and means "this would matter, and we are not sure".
+
+Triage requires a written `note`, stored on the finding and in the audit log.
+`RESOLVED`, `SUPPRESSED` and `FALSE_POSITIVE` all stop a finding contributing to
+risk, and are kept distinct on purpose: "I fixed it", "never show me this again"
+and "the rule was wrong" are different facts, and the last one is the only
+feedback signal about detector quality. A rule that fires again reopens a
+`RESOLVED` finding; it leaves `SUPPRESSED` and `FALSE_POSITIVE` alone.
+
+`PUT /detections/config` merges a partial document into the current one and
+validates the result as a whole. Send the `version` you read to get optimistic
+concurrency — a stale version is `409`, not an overwrite.
 
 ### Sensors
 | Method | Path | Permission |
@@ -266,7 +313,24 @@ Related honesty rules visible in the API:
 - `vendor: null` on a device means no OUI database is loaded — not "unknown
   manufacturer".
 - `risk_score: null` with `risk_level: "UNKNOWN"` means the risk engine has not
-  assessed the device. That is not a score of zero.
+  assessed the device (`state: NOT_ASSESSED` on the risk endpoint). That is not
+  a score of zero — a device assessed with no active findings scores `0` at
+  level `LOW`.
+- `GET /detections/status` reports `IDLE` when every stored event has been
+  analysed — including after a finite laboratory scenario finishes — and
+  `STALLED` when events are waiting and no analysis pass has run recently,
+  which usually means no worker process is running. Neither is inferred from an
+  empty result set.
+- A detector that cannot run reports `NOT_CONFIGURED` with a `remedy`, per
+  scope. `unexpected_communication` does this for the real network until
+  `NEXUS_MONITORED_NETWORKS` is set, because without declared networks it cannot
+  tell internal traffic from external.
+- `evidence_state` is `PARTIAL` or `PRUNED` when event retention has removed
+  observations a finding cites. The finding keeps a stored snapshot and stays
+  explainable; it is never presented as fully supported.
+- `weights_source: "DEFAULT_AFTER_INVALID_CONFIGURATION"` means a stored
+  configuration document was rejected and defaults are in force. `detail` names
+  the offending field.
 - A sensor's `NOT_AVAILABLE` (this host cannot run the driver) and
   `NOT_CONFIGURED` (you have not set it up) are distinct from `FAILED`, and
   each carries a `remedy` naming what to do.
@@ -275,6 +339,12 @@ Related honesty rules visible in the API:
 
 ## Not yet implemented
 
-No endpoints exist yet for detections, threat intelligence, the laboratory, or
-quarantine. They are absent from the OpenAPI document too: this project does
-not publish an endpoint before it works.
+No endpoints exist yet for threat intelligence, the laboratory, or quarantine.
+They are absent from the OpenAPI document too: this project does not publish an
+endpoint before it works.
+
+NEXUS ships **no threat-intelligence feed**. No address, domain or hash in any
+finding has been compared against a reputation source, and no response field
+implies otherwise — an `UNEXPECTED_COMMUNICATION` finding reports that a
+destination is outside your networks and off your allow-list, which is a
+statement about your configuration, not about that endpoint.

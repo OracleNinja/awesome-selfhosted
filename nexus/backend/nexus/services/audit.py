@@ -99,6 +99,15 @@ class AuditAction(str, Enum):
     # Authorization
     PERMISSION_DENIED = "PERMISSION_DENIED"
 
+    # Detection and risk
+    DETECTION_FINDING_CREATED = "DETECTION_FINDING_CREATED"
+    # Written instead of the per-finding entries when one analysis pass creates
+    # more findings than are audited individually. The burst is still recorded.
+    DETECTION_FINDINGS_CREATED = "DETECTION_FINDINGS_CREATED"
+    DETECTION_FINDING_TRIAGED = "DETECTION_FINDING_TRIAGED"
+    DETECTION_CONFIG_CHANGED = "DETECTION_CONFIG_CHANGED"
+    DEVICE_RISK_CHANGED = "DEVICE_RISK_CHANGED"
+
     # Configuration
     SETTING_CHANGED = "SETTING_CHANGED"
     RETENTION_CHANGED = "RETENTION_CHANGED"

@@ -12,6 +12,12 @@ from sqlalchemy import func, select
 from nexus.api.deps import ContextDep, SessionDep
 from nexus.api.middleware import client_ip
 from nexus.api.schemas.common import responses
+from nexus.api.schemas.detection import (
+    DeviceRiskResponse,
+    FindingSummary,
+    RiskAssessmentSummary,
+    RiskHistoryPage,
+)
 from nexus.api.schemas.monitoring import (
     DeviceDetail,
     DevicePage,
@@ -25,6 +31,9 @@ from nexus.core.rbac import Permission
 from nexus.db.base import utcnow
 from nexus.db.models.device import Device
 from nexus.db.models.event import SecurityEvent
+from nexus.detection.config import load_config
+from nexus.detection.risk import RiskService
+from nexus.services import findings as finding_service
 from nexus.services.audit import AuditAction
 from nexus.services.auth import AuthenticatedIdentity
 
@@ -210,4 +219,76 @@ async def update_device(
             details={"changes": changes},
         )
 
+    if "is_trusted" in changes and device.risk_score is not None:
+        # Operator trust is a factor in the risk model, so the score is stale
+        # the moment it changes. Recomputed here rather than left to the next
+        # scheduled pass: an operator who marks a device trusted and sees no
+        # change assumes the control does nothing.
+        loaded = await load_config(session)
+        await RiskService(session).rescore(device, config=loaded.config)
+
     return DeviceSummary.model_validate(device)
+
+
+@router.get(
+    "/{device_id}/risk",
+    response_model=DeviceRiskResponse,
+    summary="Get a device's risk score and how it was derived",
+    description=(
+        "Returns the current score together with **every factor the model "
+        "evaluated** — including those that contributed nothing — the evidence "
+        "window the assessment covers, and the findings that contributed.\n\n"
+        "A device the engine has not assessed returns `state: NOT_ASSESSED` "
+        "with `risk_score: null` and `risk_level: UNKNOWN`. That is not a score "
+        "of zero, and a client must not render it as one.\n\n"
+        "The score is a weighted sum of the listed factors and nothing else: no "
+        "model is involved, and the arithmetic in this response can be checked "
+        "by hand."
+    ),
+    responses=responses(401, 403, 404),
+)
+async def get_device_risk(
+    device_id: uuid.UUID, identity: DeviceReaderDep, session: SessionDep
+) -> DeviceRiskResponse:
+    device = await session.get(Device, device_id)
+    if device is None:
+        raise NotFound("No such device.")
+
+    loaded = await load_config(session)
+    payload = await finding_service.device_risk(session, device, loaded)
+    payload["contributing_findings"] = [
+        FindingSummary.model_validate(item) for item in payload["contributing_findings"]
+    ]
+    return DeviceRiskResponse.model_validate(payload)
+
+
+@router.get(
+    "/{device_id}/risk/assessments",
+    response_model=RiskHistoryPage,
+    summary="Get a device's risk history",
+    description=(
+        "Every recorded assessment, newest first, each with the score it "
+        "replaced. An assessment is written only when the result changes, so "
+        "this is a history of actual movement rather than a log of the "
+        "scheduler ticking — and comparing two consecutive entries answers "
+        "'why did this go up?'."
+    ),
+    responses=responses(401, 403, 404),
+)
+async def get_device_risk_history(
+    device_id: uuid.UUID,
+    identity: DeviceReaderDep,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> RiskHistoryPage:
+    device = await session.get(Device, device_id)
+    if device is None:
+        raise NotFound("No such device.")
+
+    rows, total = await finding_service.risk_history(session, device, limit=limit, offset=offset)
+    return RiskHistoryPage(
+        device_id=device.id,
+        items=[RiskAssessmentSummary.model_validate(row) for row in rows],
+        total=total,
+    )

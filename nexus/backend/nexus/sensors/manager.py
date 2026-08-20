@@ -44,6 +44,7 @@ from nexus.db.models.sensor import Sensor as SensorRow
 from nexus.sensors import resolve_driver
 from nexus.sensors.base import Availability, RawObservation, Sensor
 from nexus.services.ingest import IngestionService
+from nexus.services.jobs import JobQueue
 
 logger = get_logger(__name__)
 
@@ -348,6 +349,26 @@ class SensorManager:
                     observations, sensor_row, driver_is_simulation=is_simulation
                 )
                 sensor_row.last_heartbeat_at = utcnow()
+
+                if result.stored:
+                    # Ask for analysis in the same transaction that stored the
+                    # events, so the job cannot exist for events that rolled
+                    # back. The dedupe key means a busy sensor coalesces into
+                    # one pending pass rather than one job per batch — the
+                    # analysis is watermark-driven and will pick up everything
+                    # that has arrived by the time it runs.
+                    #
+                    # This only lowers latency. The scheduler enqueues the same
+                    # kind on a timer, so detection still runs if no sensor is
+                    # producing, and a deployment whose workers are elsewhere
+                    # simply queues the work for them.
+                    await JobQueue(session).enqueue(
+                        "detection.analyze_pending",
+                        queue="analysis",
+                        timeout_seconds=120,
+                        max_attempts=3,
+                        dedupe_key="detection.analyze_pending|ingest",
+                    )
 
             runtime.events_ingested += result.stored
             runtime.events_duplicate += result.duplicates

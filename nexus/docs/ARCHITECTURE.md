@@ -484,6 +484,7 @@ though it had never run.
 
 ---
 
+
 ## 15. Testing strategy
 
 Tests run against a **real PostgreSQL database**. The schema uses JSONB, INET,
@@ -504,8 +505,236 @@ check return 200 when everything works.
 
 ---
 
+## 16. Detection — `nexus/detection/`
+
+### The canonical observation model
+
+Detection rules consume `Observation` (`nexus/detection/observation.py`), a
+frozen dataclass projected from a `security_events` row. It carries the
+normalised network fields plus a `Provenance` record that answers, for any
+observation:
+
+| Question | Field |
+|---|---|
+| Which sensor produced this? | `provenance.sensor_name` / `sensor_id` / `driver` |
+| When was it produced? | `provenance.occurred_at` (sensor clock) / `received_at` (ours) |
+| Which raw event supports it? | `provenance.event_id` / `event_uid` / `has_raw` |
+| Is it real or laboratory data? | `provenance.is_simulation` |
+
+This is a **read-side projection, not a second table**. `security_events` (M4)
+already stores every one of those fields; copying them would create two records
+of one fact that can disagree, double the storage of the highest-volume table,
+and need a synchronisation job whose failure mode is silent divergence.
+
+The type is frozen because detectors run in sequence over the same batch. If one
+could mutate an observation, the next rule's conclusion would depend on
+execution order and the pipeline would stop being deterministic.
+
+### The analysis pass
+
+```
+watermark ─▶ fetch a bounded batch of security_events (id > watermark, in id order)
+                ├─ project to Observations
+                ├─ split by scope: real | simulation      (never mixed)
+                ├─ run each available detector per scope
+                ├─ persist candidates by fingerprint      (INSERT … ON CONFLICT)
+                ├─ link evidence                          (PK (finding_id, event_id))
+                ├─ recompute risk for touched devices     (pure function)
+                ├─ audit what changed                     (existing hash chain)
+                └─ advance the watermark
+                         │
+                         ▼  one transaction, committed by the worker
+```
+
+**Why a watermark, not a queue of event ids.** Enqueuing each event would make
+the job table larger than the event table, and would make cross-event rules —
+which must count occurrences inside a window — depend on job ordering. A
+watermark over a monotonic id gives ordered, bounded, restartable batches with
+O(1) state. It cannot skip an event, because ids come from a single
+`GENERATED ALWAYS AS IDENTITY` sequence and the pass advances only to the
+highest id it actually read.
+
+**Concurrency.** The pass takes a transaction-scoped advisory lock, and takes it
+with `pg_try_advisory_xact_lock`. A second worker finding the lock held returns
+immediately and its job succeeds having done nothing: blocking would tie up a
+worker to do work already in progress.
+
+**Scope isolation is structural.** Real and simulated observations are separate
+passes with separate history queries, so no rule can correlate a laboratory
+event with a real one even by mistake. The finding fingerprint includes the
+scope, so the two can never collapse into one row.
+
+### The four rules
+
+| Rule | Fires on | Severity | Confidence |
+|---|---|---|---|
+| `new_device` | The lowest `security_events.id` mentioning a device falls inside this batch | MEDIUM | 90 with a MAC, 60 by IP only |
+| `identity_change` | A (MAC, IP) pair disagrees with the last pre-batch observation | HIGH for `IP_REASSIGNED`, MEDIUM for `MAC_MOVED` | 35, or 60 when the change is abrupt (≤300 s) |
+| `repeated_anomaly` | *Rate*: same kind, N times in a window. *Enumeration*: N distinct endpoints in a window | up to HIGH (rate), MEDIUM (enumeration) | scales with how far past the threshold |
+| `unexpected_communication` | Monitored source → non-monitored destination on a port outside the allow-list | MEDIUM | 70 |
+
+`new_device` decides novelty from the **evidence** (`MIN(security_events.id)` for
+the device), not from `devices.first_seen_at`, which ingestion maintains and
+which moves under concurrent upserts. Event ids never change, so the same
+question asked twice gives the same answer.
+
+`repeated_anomaly` counts two ways because sensors produce two kinds of
+evidence. A syslog line saying "authentication failed" is self-describing, so
+forty of them in ten minutes is a rate signal. A packet-capture sensor emits
+`TRAFFIC` records where no individual flow is anomalous and the whole signal is
+in the spread — so that half counts *distinct `(address, port)` pairs*. Counting
+raw flows there would report that a busy device is busy, which is why `TRAFFIC`
+is excluded from the rate condition's default categories.
+
+`unexpected_communication` reports `NOT_CONFIGURED` for the real-network scope
+until `NEXUS_MONITORED_NETWORKS` is set. With no declared networks,
+`Settings.is_monitored_address` returns `False` for everything (it fails closed,
+by design), so the rule would see all traffic as external-to-external and fire on
+everything or nothing. Both would be lies about the network, so it declines to
+run and says why.
+
+### Severity and confidence are separate columns
+
+* **Severity** — how bad this is *if the conclusion is correct*.
+* **Confidence** — how likely it is that the conclusion is correct.
+
+`identity_change` is the clearest case: an address answering for a different MAC
+is the observable signature of ARP spoofing (HIGH), and is also exactly what a
+DHCP reassignment looks like (confidence 35). Folding those into one number at
+detection time destroys the distinction an analyst uses to decide what to look
+at first, so the schema, the scoring model and the API keep them apart.
+
+---
+
+## 17. Risk scoring — `nexus/detection/risk.py`
+
+```
+score = clamp(round(sum of (weight_f * magnitude_f)), 0, 100)
+```
+
+Seven named factors, each normalised to 0–1 by a documented saturation value and
+multiplied by a configurable weight:
+
+| Factor | Default weight | Saturates at |
+|---|---|---|
+| `SEVERITY_WEIGHTED_FINDINGS` | 45 | 2.0 severity×confidence units |
+| `RECENT_ACTIVITY` | 15 | decays to 0 at 72 h |
+| `IDENTITY_INSTABILITY` | 15 | 2 identity-change findings |
+| `EXTERNAL_EXPOSURE` | 15 | 3 distinct unexpected endpoints |
+| `ANOMALY_VOLUME` | 10 | 2 repeated-anomaly findings |
+| `DEVICE_NOVELTY` | 10 | first seen within 24 h |
+| `OPERATOR_TRUST` | **−30** | device marked trusted |
+
+Every factor is stored with its code, weight, magnitude, contribution and the
+evidence it came from — including the ones that contributed nothing, because
+"considered and absent" is information. The positive weights sum to more than
+100 deliberately: a device that is bad in every dimension saturates rather than
+requiring each factor to be scaled down.
+
+**No model, and that is a design decision.** A security score exists to be
+argued with. An operator must be able to ask why a device is 72, get an answer
+in terms of the evidence, change a weight and see the number move predictably. A
+learned model gives a number that is at best correlated with something and at
+worst unfalsifiable. Nothing in the scoring path calls a model of any kind.
+
+**`UNKNOWN` is not zero.** A device the engine has never assessed has
+`risk_score = NULL` / `risk_level = 'UNKNOWN'`. A device assessed with no active
+findings has `risk_score = 0` / `risk_level = 'LOW'`. Different claims, kept
+apart in the schema, the API and (later) the UI.
+
+### Configuration
+
+Rule parameters and weights live in one `app_settings` row under
+`detection.config`, validated by pydantic on **write and on read**. One document
+rather than one row per knob, because a risk model is only coherent as a whole
+and a half-applied change produces scores that mean nothing; the table's existing
+`version` column makes concurrent edits a `409` rather than a silent overwrite.
+
+If the stored document is invalid — a bad migration, a restore, someone with
+`psql` — the loader falls back to the documented defaults and **reports
+`DEFAULT_AFTER_INVALID_CONFIGURATION`** with the offending field. Silently using
+defaults would leave an operator convinced their tuning was in force.
+
+---
+
+## 18. Idempotency, and why it is not application logic
+
+Job delivery is at-least-once (§14), so every part of this pipeline is re-run in
+normal operation. Four mechanisms make that safe, and three of them are database
+constraints rather than checks in Python — because a check and a write in two
+statements is a race, and the loser's write still lands.
+
+1. **`findings.fingerprint UNIQUE`.** A candidate's identity is a digest of what
+   was detected: detector, rule version, scope, and the specific device,
+   transition or endpoint. Re-analysis re-derives the same fingerprint, and the
+   `INSERT … ON CONFLICT DO UPDATE` becomes an update of the observation window.
+   Two workers reaching the statement at once produce one row and one update.
+2. **`PRIMARY KEY (finding_id, event_id)` on the evidence link.** An observation
+   supports a finding at most once. `observation_count` is incremented only by
+   the row count of an `ON CONFLICT DO NOTHING` insert, so a replayed pass adds
+   zero and no evidence-derived number can drift upward.
+3. **Risk is recomputed, never accumulated.** There is no `score += …` anywhere;
+   the score is a pure function of the device's current active findings. This is
+   what makes "a retry must not repeatedly increase risk" true structurally
+   rather than by a guard.
+4. **Time enters the model only in whole hours.** The recency factor decays with
+   the age of the newest finding, floored to hours. Without that, two runs a
+   second apart would differ in the last decimal and append an assessment row
+   every time; with it, unchanged input produces an identical result and nothing
+   is written.
+
+### `SELECT … FOR UPDATE` on the device before scoring
+
+Found by running the system, not by the tests. `detection.analyze_pending` and
+`risk.rescore_stale` both score devices, and on a freshly started deployment
+both ran within the same second. Under `READ COMMITTED` each transaction reads
+its own snapshot: the job that began first saw *none* of the other's
+freshly-committed findings, computed the no-findings score, and — committing
+last — wrote that stale score over the correct one. A device that should have
+read 40 read 10.
+
+`RiskService.rescore` now locks the device row before reading its findings. The
+statement that takes the lock also takes a fresh snapshot, so the second writer
+sees the first's work instead of racing it. Both multi-device callers lock in
+device-id order, so they cannot deadlock by taking the same locks in opposite
+orders. `tests/test_risk.py::TestConcurrentRescoring` reproduces the original
+race and fails without the lock.
+
+### Evidence outlives events
+
+Event retention prunes `security_events`, and the evidence link is
+`ON DELETE CASCADE`. A finding therefore keeps a bounded snapshot of its
+observations in `evidence` plus a monotonic `observation_count`; comparing that
+count with the links still present is how the API reports `COMPLETE`, `PARTIAL`
+or `PRUNED`. A console that showed a thinned finding as fully supported would be
+claiming evidence it cannot produce.
+
+---
+
+## 19. Honest states in detection
+
+| State | Means | Never rendered as |
+|---|---|---|
+| `analysis.state = NEVER_RUN` | No pass has completed | "no findings" |
+| `analysis.state = IDLE` | Every stored event analysed — including after a finite laboratory scenario finishes | a fault |
+| `analysis.state = BACKLOG` | Events waiting, a pass ran recently | healthy-and-idle |
+| `analysis.state = STALLED` | Events waiting, no pass in 5 minutes — usually no worker is running | healthy |
+| detector `NOT_CONFIGURED` | A prerequisite is missing; `remedy` says what to do | an empty result |
+| detector `DISABLED` | Turned off in configuration | "found nothing" |
+| `risk.state = NOT_ASSESSED` | The engine has not scored this device | a score of zero |
+| `weights_source = DEFAULT_AFTER_INVALID_CONFIGURATION` | Stored tuning was rejected | "your settings are active" |
+| `evidence_state = PARTIAL` / `PRUNED` | Retention removed some observations | fully-supported |
+| `is_simulation = true` | Derived from laboratory data | an observation of your network |
+
+Findings derived from simulation are excluded from every real-network view by
+default, exactly as simulated events are.
+
+---
+
 ## Change log for this document
 
 - **M1** — established sections 1–9 and the testing strategy.
 - **M2** — added §10 (sessions) and §11 (the commit-boundary exception).
 - **M4** — added §12 (sensors), §13 (ingestion) and §14 (the job queue).
+- **M5** — added §16 (detection), §17 (risk scoring), §18 (idempotency and the
+  device-lock defect found in live running) and §19 (honest states).

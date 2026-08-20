@@ -6,6 +6,6 @@ DEAD with "no handler registered" rather than guessing, which is the correct
 outcome after a rollback to a build that predates the kind.
 """
 
-from nexus.workers.handlers import maintenance
+from nexus.workers.handlers import detection, maintenance
 
-__all__ = ["maintenance"]
+__all__ = ["detection", "maintenance"]

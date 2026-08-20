@@ -245,13 +245,71 @@ target device itself.
 
 ---
 
-## 9. Reporting a vulnerability
+## 9. What detections and risk scores do and do not prove
+
+The detection engine (ARCHITECTURE.md §16–17) is deliberately modest about what
+it claims, and the claims are worth stating precisely so nobody acts on more
+than the evidence supports.
+
+**What a finding asserts.** That specific observations, recorded by a named
+sensor at a named time, satisfied a stated rule with stated thresholds. Every
+finding carries the observations it was derived from, and the API can return
+them. That is the whole claim.
+
+**What a finding does not assert.**
+
+- *Not attribution.* An `IDENTITY_CHANGE` finding says a (MAC, IP) pair
+  disagrees with the previous observation. It does not say ARP spoofing
+  happened. That evidence is also produced by a DHCP lease reassignment, which
+  is why its confidence is 35 and its explanation says so in words.
+- *Not reputation.* An `UNEXPECTED_COMMUNICATION` finding says a destination is
+  outside the networks **you declared** and on a port outside the allow-list
+  **you configured**. It is a statement about your configuration, not about that
+  endpoint. NEXUS ships no threat-intelligence feed and consults none.
+- *Not compromise.* Nothing in this system concludes that a device is
+  compromised. There is no such finding type, and no score threshold means it.
+- *Not completeness.* A rule fires on what the sensors recorded. An attacker on
+  a switched segment that no sensor observes produces no findings, and an empty
+  detections list is not evidence of a quiet network. See §1.
+
+**Severity is not confidence.** They are separate columns and the server never
+combines them. A `HIGH`/`35` finding means "this would matter, and we are not
+sure". Treating the pair as one number is the mistake this schema exists to
+prevent.
+
+**A risk score is an opinion with its arithmetic attached.** It is a weighted sum
+of seven declared factors whose weights you control; it is not a measurement.
+Every score returns the factors that produced it, so a number you disagree with
+can be traced to the weight or the finding responsible. A device scoring 0 has
+been assessed and found to have no active findings; a device scoring `null` has
+not been assessed at all, and the two must never be shown the same way.
+
+**Evidence can age out.** Event retention prunes observations, and a finding
+whose citations have been removed reports `PARTIAL` or `PRUNED`. It keeps a
+stored snapshot so it stays explainable, but the primary evidence is gone — do
+not treat such a finding as independently verifiable.
+
+**Who can change what.**
+
+| Action | Permission | Audited as |
+|---|---|---|
+| Read findings, evidence, risk | `detections:read` / `devices:read` | — |
+| Triage a finding (written note required) | `detections:triage` | `DETECTION_FINDING_TRIAGED` |
+| Change rule thresholds and risk weights | `rules:write` (ADMIN only) | `DETECTION_CONFIG_CHANGED` |
+
+Tuning is a security-relevant act: lowering a threshold suppresses detection for
+everyone. It therefore requires an administrator, a written reason, and lands in
+the hash-chained audit log with the fingerprint of the configuration before and
+after. Marking a device trusted lowers its score but never suppresses recording
+— a trusted device that starts enumerating the subnet still produces findings.
+
+## 10. Reporting a vulnerability
 
 This is a personal self-hosted project. If you find a security issue, open a
 GitHub issue describing it, or contact the repository owner directly for
 anything you would rather not post publicly.
 
-## 10. Hardening checklist for deployment
+## 11. Hardening checklist for deployment
 
 - [ ] `NEXUS_ENVIRONMENT=production`
 - [ ] `NEXUS_SECRET_KEY` set to 48+ random characters

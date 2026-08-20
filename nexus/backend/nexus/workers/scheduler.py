@@ -55,6 +55,25 @@ DEFAULT_SCHEDULE: tuple[ScheduleEntry, ...] = (
     ScheduleEntry("retention.prune_audit", interval_seconds=24 * 3600),
     ScheduleEntry("jobs.purge_finished", interval_seconds=12 * 3600),
     ScheduleEntry("devices.reconcile_state", interval_seconds=900),
+    # Detection runs on the "analysis" queue at normal priority: it is the only
+    # background work an operator is actually waiting on, so it must not sit
+    # behind a retention sweep. Ingestion also nudges it directly (see
+    # nexus.sensors.manager), and this entry is the floor that guarantees a pass
+    # happens even when no sensor is producing.
+    ScheduleEntry(
+        "detection.analyze_pending",
+        interval_seconds=60,
+        queue="analysis",
+        priority=0,
+        timeout_seconds=120,
+    ),
+    ScheduleEntry(
+        "risk.rescore_stale",
+        interval_seconds=3600,
+        queue="analysis",
+        priority=-5,
+        timeout_seconds=300,
+    ),
 )
 
 # How often to evaluate the schedule. Must be well below the shortest interval,

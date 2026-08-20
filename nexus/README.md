@@ -30,7 +30,7 @@ These are non-negotiable constraints on the whole codebase:
 
 ## Implemented
 
-Milestones 1–4 — foundation, authentication, CI, and the observation pipeline:
+Milestones 1–5 — foundation, authentication, CI, the observation pipeline, and detection:
 
 | Area | What works |
 |---|---|
@@ -57,15 +57,19 @@ Milestones 1–4 — foundation, authentication, CI, and the observation pipelin
 | Workers | In-process or standalone (`python -m nexus.worker`), graceful shutdown, leaderless recurring schedule |
 | Retention | Batched event pruning, audit pruning that refuses to empty the chain, device idle reconciliation |
 | Monitoring API | Events (keyset-paginated), devices, sensors, jobs — with simulated data excluded from real views by default |
-| Tests | 365 tests against a real PostgreSQL instance, including failure and attack paths |
-| Tests | 206 tests against a real PostgreSQL instance, including failure and attack paths |
+| Detection | Four deterministic rules — new device, MAC/IP identity change, repeated anomaly (by rate and by endpoint enumeration), unexpected external communication. Every finding cites the observations it came from |
+| Findings | Persistent, deduplicated by fingerprint, with independent severity and confidence, structured evidence, a written explanation, and triage that feeds back into risk |
+| Risk scoring | A weighted sum of seven named factors with configurable weights. Deterministic, recomputed rather than accumulated, and fully decomposable — no model of any kind |
+| Detection API | `/detections` (findings, evidence, triage, engine status) and `/devices/{id}/risk` (score, every contributing factor, history) |
+| Tests | 480 tests against a real PostgreSQL instance, including failure, attack, concurrency and idempotency paths |
 
 ## Not yet implemented
 
 Listed so nothing here reads as a promise that the code already keeps:
 
-- Detection engine, risk scoring, threat intelligence (devices report
-  `risk_score: null` / `UNKNOWN` until it exists — not zero)
+- Threat intelligence. **No reputation feed of any kind is shipped or
+  consulted**: no address, domain or hash in a finding has been checked against
+  one, and nothing in the API implies otherwise
 - Real-time streaming to the UI
 - Vendor lookup (no OUI database is shipped, so `vendor` is always null)
 - The frontend
