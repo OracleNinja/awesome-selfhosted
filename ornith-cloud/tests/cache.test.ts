@@ -9,7 +9,7 @@ describe('createCache', () => {
   });
 
   it('reports a miss for an unknown key', () => {
-    expect(createCache<string>(1000, 10).get('nope')).toBeUndefined();
+    expect(createCache<string>(1000, 10).get('nope')).toBeDefined(); // P2J deliberate break — must fail
   });
 
   it('expires entries after the TTL and does not serve stale data', () => {
