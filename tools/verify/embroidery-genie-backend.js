@@ -104,8 +104,25 @@ module.exports = {
       'and tests/test_hardening.py:14 each use requires_db or check ' +
       'TEST_DATABASE_URL directly, confirming DB-gating is enforced at ' +
       'the test level, not the file level, per conftest.py:1-9.',
-    'The conditional (DB-present) run was not itself executed against a ' +
-      'live PostgreSQL database by me or, per the Lead\'s report, by the ' +
-      'Lead; only the no-DB path and the install fix were confirmed.',
+    'The conditional (DB-present) run has since been executed against a ' +
+      'live PostgreSQL database — per the Lead\'s report, not run by me. ' +
+      'Locally: PostgreSQL 16.13 with TEST_DATABASE_URL set to a psycopg ' +
+      'URL, "python3 -m pytest" reported 166 passed, 0 skipped, 0 failed ' +
+      '(vs. 79 passed, 87 skipped with the variable unset). In CI: GitHub ' +
+      'Actions run 32755670933, job "embroidery-genie-backend (with ' +
+      'database)" (required, not advisory), supplied a postgres:16 service ' +
+      'container gated on pg_isready and set TEST_DATABASE_URL; the ' +
+      'conditional step reported PASS, "(conditional, TEST_DATABASE_URL ' +
+      'set)", 26.7s, exit 0. All 87 no-DB skips trace to the single cause ' +
+      'TEST_DATABASE_URL being unset, across 82 skip sites — ' +
+      'test_ai_cost_controls.py (38), test_api.py (37), test_hardening.py ' +
+      '(7) — no skip in this suite has any other cause. Not established: ' +
+      'behaviour against PostgreSQL major versions other than 16 ' +
+      '(16.13 ran locally, 16.15 ran in CI in run 32755670933, both ' +
+      'passing), ' +
+      'flakiness (each path run only a handful of times), or any Alembic ' +
+      'migration path — the schema here comes from ' +
+      'Base.metadata.create_all() in the app_client fixture, not a ' +
+      'migration.',
   ],
 };
