@@ -1,0 +1,21 @@
+# Live campaign data — never committed.
+db/*.db
+db/*.db-wal
+db/*.db-shm
+var/screenshots/*
+var/exports/*
+var/evidence/*
+var/drafts/*
+!var/**/.gitkeep
+
+# Sensitive identifiers (EIN, permit numbers) live here and stay local.
+profile/sensitive.local.json
+profile/documents/*
+profile/photos/*
+!profile/documents/.gitkeep
+!profile/photos/.gitkeep
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/

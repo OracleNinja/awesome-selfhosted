@@ -1,0 +1,89 @@
+{
+  "_comment": "Which profile fields gate which actions. Dotted paths into business.json. If a required field is null/empty, the action is BLOCKED and a human task is raised. Nothing here may ever be auto-filled with a guess.",
+  "levels": {
+    "identity": {
+      "label": "Minimum identity — required before ANY external contact",
+      "required": [
+        "legal_name",
+        "owner_name",
+        "business_name",
+        "phone",
+        "email",
+        "city",
+        "state"
+      ]
+    },
+    "outreach": {
+      "label": "Required to draft credible outreach",
+      "extends": "identity",
+      "required": [
+        "business_description",
+        "territory.primary_market",
+        "storefront_description",
+        "display_area.type",
+        "shipping_capability.receiving_method",
+        "projected_initial_inventory.units",
+        "projected_initial_inventory.timeframe"
+      ],
+      "recommended": [
+        "website",
+        "years_in_business",
+        "current_products",
+        "marketing_channels",
+        "service_capabilities.in_house_service",
+        "projected_annual_volume.units"
+      ]
+    },
+    "dealer_application": {
+      "label": "Required for a manufacturer/distributor dealer application",
+      "extends": "outreach",
+      "required": [
+        "business_address",
+        "zip",
+        "tax_information.entity_type",
+        "tax_information.ein",
+        "licenses.sales_tax_permit.held",
+        "licenses.sales_tax_permit.number",
+        "display_area.square_feet",
+        "projected_annual_volume.units",
+        "projected_annual_volume.basis"
+      ],
+      "recommended": [
+        "licenses.business_license.number",
+        "licenses.liability_insurance.carrier",
+        "banking_and_credit.trade_references_available",
+        "photos",
+        "documents",
+        "website",
+        "social_profiles.google_business_profile"
+      ]
+    },
+    "credit_or_terms": {
+      "label": "Required only if applying for terms / floor plan (human supplies financials directly)",
+      "extends": "dealer_application",
+      "required": [
+        "banking_and_credit.bank_reference_available",
+        "banking_and_credit.trade_references_available"
+      ],
+      "human_only": [
+        "Bank account and routing numbers",
+        "Personal guarantee / SSN",
+        "Financial statements",
+        "Credit card details"
+      ]
+    }
+  },
+  "never_agent_supplied": [
+    "tax_information.ein",
+    "tax_information.state_tax_id",
+    "licenses.*.number",
+    "banking_and_credit.*",
+    "references.*"
+  ],
+  "projection_fields": [
+    "projected_initial_inventory.units",
+    "projected_initial_inventory.timeframe",
+    "projected_annual_volume.units"
+  ],
+  "projection_language_rule": "Projection fields must be phrased as forward-looking plans ('I plan to stock', 'I project'), never as achieved history ('we sell', 'we move')."
+}

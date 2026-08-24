@@ -1,0 +1,148 @@
+{
+  "_comment": "Stage 4. Ranked acquisition strategies. rank 1 is best. The engine picks the highest-ranked strategy whose preconditions the target actually satisfies — it never defaults to purchasing.",
+  "version": 1,
+  "default_strategy": null,
+  "never_default_to": ["retail_purchase"],
+  "strategies": [
+    {
+      "key": "manufacturer_sponsored_evaluation",
+      "rank": 1,
+      "label": "Manufacturer-sponsored evaluation unit — $0 vehicle + $0 freight",
+      "target_landed_cost_cents": 0,
+      "applies_when": {"company_type_in": ["manufacturer"], "any_signal": ["dealer_development_program", "published_demo_program", "wholesale_operation"]},
+      "ask": "One evaluation unit provided at no cost, freight included, to establish the product at our location ahead of an initial inventory order.",
+      "what_we_offer": ["Committed first inventory order on successful evaluation", "Local market entry in an under-served territory", "Photos, video and field feedback from real-world evaluation", "Display presence and service capability in-market"],
+      "typical_objection": "We don't place free units with unestablished dealers.",
+      "counter": "Offer the credited structure (rank 6) as the fallback in the same conversation, so a 'no' converts rather than ends."
+    },
+    {
+      "key": "distributor_sponsored_demo",
+      "rank": 2,
+      "label": "Distributor-sponsored demo unit",
+      "target_landed_cost_cents": 0,
+      "applies_when": {"company_type_in": ["distributor"], "any_signal": ["wholesale_operation", "dealer_development_program"]},
+      "ask": "A distributor-placed demo unit at no cost to establish a local sales channel in our territory.",
+      "what_we_offer": ["A new downstream retail outlet for the distributor's line", "Territory coverage the distributor currently lacks", "Initial stocking order once the demo proves out"],
+      "typical_objection": "Demo units are reserved for stocking dealers.",
+      "counter": "Ask what stocking threshold unlocks a demo, then negotiate the threshold or the credit."
+    },
+    {
+      "key": "dealer_demo_transfer",
+      "rank": 3,
+      "label": "Dealer demo transfer — take an existing dealer's aging demo",
+      "target_landed_cost_cents": 0,
+      "applies_when": {"company_type_in": ["dealer"], "any_signal": ["existing_denago_relationship", "dealer_to_dealer_evidence", "excess_inventory_signal"]},
+      "ask": "Transfer of an existing demo/floor unit that has aged out of the current selling season.",
+      "what_we_offer": ["Frees their floor space and floor-plan interest", "No retail-market competition — different territory", "Cash-free transfer or credited transfer"],
+      "typical_objection": "We'd rather retail it ourselves.",
+      "counter": "Position against their carrying cost: aged demo units cost them interest and depreciation every month."
+    },
+    {
+      "key": "free_unit_buyer_freight",
+      "rank": 4,
+      "label": "$0 unit, buyer pays freight",
+      "target_landed_cost_cents": null,
+      "requires_human_approval": true,
+      "approval_reason": "Commits out-of-pocket freight cost — exceeds the $0 landed-cost objective.",
+      "applies_when": {"any_signal": ["published_demo_program", "excess_inventory_signal", "previous_model_year_signal"]},
+      "ask": "$0 vehicle with freight arranged and paid by us.",
+      "negotiate_next": ["Ask for freight at their negotiated carrier rate rather than retail LTL", "Ask whether we can pick up to eliminate freight entirely"]
+    },
+    {
+      "key": "free_unit_split_freight",
+      "rank": 5,
+      "label": "$0 unit, freight split",
+      "target_landed_cost_cents": null,
+      "requires_human_approval": true,
+      "approval_reason": "Commits out-of-pocket freight cost.",
+      "applies_when": {"any_signal": ["published_demo_program", "excess_inventory_signal"]},
+      "ask": "$0 vehicle with freight cost shared 50/50."
+    },
+    {
+      "key": "credited_demo",
+      "rank": 6,
+      "label": "Demo cost 100% credited against first inventory order",
+      "target_landed_cost_cents": null,
+      "requires_human_approval": true,
+      "approval_reason": "Requires paying up front and committing to a first order; net-zero only if the order happens.",
+      "applies_when": {"any_signal": ["dealer_development_program", "manufacturer_or_distributor", "wholesale_operation"]},
+      "ask": "Demo unit at dealer cost with 100% of that cost credited against our first 5-10 unit inventory order.",
+      "must_capture": ["Credit percentage in writing", "Order size that triggers the credit", "Credit expiry window", "Whether freight is also credited", "What happens if the first order is smaller than projected"],
+      "note": "Most achievable genuinely-net-zero structure. Push for this the moment a free unit is declined."
+    },
+    {
+      "key": "previous_model_year",
+      "rank": 7,
+      "label": "Previous-model-year unit at or near cost",
+      "requires_human_approval": true,
+      "applies_when": {"any_signal": ["previous_model_year_signal", "excess_inventory_signal"]},
+      "ask": "Non-current model-year unit at dealer cost or below, ideally with credit toward the first order."
+    },
+    {
+      "key": "excess_inventory",
+      "rank": 8,
+      "label": "Excess / overstock inventory",
+      "requires_human_approval": true,
+      "applies_when": {"any_signal": ["excess_inventory_signal"]},
+      "ask": "Overstock unit at liquidation pricing with freight included."
+    },
+    {
+      "key": "customer_cancellation",
+      "rank": 9,
+      "label": "Customer-cancelled order",
+      "requires_human_approval": true,
+      "applies_when": {"any_signal": ["excess_inventory_signal", "existing_denago_relationship"]},
+      "ask": "Any cancelled/refused order sitting unsold — taken off their hands at cost."
+    },
+    {
+      "key": "cosmetic_blemish",
+      "rank": 10,
+      "label": "Cosmetic-blemish / freight-damaged unit",
+      "requires_human_approval": true,
+      "applies_when": {"any_signal": ["excess_inventory_signal"]},
+      "ask": "Cosmetically blemished or freight-damaged unit that is mechanically sound — cosmetics are acceptable for an evaluation unit.",
+      "note": "Strong angle: blemished units are hard for them to retail but perfectly serviceable as a demo, so the discount can be extreme."
+    },
+    {
+      "key": "discounted_dealer_sample",
+      "rank": 11,
+      "label": "Deeply discounted dealer sample",
+      "requires_human_approval": true,
+      "applies_when": {"any_signal": ["manufacturer_or_distributor", "wholesale_operation"]},
+      "ask": "Single sample unit at sample pricing to validate quality before a container/stocking order.",
+      "note": "Common structure with overseas manufacturers: sample price is often credited on the first container order — always ask for that credit in writing."
+    },
+    {
+      "key": "retail_purchase",
+      "rank": 12,
+      "label": "Retail purchase — final fallback only",
+      "requires_human_approval": true,
+      "approval_reason": "Full out-of-pocket cost. Contradicts the campaign objective; only valid once all other channels are documented as exhausted.",
+      "applies_when": {"always": true},
+      "blocked_until": "All strategies ranked 1-11 have been attempted or ruled out with recorded evidence for this target.",
+      "note": "The engine will not select this automatically. It must be chosen by a human."
+    }
+  ],
+  "concession_ladder": {
+    "_comment": "Stage 9. When $0 landed is refused, walk DOWN this ladder, extracting the highest item still available. Never volunteer a lower rung before the higher one is explicitly refused.",
+    "items": [
+      {"rank": 1,  "key": "free_vehicle",        "label": "Vehicle at no cost"},
+      {"rank": 2,  "key": "free_freight",        "label": "Freight included"},
+      {"rank": 3,  "key": "full_first_order_credit", "label": "100% of unit cost credited to first order"},
+      {"rank": 4,  "key": "max_discount",        "label": "Maximum discount off dealer cost"},
+      {"rank": 5,  "key": "extended_warranty",   "label": "Extended warranty on the unit"},
+      {"rank": 6,  "key": "parts_package",       "label": "Parts package included"},
+      {"rank": 7,  "key": "battery_warranty",    "label": "Extended lithium battery warranty"},
+      {"rank": 8,  "key": "charger",             "label": "Charger included at no cost"},
+      {"rank": 9,  "key": "spare_parts",         "label": "Spare/consumable parts kit"},
+      {"rank": 10, "key": "marketing_support",   "label": "Marketing, display and POS support"}
+    ],
+    "rules": [
+      "Never claim a competing offer that does not exist.",
+      "Any market price cited must carry a source URL and retrieval date.",
+      "Never accept a paid offer automatically — every cost commitment goes to the human.",
+      "Trade only things actually within the profile's constraints (e.g. a first-order commitment requires constraints.willing_to_commit_first_order = true).",
+      "If the counterparty asks for payment before any verification, stop and flag the target."
+    ]
+  }
+}

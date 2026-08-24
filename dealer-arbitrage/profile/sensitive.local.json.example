@@ -1,0 +1,8 @@
+{
+  "_comment": "Copy to sensitive.local.json (gitignored) and fill in ONLY these identifiers. NEVER put passwords, card numbers, bank accounts, or an SSN in here — the loader refuses to carry them and no form-fill path will transmit them.",
+  "ein": null,
+  "state_tax_id": null,
+  "sales_tax_permit_number": null,
+  "business_license_number": null,
+  "state_dealer_license_number": null
+}

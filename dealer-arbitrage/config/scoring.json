@@ -1,0 +1,333 @@
+{
+  "_comment": "Stage 3 scoring model, 0-100. Data-driven so weights can be tuned without touching code. EVERY positive signal requires a sources row (Stage 13) or it contributes 0 \u2014 an unevidenced belief is worth nothing.",
+  "version": 1,
+  "base_score": 0,
+  "clamp": {
+    "min": 0,
+    "max": 100
+  },
+  "positive_signals": {
+    "existing_denago_relationship": {
+      "weight": 18,
+      "label": "Sells or has sold Denago product",
+      "requires_evidence": true,
+      "evidence_claim": "denago_relationship",
+      "detect": {
+        "any_text": [
+          "denago"
+        ],
+        "in": [
+          "products",
+          "website_text",
+          "inventory"
+        ]
+      }
+    },
+    "manufacturer_or_distributor": {
+      "weight": 15,
+      "label": "Is a manufacturer or distributor (source of supply, not a reseller)",
+      "requires_evidence": true,
+      "evidence_claim": "company_type",
+      "detect": {
+        "company_type_in": [
+          "manufacturer",
+          "distributor"
+        ]
+      }
+    },
+    "dealer_development_program": {
+      "weight": 14,
+      "label": "Published dealer / dealer-development program",
+      "requires_evidence": true,
+      "evidence_claim": "dealer_program",
+      "detect": {
+        "any_text": [
+          "become a dealer",
+          "dealer application",
+          "dealer program",
+          "dealer inquiry",
+          "wholesale application",
+          "become a partner"
+        ]
+      }
+    },
+    "published_demo_program": {
+      "weight": 13,
+      "label": "Published demo / evaluation / loaner unit program",
+      "requires_evidence": true,
+      "evidence_claim": "demo_program",
+      "detect": {
+        "any_text": [
+          "demo program",
+          "demo unit",
+          "evaluation unit",
+          "loaner",
+          "sample unit",
+          "showroom unit program"
+        ]
+      }
+    },
+    "wholesale_operation": {
+      "weight": 11,
+      "label": "Sells wholesale / dealer pricing available",
+      "requires_evidence": true,
+      "evidence_claim": "wholesale",
+      "detect": {
+        "any_text": [
+          "wholesale",
+          "dealer pricing",
+          "dealer cost",
+          "b2b",
+          "trade pricing",
+          "moq"
+        ]
+      }
+    },
+    "texas_location": {
+      "weight": 10,
+      "label": "Located in Texas (low freight, easy in-person pickup)",
+      "requires_evidence": false,
+      "detect": {
+        "state_in": [
+          "TX"
+        ]
+      }
+    },
+    "dfw_proximity": {
+      "weight": 8,
+      "label": "Within DFW metro (pickup feasible, freight avoidable)",
+      "requires_evidence": false,
+      "detect": {
+        "distance_miles_lte": 75
+      }
+    },
+    "existing_nomad_xl_inventory": {
+      "weight": 9,
+      "label": "Has Nomad XL (or target model) in stock now",
+      "requires_evidence": true,
+      "evidence_claim": "target_model_inventory",
+      "detect": {
+        "any_text": [
+          "nomad xl",
+          "nomad-xl"
+        ]
+      }
+    },
+    "excess_inventory_signal": {
+      "weight": 8,
+      "label": "Excess / overstock / clearance inventory advertised",
+      "requires_evidence": true,
+      "evidence_claim": "excess_inventory",
+      "detect": {
+        "any_text": [
+          "clearance",
+          "overstock",
+          "excess inventory",
+          "blowout",
+          "liquidation",
+          "must go",
+          "closeout"
+        ]
+      }
+    },
+    "previous_model_year_signal": {
+      "weight": 7,
+      "label": "Previous-model-year units advertised",
+      "requires_evidence": true,
+      "evidence_claim": "previous_model_year",
+      "detect": {
+        "any_text": [
+          "previous model year",
+          "prior year",
+          "non-current",
+          "leftover",
+          "last year's model"
+        ]
+      }
+    },
+    "dealer_to_dealer_evidence": {
+      "weight": 7,
+      "label": "Evidence of dealer-to-dealer / inventory transfer sales",
+      "requires_evidence": true,
+      "evidence_claim": "dealer_to_dealer",
+      "detect": {
+        "any_text": [
+          "dealer to dealer",
+          "dealer transfer",
+          "inventory transfer",
+          "dealer trade"
+        ]
+      }
+    },
+    "clear_contact_information": {
+      "weight": 6,
+      "label": "Named human contact with direct email or direct line",
+      "requires_evidence": false,
+      "detect": {
+        "has_named_contact_with_channel": true
+      }
+    },
+    "responsive_history": {
+      "weight": 4,
+      "label": "Has already responded to us at least once",
+      "requires_evidence": false,
+      "detect": {
+        "response_count_gte": 1
+      }
+    }
+  },
+  "penalties": {
+    "retail_only": {
+      "weight": -14,
+      "label": "Retail-only operation, no wholesale/dealer channel",
+      "detect": {
+        "wholesale_status_in": [
+          "retail_only"
+        ]
+      }
+    },
+    "no_identifiable_contact": {
+      "weight": -16,
+      "label": "No email, no phone, no form \u2014 nobody to reach",
+      "detect": {
+        "has_no_contact_channel": true
+      }
+    },
+    "no_dealer_or_wholesale_program": {
+      "weight": -9,
+      "label": "No dealer, demo or wholesale program found",
+      "detect": {
+        "no_program_signals": true
+      }
+    },
+    "no_relevant_inventory_evidence": {
+      "weight": -8,
+      "label": "No evidence of relevant lithium / 6-passenger inventory",
+      "detect": {
+        "no_relevant_products": true
+      }
+    },
+    "high_freight_cost": {
+      "weight": -12,
+      "label": "Freight estimate exceeds the campaign's freight ceiling",
+      "detect": {
+        "freight_estimate_cents_gt": 90000
+      },
+      "scaled": true,
+      "scale_note": "-4 per additional $500 of freight above the ceiling, floored at -20"
+    },
+    "unclear_company_identity": {
+      "weight": -15,
+      "label": "Cannot establish who the company actually is",
+      "detect": {
+        "identity_verified": 0,
+        "and_any": [
+          "no_physical_address",
+          "no_registered_entity",
+          "generic_email_only"
+        ]
+      }
+    },
+    "suspicious_website": {
+      "weight": -25,
+      "label": "Site shows scam markers (no address, stock-photo inventory, brand-new domain, prices far below market, wire-only payment)",
+      "detect": {
+        "risk_flags_any": [
+          "no_address",
+          "new_domain",
+          "price_too_good",
+          "wire_only",
+          "copied_content",
+          "no_https",
+          "stock_photos_only"
+        ]
+      }
+    },
+    "payment_before_verification": {
+      "weight": -30,
+      "label": "Requests payment/deposit before any verification \u2014 hard disqualifier candidate",
+      "detect": {
+        "risk_flags_any": [
+          "upfront_payment_request",
+          "deposit_before_docs"
+        ]
+      },
+      "auto_flag": "review_for_disqualification"
+    },
+    "opted_out": {
+      "weight": -100,
+      "label": "Contact asked not to be contacted \u2014 campaign over for this target",
+      "detect": {
+        "opted_out": true
+      },
+      "auto_disqualify": true
+    }
+  },
+  "probability_model": {
+    "_comment": "Coarse, transparent estimates. These are PRIORS for sequencing work, not predictions to quote to anyone. Every estimate carries a rationale string naming the signals that produced it.",
+    "p_demo": {
+      "base": 5,
+      "add": {
+        "manufacturer_or_distributor": 20,
+        "dealer_development_program": 20,
+        "published_demo_program": 30,
+        "existing_denago_relationship": 10,
+        "wholesale_operation": 10,
+        "texas_location": 5,
+        "responsive_history": 10
+      },
+      "cap": 90
+    },
+    "p_free_unit": {
+      "base": 2,
+      "add": {
+        "published_demo_program": 22,
+        "manufacturer_or_distributor": 14,
+        "dealer_development_program": 12,
+        "excess_inventory_signal": 10,
+        "previous_model_year_signal": 8,
+        "existing_denago_relationship": 6,
+        "dfw_proximity": 5,
+        "responsive_history": 8
+      },
+      "cap": 70,
+      "note": "A genuinely free unit is rare. Keep this pessimistic; the point is ranking, not optimism."
+    },
+    "p_credited_unit": {
+      "base": 8,
+      "add": {
+        "dealer_development_program": 25,
+        "manufacturer_or_distributor": 20,
+        "published_demo_program": 15,
+        "wholesale_operation": 12,
+        "existing_denago_relationship": 10,
+        "dealer_to_dealer_evidence": 8,
+        "responsive_history": 8
+      },
+      "cap": 85,
+      "note": "Credit-against-first-order is the single most achievable $0-net structure and should usually outrank free-unit chasing."
+    }
+  },
+  "tiers": [
+    {
+      "min": 80,
+      "label": "A \u2014 pursue immediately, personalized outreach + application"
+    },
+    {
+      "min": 60,
+      "label": "B \u2014 pursue this week"
+    },
+    {
+      "min": 40,
+      "label": "C \u2014 pursue after A/B, or if A/B stall"
+    },
+    {
+      "min": 20,
+      "label": "D \u2014 low priority, batch later"
+    },
+    {
+      "min": 0,
+      "label": "E \u2014 do not pursue without new evidence"
+    }
+  ]
+}

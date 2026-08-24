@@ -1,0 +1,175 @@
+{
+  "_meta": {
+    "purpose": "Single source of truth for every fact this agent is allowed to state about the business.",
+    "rules": [
+      "null means NOT PROVIDED. The agent must never invent, estimate, or infer a null field.",
+      "A null field required by a form or message BLOCKS that action and is raised as a human task.",
+      "Projections (inventory, volume) are forward-looking plans and MUST be labeled as plans, never as history.",
+      "Never add passwords, card numbers, bank account numbers, or auth cookies to this file.",
+      "Fields marked {\"$sensitive\": ...} keep their value in profile/sensitive.local.json (gitignored)."
+    ],
+    "schema_version": 1,
+    "last_reviewed_by": null,
+    "last_reviewed_at": null
+  },
+
+  "legal_name": null,
+  "owner_name": null,
+  "business_name": null,
+
+  "phone": null,
+  "email": null,
+  "website": null,
+  "social_profiles": {
+    "facebook": null,
+    "instagram": null,
+    "google_business_profile": null,
+    "linkedin": null,
+    "youtube": null,
+    "tiktok": null,
+    "marketplace_storefronts": []
+  },
+
+  "business_address": null,
+  "address_line_2": null,
+  "city": null,
+  "state": null,
+  "zip": null,
+  "county": null,
+  "territory": {
+    "primary_market": null,
+    "radius_miles": null,
+    "counties_served": [],
+    "cities_served": [],
+    "exclusivity_requested": false
+  },
+
+  "business_description": null,
+  "years_in_business": null,
+  "business_start_date": null,
+  "entity_formed_state": null,
+
+  "current_products": [],
+  "desired_products": [
+    {
+      "brand": "Denago",
+      "model": "Nomad XL",
+      "priority": 1,
+      "notes": "Primary target. Equivalent Denago/Tao lithium 6-passenger models acceptable."
+    }
+  ],
+  "acceptable_substitutes": [
+    "Denago lithium models (any current or previous model year)",
+    "Tao Motor lithium models",
+    "Equivalent 6-passenger lithium golf carts from other manufacturers"
+  ],
+  "acceptable_unit_conditions": [
+    "manufacturer evaluation unit",
+    "distributor demo",
+    "dealer demo transfer",
+    "previous model year",
+    "excess inventory",
+    "customer cancellation",
+    "cosmetic blemish",
+    "factory sample"
+  ],
+
+  "projected_initial_inventory": {
+    "units": null,
+    "basis": null,
+    "timeframe": null,
+    "is_projection": true
+  },
+  "projected_annual_volume": {
+    "units": null,
+    "basis": null,
+    "is_projection": true
+  },
+
+  "service_capabilities": {
+    "in_house_service": null,
+    "technicians": null,
+    "certifications": [],
+    "warranty_work_capable": null,
+    "battery_lithium_service": null,
+    "mobile_service": null,
+    "parts_inventory": null
+  },
+
+  "storefront_description": null,
+  "display_area": {
+    "type": null,
+    "square_feet": null,
+    "indoor_units_displayable": null,
+    "outdoor_units_displayable": null,
+    "secured": null,
+    "covered": null,
+    "photos_available": false
+  },
+
+  "marketing_channels": [],
+
+  "shipping_capability": {
+    "receiving_method": null,
+    "forklift": null,
+    "loading_dock": null,
+    "liftgate_required": null,
+    "freight_accessible": null,
+    "can_receive_ltl": null,
+    "can_receive_full_truckload": null,
+    "preferred_freight_terms": null
+  },
+
+  "dealer_status": {
+    "denago_authorized_dealer": false,
+    "denago_application_submitted": false,
+    "denago_application_date": null,
+    "other_authorized_brands": [],
+    "note": "This agent must never assert dealer/distributor/partner status unless the corresponding flag here is true AND an approval record exists."
+  },
+
+  "licenses": {
+    "business_license": {"held": false, "number": {"$sensitive": "business_license_number"}, "issuer": null, "expires": null},
+    "state_dealer_license": {"held": false, "number": {"$sensitive": "state_dealer_license_number"}, "issuer": null, "expires": null, "required_for_lsv": null},
+    "sales_tax_permit": {"held": false, "number": {"$sensitive": "sales_tax_permit_number"}, "issuer": null, "expires": null},
+    "dba_registration": {"held": false, "number": null, "issuer": null, "expires": null},
+    "liability_insurance": {"held": false, "carrier": null, "coverage_amount": null, "expires": null},
+    "garage_keepers_insurance": {"held": false, "carrier": null, "coverage_amount": null, "expires": null}
+  },
+
+  "tax_information": {
+    "entity_type": null,
+    "ein": {"$sensitive": "ein"},
+    "state_tax_id": {"$sensitive": "state_tax_id"},
+    "resale_certificate_on_file": false,
+    "w9_on_file": false,
+    "tax_exempt_for_resale": null
+  },
+
+  "banking_and_credit": {
+    "note": "NEVER store account numbers, card numbers, or routing numbers here or in sensitive.local.json. Record only whether a reference exists; the human supplies the value directly to the counterparty.",
+    "trade_references_available": false,
+    "bank_reference_available": false,
+    "floor_plan_financing": null,
+    "credit_application_willing": null
+  },
+
+  "photos": [],
+  "documents": [],
+
+  "references": {
+    "note": "Never fabricate references. Only list real, contactable parties who have agreed to be listed.",
+    "trade": [],
+    "customer": []
+  },
+
+  "constraints": {
+    "max_out_of_pocket_cents": 0,
+    "max_freight_cents": 0,
+    "willing_to_pay_freight": false,
+    "willing_to_split_freight": false,
+    "willing_to_commit_first_order": null,
+    "first_order_units_willing": null,
+    "note": "max_out_of_pocket_cents = 0 encodes the $0 landed-cost objective. Any offer above this requires explicit human approval."
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "_comment": "Stage 2. The research plan. Queries are grouped so a run can target one channel (/find-denago) or the whole board (/dealer-research). {city}/{state}/{metro} are filled from config/settings.json campaign.home_market. Queries with a null-valued placeholder are skipped and reported, never guessed.",
+  "version": 1,
+  "placeholders": {
+    "state": "campaign.home_market.state",
+    "city": "campaign.home_market.city",
+    "metro": "campaign.home_market.metro"
+  },
+  "groups": {
+    "denago_core": {
+      "label": "Denago brand channel",
+      "priority": 1,
+      "expected_company_types": ["manufacturer", "distributor", "dealer"],
+      "queries": [
+        "Denago dealers",
+        "Denago EV dealer locator",
+        "Denago distributors",
+        "Denago dealer application",
+        "become a Denago dealer",
+        "Denago wholesale",
+        "Denago Nomad XL dealers",
+        "Denago Nomad XL demo units",
+        "Denago clearance inventory",
+        "Denago previous model year inventory",
+        "Denago dealer demos",
+        "Denago excess inventory",
+        "Denago factory samples",
+        "Denago EV corporate contact sales",
+        "Denago dealer development program"
+      ]
+    },
+    "tao_motor": {
+      "label": "Tao Motor channel",
+      "priority": 2,
+      "expected_company_types": ["manufacturer", "distributor", "dealer"],
+      "queries": [
+        "Tao Motor dealers",
+        "Tao Motor dealer application",
+        "Tao Motor distributors",
+        "Tao Motor golf cart wholesale",
+        "TaoTao golf cart dealer program",
+        "Tao Motor demo unit dealer"
+      ]
+    },
+    "geographic": {
+      "label": "Home-state and metro channel",
+      "priority": 1,
+      "expected_company_types": ["dealer", "wholesaler", "distributor"],
+      "queries": [
+        "{state} Denago dealers",
+        "Texas Denago dealers",
+        "Texas golf cart wholesalers",
+        "DFW golf cart wholesalers",
+        "{metro} golf cart wholesalers",
+        "{state} golf cart distributors",
+        "{city} golf cart dealers",
+        "Dallas Fort Worth golf cart distributor",
+        "Texas LSV distributor wholesale",
+        "{state} golf cart dealer auction"
+      ]
+    },
+    "supply_side": {
+      "label": "Upstream supply — manufacturers and importers",
+      "priority": 2,
+      "expected_company_types": ["manufacturer", "distributor"],
+      "queries": [
+        "Chinese lithium golf cart manufacturers",
+        "six passenger lithium golf cart manufacturers",
+        "U.S. golf cart distributors",
+        "lithium golf cart OEM dealer program",
+        "golf cart manufacturer looking for US dealers",
+        "6 seater lithium golf cart wholesale supplier",
+        "golf cart importer wholesale United States",
+        "LSV manufacturer dealer inquiry"
+      ]
+    },
+    "zero_dollar_signals": {
+      "label": "Direct free/demo/credited-unit signals",
+      "priority": 1,
+      "expected_company_types": ["manufacturer", "distributor", "dealer", "wholesaler"],
+      "note": "Highest-yield group for the campaign objective. Run these every cycle.",
+      "queries": [
+        "golf cart manufacturer demo unit program dealers",
+        "golf cart dealer demo program free unit",
+        "golf cart evaluation unit dealer development",
+        "demo unit credited toward first order golf cart",
+        "golf cart dealer sample credited first container order",
+        "golf cart dealer floor model program",
+        "golf cart overstock clearance dealer",
+        "golf cart cancelled order for sale dealer",
+        "freight damaged golf cart for sale dealer",
+        "blemished golf cart closeout",
+        "non-current golf cart inventory dealer cost"
+      ]
+    },
+    "trade_channels": {
+      "label": "Trade shows, dealer networks and B2B marketplaces",
+      "priority": 3,
+      "expected_company_types": ["marketplace", "distributor", "wholesaler"],
+      "queries": [
+        "golf cart dealer trade show exhibitor list",
+        "PGA Show golf cart exhibitors dealer",
+        "golf car dealer association members",
+        "golf cart B2B wholesale marketplace",
+        "powersports dealer expo golf cart exhibitors"
+      ]
+    }
+  },
+  "collect_per_target": [
+    "company", "website", "location", "phone", "email", "contact_person", "role",
+    "products", "dealer_status", "wholesale_status", "evidence", "source_url",
+    "estimated_relevance", "p_demo", "p_free_unit", "p_credited_unit"
+  ],
+  "evidence_rules": {
+    "required_for": ["dealer_status", "wholesale_status", "products", "has_demo_program", "has_dealer_program", "pricing"],
+    "must_capture": ["source_url", "quoted_text", "retrieved_at"],
+    "note": "If a fact cannot be quoted from a retrievable source, it is recorded as 'unknown' — never as a soft assumption."
+  },
+  "vetting_checklist": {
+    "_comment": "Run before a target is promoted past 'discovered'. Feeds the suspicious_website / unclear_company_identity penalties.",
+    "checks": [
+      "Physical address present and plausible (not a mail drop or residential-only)",
+      "Domain age and WHOIS consistency",
+      "Phone answers / is a real business line",
+      "Business registered with a Secretary of State (or foreign equivalent)",
+      "Inventory photos are original, not stock or copied from another dealer",
+      "Prices are within a plausible band of market — far-below-market is a scam marker",
+      "Payment terms: wire-only or crypto-only is a hard flag",
+      "Reviews / BBB / complaint history",
+      "For overseas suppliers: verified supplier status, audit reports, trade assurance"
+    ]
+  }
+}

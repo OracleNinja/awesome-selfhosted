@@ -1,0 +1,105 @@
+{
+  "_comment": "Autonomy and safety switches. Everything that touches the outside world is OFF by default and can only be enabled by a human editing this file.",
+  "campaign": {
+    "objective": "Acquire one golf cart evaluation/demo unit at $0 landed cost.",
+    "primary_product": "Denago Nomad XL",
+    "home_market": {
+      "city": null,
+      "state": null,
+      "zip": null,
+      "metro": null,
+      "metro_cities": [],
+      "_comment": "metro_cities: nearby city names that count as pickup-distance for the dfw_proximity signal (e.g. Dallas, Fort Worth, Arlington, Plano). Leave empty until the home market is set."
+    },
+    "target_landed_cost_cents": 0,
+    "stop_conditions": [
+      "A $0 landed-cost evaluation unit is secured and human-approved.",
+      "All credible free-unit channels are exhausted and the best fallback offer is documented."
+    ]
+  },
+  "autonomy": {
+    "autonomous_sending_enabled": false,
+    "autonomous_sending_allowlist": [],
+    "autonomous_followups_enabled": false,
+    "auto_submit_applications": false,
+    "auto_accept_offers": false,
+    "auto_purchase": false,
+    "_comment": "auto_submit_applications, auto_accept_offers and auto_purchase are hard-wired OFF in code. Setting them true here has no effect; the code refuses.",
+    "max_new_outreach_per_day": 8,
+    "max_touches_per_company": 5,
+    "min_hours_between_touches": 48
+  },
+  "approval": {
+    "required_for": [
+      "outreach",
+      "followup",
+      "application_submission",
+      "offer_acceptance",
+      "purchase",
+      "any_cost_commitment"
+    ],
+    "commands": {
+      "approve": "APPROVE SEND",
+      "edit": "EDIT",
+      "cancel": "CANCEL"
+    },
+    "approver": null,
+    "_comment": "approver is recorded on every approval row. Set it to the human's name/handle."
+  },
+  "security": {
+    "never_store": [
+      "passwords",
+      "credit_card_numbers",
+      "bank_account_numbers",
+      "auth_cookies",
+      "ssn"
+    ],
+    "pause_on": [
+      "login_required",
+      "captcha",
+      "identity_verification",
+      "payment_authorization",
+      "e_signature",
+      "mfa_challenge"
+    ],
+    "browser_automation": {
+      "enabled": true,
+      "submit_allowed": false,
+      "screenshot_before_submit": true,
+      "respect_robots_txt": true,
+      "allowed_domains": [],
+      "_comment": "allowed_domains empty = agent must ask before automating any new domain. submit_allowed is enforced OFF in code."
+    },
+    "outreach_hygiene": {
+      "honor_opt_out": true,
+      "business_contacts_only": true,
+      "no_scraped_personal_emails": true,
+      "identify_as_prospective_dealer": true,
+      "disclose_ai_assistance_if_asked": true
+    }
+  },
+  "followups": {
+    "schedule_days": [
+      3,
+      7,
+      14,
+      30
+    ],
+    "require_new_angle": true,
+    "stop_after_days": 45,
+    "stop_on": [
+      "rejection",
+      "opt_out",
+      "won"
+    ]
+  },
+  "scoring": {
+    "config_file": "config/scoring.json"
+  },
+  "strategies": {
+    "config_file": "config/strategies.json"
+  },
+  "discovery": {
+    "config_file": "config/search_queries.json"
+  }
+}
