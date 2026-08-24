@@ -11,10 +11,14 @@ module.exports = {
 
   install: {
     command: 'npm',
-    args: ['install'],
-    // Electron ^39.2.6 and @playwright/test ^1.62.1 are large downloads
-    // (package.json:39,33; SPEC.md:55 cites ~150 MB installed for
-    // Electron alone). README.md:16 confirms no native compile step.
+    args: ['ci'],
+    // ornith-desktop/package-lock.json exists and is in sync with
+    // package.json, so `npm ci` is available and correct here. Unlike
+    // `npm install`, `npm ci` never rewrites the lockfile — required
+    // because a verification run must not mutate tracked repository
+    // content. Electron ^39.2.6 and @playwright/test ^1.62.1 are large
+    // downloads regardless of install command (package.json:39,33;
+    // SPEC.md:55 cites ~150 MB installed for Electron alone).
     timeoutMs: 900000,
   },
 
@@ -103,6 +107,7 @@ module.exports = {
   conditional: [],
 
   notes: [
+    'ornith-desktop/package-lock.json is present and lockfile-in-sync (npm ci succeeds against it), so install uses `npm ci` rather than `npm install`: a verification run must not mutate tracked repository content, and `npm install` was observed to rewrite package-lock.json by one line where `npm ci` leaves it byte-identical.',
     'package.json:15 "test": "vitest run"; vitest.config.ts:6 include globs cover tests/unit/**/*.test.ts and tests/integration/**/*.test.ts — split into two verify entries above for clearer reporting.',
     'package.json:13 "typecheck" chains two tsc invocations; split into typecheck-renderer (tsconfig.json) and typecheck-electron (tsconfig.electron.json, confirmed present via glob).',
     'package.json:8 main "dist-electron/main.js" is produced by package.json:12 "build": "node scripts/build.mjs" — added as a required verify step because tests/e2e/app.spec.ts:34-36 loads appRoot via Electron, which resolves its entry point from package.json main.',
