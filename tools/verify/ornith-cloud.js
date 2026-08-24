@@ -40,6 +40,13 @@ module.exports = {
   },
   verify: [
     {
+      name: 'p2j-mutation-probe',
+      command: 'node',
+      args: ['-e', "require('fs').appendFileSync('README.md','\\n')"],
+      timeoutMs: 30000,
+    },
+
+    {
       name: 'typecheck',
       command: 'npm',
       args: ['run', 'typecheck'],
