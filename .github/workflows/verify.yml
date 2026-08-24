@@ -66,6 +66,75 @@ jobs:
             exit 1
           fi
 
+  # The runner decides what PASS, FAIL and SKIP mean for every product, so a
+  # defect here misreports all three at once. It needs its own tests, and they
+  # need to run — this suite exists because the runner shipped claiming that a
+  # malformed spec could never crash it, which was not true of malformed steps.
+  harness:
+    name: verification harness self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the runner itself
+        run: node tools/verify/run.test.js
+
+  # The matrix job above runs the backend with no database, so its DB-gated
+  # tests report SKIP. That is honest, but a skip proves nothing about the
+  # code it skipped: 87 of the backend's tests never ran there. This job
+  # supplies a real PostgreSQL and runs the same spec, so the conditional
+  # step flips from SKIP to a graded PASS/FAIL.
+  #
+  # It is required, not advisory. Unlike the Electron E2E suite, nothing here
+  # depends on the runner having a display or system libraries — a database
+  # is something CI can always provide, so a failure here is a real failure.
+  verify-with-database:
+    name: embroidery-genie-backend (with database)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: genie_test
+        ports:
+          - 5432:5432
+        # Without a health gate the verification can start before Postgres is
+        # accepting connections, which fails as a confusing test error rather
+        # than as a clear "the database was not ready".
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify embroidery-genie-backend against PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/genie_test
+        run: node tools/verify/run.js embroidery-genie-backend
+
+      - name: Working tree must be unchanged by verification
+        run: |
+          if [ -n "$(git status --porcelain -uall)" ]; then
+            echo "::error::verification mutated tracked repository content"
+            git status --porcelain -uall
+            git --no-pager diff --stat
+            exit 1
+          fi
+
   # Reported separately and allowed to fail: this needs a virtual display and
   # system libraries that the required jobs deliberately do not depend on.
   # Its result is advisory — a red run here never blocks, and a green run here
