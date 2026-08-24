@@ -54,6 +54,23 @@ function parseArgs(argv) {
   return out;
 }
 
+/** Steps need checking too, not just the spec around them. A step with no
+ *  command crashed the runner outright — spawnSync rejects a non-string —
+ *  and a step with no name printed "PASS undefined", both while the
+ *  file-level checks below happily reported the spec as well-formed. */
+function stepProblems(step, key, index) {
+  const at = `${key}[${index}]`;
+  if (!step || typeof step !== 'object') return [`${at} is not an object`];
+  const problems = [];
+  if (typeof step.name !== 'string' || !step.name) problems.push(`${at} is missing name`);
+  if (typeof step.command !== 'string' || !step.command) problems.push(`${at} is missing command`);
+  if (step.args !== undefined) {
+    if (!Array.isArray(step.args)) problems.push(`${at} args is not an array`);
+    else if (step.args.some(a => typeof a !== 'string')) problems.push(`${at} args contains a non-string`);
+  }
+  return problems;
+}
+
 /** A malformed spec is a reportable failure, never a crash. */
 function loadSpec(file) {
   let spec;
@@ -68,7 +85,17 @@ function loadSpec(file) {
     if (typeof spec.id !== 'string' || !spec.id) problems.push('missing id');
     if (typeof spec.dir !== 'string' || !spec.dir) problems.push('missing dir');
     for (const key of ['verify', 'optional', 'conditional']) {
-      if (spec[key] !== undefined && !Array.isArray(spec[key])) problems.push(`${key} is not an array`);
+      if (spec[key] === undefined) continue;
+      if (!Array.isArray(spec[key])) { problems.push(`${key} is not an array`); continue; }
+      spec[key].forEach((step, i) => problems.push(...stepProblems(step, key, i)));
+    }
+    if (spec.install !== undefined) {
+      if (!spec.install || typeof spec.install !== 'object') problems.push('install is not an object');
+      else {
+        // install is named by the caller, so it needs a command but not a name.
+        if (typeof spec.install.command !== 'string' || !spec.install.command) problems.push('install is missing command');
+        if (spec.install.args !== undefined && !Array.isArray(spec.install.args)) problems.push('install args is not an array');
+      }
     }
   }
   if (problems.length) return { error: `${path.basename(file)}: ${problems.join('; ')}` };
@@ -225,5 +252,7 @@ function strip(r) {
     outputTail: r.output.trim().split('\n').slice(-10).join('\n'),
   };
 }
+
+module.exports = { loadSpec, stepProblems };
 
 if (require.main === module) main();
