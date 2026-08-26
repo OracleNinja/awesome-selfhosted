@@ -52,7 +52,27 @@ jobs:
           python-version: '3.11'
 
       - name: Verify ${{ matrix.project }}
-        run: node tools/verify/run.js ${{ matrix.project }}
+        run: |
+          set -o pipefail
+          node tools/verify/run.js ${{ matrix.project }} 2>&1 | tee "$RUNNER_TEMP/verify.log"
+
+      # Presentation only — it runs no verification of its own and never
+      # changes the job's outcome. Without it the evidence exists solely in
+      # the raw log, and a reviewer cannot answer "what actually ran?" from
+      # the checks page.
+      - name: Publish what was verified
+        if: always()
+        run: |
+          {
+            echo "### $JOB_LABEL"
+            echo ''
+            echo '```text'
+            grep -E '^  (PASS|FAIL|SKIP|WARN) |^  steps:|^  tests:|^ +[0-9]+ (executed )?step' \
+              "$RUNNER_TEMP/verify.log" || echo '(no evidence lines captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          JOB_LABEL: Verify ${{ matrix.project }}
 
       # A verification run must not rewrite tracked files. If it did, the
       # result is not trustworthy: the thing that was verified is no longer
@@ -124,7 +144,21 @@ jobs:
       - name: Verify embroidery-genie-backend against PostgreSQL
         env:
           TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/genie_test
-        run: node tools/verify/run.js embroidery-genie-backend
+        run: |
+          set -o pipefail
+          node tools/verify/run.js embroidery-genie-backend 2>&1 | tee "$RUNNER_TEMP/verify.log"
+
+      - name: Publish what was verified
+        if: always()
+        run: |
+          {
+            echo '### embroidery-genie-backend (with database)'
+            echo ''
+            echo '```text'
+            grep -E '^  (PASS|FAIL|SKIP|WARN) |^  steps:|^  tests:|^ +[0-9]+ (executed )?step' \
+              "$RUNNER_TEMP/verify.log" || echo '(no evidence lines captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Working tree must be unchanged by verification
         run: |
@@ -151,4 +185,19 @@ jobs:
       - name: Install a virtual display
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Run optional steps under Xvfb
-        run: xvfb-run -a node tools/verify/run.js ornith-desktop --with-optional
+        run: |
+          set -o pipefail
+          xvfb-run -a node tools/verify/run.js ornith-desktop --with-optional 2>&1 \
+            | tee "$RUNNER_TEMP/verify.log"
+
+      - name: Publish what was verified
+        if: always()
+        run: |
+          {
+            echo '### ornith-desktop e2e (optional)'
+            echo ''
+            echo '```text'
+            grep -E '^  (PASS|FAIL|SKIP|WARN) |^  steps:|^  tests:|^ +[0-9]+ (executed )?step' \
+              "$RUNNER_TEMP/verify.log" || echo '(no evidence lines captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
