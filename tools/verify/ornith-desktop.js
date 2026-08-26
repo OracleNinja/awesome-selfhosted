@@ -20,6 +20,9 @@ module.exports = {
     // downloads regardless of install command (package.json:39,33;
     // SPEC.md:55 cites ~150 MB installed for Electron alone).
     timeoutMs: 900000,
+    // `npm ci` installs dependencies; it runs no tests and writes no
+    // test-result artifact of any kind.
+    count: { strategy: 'none', reason: 'dependency install, not a test runner' },
   },
 
   verify: [
@@ -32,6 +35,9 @@ module.exports = {
       command: 'npm',
       args: ['run', 'build'],
       timeoutMs: 180000,
+      // scripts/build.mjs (package.json:12) compiles renderer + electron
+      // output; it produces build artifacts, not test results.
+      count: { strategy: 'none', reason: 'build step, not a test runner' },
     },
     {
       // First half of package.json:13 typecheck script (renderer +
@@ -40,6 +46,9 @@ module.exports = {
       command: 'npx',
       args: ['tsc', '--noEmit'],
       timeoutMs: 120000,
+      // tsc --noEmit type-checks only; it has no notion of tests and
+      // writes no result artifact.
+      count: { strategy: 'none', reason: 'typecheck, not a test runner' },
     },
     {
       // Second half of package.json:13: "tsc --noEmit -p
@@ -48,6 +57,9 @@ module.exports = {
       command: 'npx',
       args: ['tsc', '--noEmit', '-p', 'tsconfig.electron.json'],
       timeoutMs: 120000,
+      // Same tool as typecheck-renderer, different project file; still
+      // no test concept, no result artifact.
+      count: { strategy: 'none', reason: 'typecheck, not a test runner' },
     },
     {
       // package.json:14 "lint": "eslint .". Plain Node, no Electron
@@ -56,6 +68,9 @@ module.exports = {
       command: 'npx',
       args: ['eslint', '.'],
       timeoutMs: 120000,
+      // eslint . (package.json:14) reports lint violations, not test
+      // counts; no machine-readable test artifact exists.
+      count: { strategy: 'none', reason: 'lint, not a test runner' },
     },
     {
       // package.json:15 "test": "vitest run"; vitest.config.ts:6 include
@@ -67,6 +82,10 @@ module.exports = {
       command: 'npx',
       args: ['vitest', 'run', 'tests/unit'],
       timeoutMs: 60000,
+      // Invokes vitest directly via npx (no npm-script wrapper), so the
+      // runner's appended --reporter/--outputFile flags reach the vitest
+      // CLI unmodified.
+      count: { strategy: 'vitest-json' },
     },
     {
       // Same vitest config; tests/integration/client.test.ts and
@@ -77,6 +96,9 @@ module.exports = {
       command: 'npx',
       args: ['vitest', 'run', 'tests/integration'],
       timeoutMs: 60000,
+      // Same tool, same direct npx invocation as unit — no wrapper in
+      // the way of appended flags.
+      count: { strategy: 'vitest-json' },
     },
   ],
 
@@ -101,6 +123,11 @@ module.exports = {
         "container; Electron additionally needs GTK/NSS/ATK/Mesa system " +
         "libraries npm install does not provide. Cannot be assumed to " +
         "run here — report SKIP, never PASS, if it does not.",
+      // Invokes playwright directly via npx (no npm-script wrapper);
+      // playwright.config.ts:11 sets reporter: [['list']] as a config
+      // default, but a CLI --reporter flag overrides it, so the
+      // runner's appended --reporter=list,json still lands as intended.
+      count: { strategy: 'playwright-json' },
     },
   ],
 
@@ -115,5 +142,6 @@ module.exports = {
     'All non-install commands invoke local devDependency binaries via npx (typescript ^5.9.3 package.json:44, eslint ^10.8.1 package.json:42, vitest ^3.2.7 package.json:47, @playwright/test ^1.62.1 package.json:33) rather than assuming global installs.',
     'No conditional checks: nothing here genuinely depends on an optional env var — tests/integration and tests/e2e both use a stub Ollama server (tests/integration/stubOllama.ts), never a real Ollama instance, so there is no "runs only if X is configured" case to encode.',
     'Not established: whether this verification container has network egress sufficient for the Electron download (SPEC.md:55: ~150 MB installed), or whether Xvfb / GTK-NSS-ATK-Mesa libraries needed for the optional e2e step are present.',
+    'count strategies: unit and integration both run `npx vitest run <dir>` directly (package.json:15) with no npm-script wrapper between the spec and the binary, so the runner\'s appended --reporter/--outputFile flags reach vitest unmodified — both use count: { strategy: \'vitest-json\' }. e2e-electron runs `npx playwright test` directly (package.json:18); playwright.config.ts:11 sets reporter: [[\'list\']] but a CLI --reporter flag overrides a config default, so the runner\'s appended --reporter=list,json plus PLAYWRIGHT_JSON_OUTPUT_NAME still take effect — count: { strategy: \'playwright-json\' }. install (npm ci), build (node scripts/build.mjs, package.json:12), typecheck-renderer/typecheck-electron (tsc --noEmit, package.json:13), and lint (eslint ., package.json:14) are not test runners and produce no test-result artifact of any kind, so each declares count: { strategy: \'none\', reason: ... } rather than rendering as UNKNOWN.',
   ],
 };
