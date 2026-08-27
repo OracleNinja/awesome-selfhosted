@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import MessageList from './components/MessageList';
 import Composer, { type ComposerHandle } from './components/Composer';
@@ -10,6 +11,9 @@ import { useStreamBuffer } from './lib/useStreamBuffer';
 import { useVoiceInput } from './lib/useVoiceInput';
 import { speakableText } from '../shared/speakable';
 import type { VoiceCapabilities } from '../shared/voice';
+// SNIPPET_MATCH_OPEN/CLOSE are runtime values (private-use code points), not
+// types, so they need a normal import alongside the `import type` below.
+import { SNIPPET_MATCH_OPEN, SNIPPET_MATCH_CLOSE } from '../shared/types';
 import type {
   ChatMessage,
   Conversation,
@@ -18,12 +22,52 @@ import type {
   ExportFormat,
   OllamaStatus,
   PublicSettings,
+  SearchResult,
   StreamState,
 } from '../shared/types';
 
 interface ActiveStream {
   requestId: string;
   messageId: string | null;
+}
+
+// Debounced rather than fired per keystroke: FTS5 queries are cheap, but
+// there is no reason to hit the store on every character while someone is
+// still typing a word.
+const SEARCH_DEBOUNCE_MS = 300;
+
+const searchTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+function formatSearchTimestamp(createdAt: number): string {
+  return searchTimeFormatter.format(new Date(createdAt));
+}
+
+/**
+ * `SearchHit.snippet` wraps matched runs in SNIPPET_MATCH_OPEN/CLOSE, which
+ * are private-use code points rather than markup (see shared/types.ts). This
+ * splits on them and renders plain text nodes with matched runs wrapped in
+ * <mark> — never dangerouslySetInnerHTML — so a conversation's own text can
+ * never inject markup here, no matter what it contains.
+ */
+function renderSnippet(snippet: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const segments = snippet.split(SNIPPET_MATCH_OPEN);
+
+  segments.forEach((segment, index) => {
+    if (index === 0) {
+      if (segment) nodes.push(segment);
+      return;
+    }
+    const [match, ...rest] = segment.split(SNIPPET_MATCH_CLOSE);
+    nodes.push(<mark key={`match-${index}`}>{match}</mark>);
+    const tail = rest.join(SNIPPET_MATCH_CLOSE);
+    if (tail) nodes.push(tail);
+  });
+
+  return nodes;
 }
 
 export default function App() {
@@ -44,6 +88,12 @@ export default function App() {
   const [exportIncludeReasoning, setExportIncludeReasoning] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState(false);
+  // Search panel, opened via `menu:search`. `searchResult` is null until the
+  // first debounced query resolves; distinguishing that from "zero hits" is
+  // what lets the UI tell "nothing typed yet" apart from "typed, no matches".
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [stream, setStream] = useState<ActiveStream | null>(null);
   const [streamState, setStreamState] = useState<StreamState | null>(null);
   const [trimmed, setTrimmed] = useState<number | null>(null);
@@ -54,6 +104,12 @@ export default function App() {
 
   const buffer = useStreamBuffer();
   const composerRef = useRef<ComposerHandle>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  // Invalidates a stale in-flight search response — see the debounce effect
+  // below. Bumped on every query change (including going back to empty) and
+  // on close, so a slow response for an old query can never overwrite what
+  // the user is looking at now.
+  const searchSeqRef = useRef(0);
 
   // Listeners are registered once and read live values from refs, so they never
   // close over stale state.
@@ -378,6 +434,65 @@ export default function App() {
     [exportIncludeReasoning, closeExportPrompt],
   );
 
+  /* --------------------------------------------------------------- search */
+
+  // Menu-triggered. Always starts from a clean slate so a previous session's
+  // query and results never flash before the debounce effect below runs.
+  const handleOpenSearch = useCallback(() => {
+    setSearchQuery('');
+    setSearchResult(null);
+    setSearchOpen(true);
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResult(null);
+  }, []);
+
+  const handleSelectSearchResult = useCallback(
+    (conversationId: string) => {
+      // Wait for the conversation to actually load before closing, so the
+      // panel never closes onto a stale title/transcript.
+      void selectConversation(conversationId).then(closeSearch);
+    },
+    [selectConversation, closeSearch],
+  );
+
+  // Debounced full-text search. The empty/whitespace case is handled locally
+  // and never reaches the store: SearchResult.hits is empty for an
+  // unindexable query too, so treating it identically to "zero matches"
+  // would show "No results" for a box the user has not finished typing in.
+  useEffect(() => {
+    // Every run invalidates whatever request is still in flight for the
+    // previous query (or for being open at all), not just the pending
+    // timer: a debounce only cancels a timer that has not fired yet, but the
+    // IPC round trip it already started can still resolve out of order.
+    const seq = ++searchSeqRef.current;
+    if (!searchOpen) return;
+
+    const trimmed = searchQuery.trim();
+    if (trimmed === '') {
+      setSearchResult(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void bridge.conversations.search({ query: trimmed }).then((result) => {
+        if (searchSeqRef.current !== seq) return; // superseded by a newer query
+        setSearchResult(result);
+      });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchOpen]);
+
+  // Focus moves to the input every time the panel opens, matching how the
+  // export chooser and settings dialog behave.
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
   const handleSend = useCallback(
     async (text: string) => {
       if (streamRef.current) return;
@@ -434,7 +549,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (settingsOpen || exportPrompt) return; // these dialogs close themselves
+      if (settingsOpen || exportPrompt || searchOpen) return; // these dialogs close themselves
       const tag = (document.activeElement?.tagName ?? '').toLowerCase();
       if (tag === 'input' || tag === 'textarea') return; // rename / composer
       if (!streamRef.current) return;
@@ -443,7 +558,7 @@ export default function App() {
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [settingsOpen, exportPrompt]);
+  }, [settingsOpen, exportPrompt, searchOpen]);
 
   useEffect(() => {
     if (!exportPrompt) return;
@@ -453,6 +568,15 @@ export default function App() {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [exportPrompt, closeExportPrompt]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeSearch();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [searchOpen, closeSearch]);
 
   /* ----------------------------------------------------------- menu wiring */
 
@@ -476,9 +600,10 @@ export default function App() {
       bridge.on('menu:prev-chat', () => step(-1)),
       bridge.on('menu:next-chat', () => step(1)),
       bridge.on('menu:export-chat', handleExportChat),
+      bridge.on('menu:search', handleOpenSearch),
     ];
     return () => offs.forEach((off) => off());
-  }, [handleNewChat, handleDelete, handleStop, selectConversation, handleExportChat]);
+  }, [handleNewChat, handleDelete, handleStop, selectConversation, handleExportChat, handleOpenSearch]);
 
   /* ---------------------------------------------------------------- render */
 
@@ -496,6 +621,10 @@ export default function App() {
 
   const connected = status?.connected === true && status.activeModelInstalled;
   const draft = activeId ? (drafts[activeId] ?? '') : (drafts.__new ?? '');
+  // A trimmed empty query is "nothing typed yet", not "typed, zero matches" —
+  // it must never render the empty-result message.
+  const hasSearchQuery = searchQuery.trim() !== '';
+  const searchHasError = searchResult?.error !== undefined;
 
   return (
     <div className="app">
@@ -642,6 +771,85 @@ export default function App() {
                 Export as JSON
               </button>
             </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {searchOpen ? (
+        <div className="modal-backdrop" onMouseDown={closeSearch} data-testid="search-dialog">
+          <div
+            className="modal search-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Find in conversations"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header className="modal-header">
+              <h2>Find in Conversations</h2>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={closeSearch}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="modal-body">
+              <label className="field">
+                <span className="field-label">Search</span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search messages…"
+                  autoComplete="off"
+                  data-testid="search-input"
+                />
+              </label>
+
+              {searchHasError ? (
+                <p className="field-hint" role="alert" data-testid="search-error">
+                  {searchResult?.error?.message}
+                </p>
+              ) : null}
+
+              {!searchHasError && searchResult?.truncated ? (
+                <p className="field-hint" data-testid="search-truncated">
+                  Showing the first {searchResult.hits.length} matches — refine your search to
+                  narrow it down.
+                </p>
+              ) : null}
+
+              {hasSearchQuery && searchResult && !searchHasError ? (
+                searchResult.hits.length === 0 ? (
+                  <p className="field-hint" data-testid="search-empty">
+                    No results found.
+                  </p>
+                ) : (
+                  <ul className="search-results" data-testid="search-results">
+                    {searchResult.hits.map((hit) => (
+                      <li key={hit.messageId}>
+                        <button
+                          type="button"
+                          className="search-result"
+                          onClick={() => handleSelectSearchResult(hit.conversationId)}
+                          data-testid="search-result"
+                        >
+                          <span className="search-result-title">{hit.title}</span>
+                          <span className="search-result-snippet">{renderSnippet(hit.snippet)}</span>
+                          <span className="search-result-time">
+                            {formatSearchTimestamp(hit.createdAt)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}

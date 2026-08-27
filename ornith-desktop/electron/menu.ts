@@ -90,6 +90,17 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
           accelerator: 'CmdOrCtrl+K',
           click: send('menu:focus-composer'),
         },
+        { type: 'separator' },
+        {
+          // Same rationale as `menu-export-chat` above: Playwright's synthetic
+          // keypresses reach the renderer's web content, not Electron's native
+          // accelerator table, so the e2e suite triggers this item by id via
+          // Menu.getApplicationMenu() rather than sending Cmd+F.
+          id: 'menu-search',
+          label: 'Find in Conversations…',
+          accelerator: 'CmdOrCtrl+F',
+          click: send('menu:search'),
+        },
       ],
     },
 
