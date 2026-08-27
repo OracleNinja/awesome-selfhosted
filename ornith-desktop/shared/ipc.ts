@@ -15,6 +15,8 @@ import type {
   AnsweredSource,
   OllamaStatus,
   PublicSettings,
+  SearchRequest,
+  SearchResult,
   Settings,
   StreamOutcome,
   StreamState,
@@ -40,6 +42,8 @@ export interface IpcInvokeMap {
   'conv:clear': { req: string; res: void };
   /** Opens a native save dialog and writes the file. The renderer never sees a path it did not receive back. */
   'conv:export': { req: ExportRequest; res: ExportResult };
+  /** Full-text search across message content. An empty query yields no hits, never every conversation. */
+  'conv:search': { req: SearchRequest; res: SearchResult };
   'clipboard:write': { req: string; res: void };
 
   /* ---- voice layer ---- */
@@ -86,6 +90,7 @@ export interface IpcEventMap {
   'menu:prev-chat': Record<string, never>;
   'menu:next-chat': Record<string, never>;
   'menu:export-chat': Record<string, never>;
+  'menu:search': Record<string, never>;
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeMap;
@@ -111,6 +116,7 @@ export const INVOKE_CHANNELS = [
   'conv:clear',
   'clipboard:write',
   'conv:export',
+  'conv:search',
 ] as const satisfies readonly IpcInvokeChannel[];
 
 export const EVENT_CHANNELS = [
@@ -131,4 +137,5 @@ export const EVENT_CHANNELS = [
   'menu:prev-chat',
   'menu:next-chat',
   'menu:export-chat',
+  'menu:search',
 ] as const satisfies readonly IpcEventChannel[];

@@ -5,6 +5,8 @@ import type {
   ConversationSummary,
   ExportRequest,
   ExportResult,
+  SearchRequest,
+  SearchResult,
   OllamaStatus,
   PublicSettings,
   Settings,
@@ -35,6 +37,7 @@ export interface OrnithApi {
     remove(id: string): Promise<void>;
     clear(id: string): Promise<void>;
     export(request: ExportRequest): Promise<ExportResult>;
+    search(request: SearchRequest): Promise<SearchResult>;
   };
   chat: {
     start(payload: { conversationId: string; requestId: string; userText: string }): void;

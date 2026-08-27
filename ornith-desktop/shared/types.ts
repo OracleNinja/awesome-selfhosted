@@ -77,6 +77,64 @@ export type ConversationSummary = Omit<Conversation, 'messages'> & {
  * it is often long, and a transcript someone intends to share is rarely
  * improved by it.
  */
+/**
+ * Conversation search.
+ *
+ * Backed by SQLite FTS5, which the shipping runtime provides (Electron 39.8.10,
+ * SQLite 3.51.2 — verified by spike, not assumed). The index covers message
+ * `content` only. Reasoning text is the model's scratch work and searching it
+ * surfaces hits a user cannot see in the transcript; titles are matched in a
+ * later version, so a hit always carries its conversation's title but a query
+ * matching only a title finds nothing today.
+ *
+ * The query is never interpreted as FTS5 syntax. Passing a raw user string to
+ * MATCH raises a SQLite error on completely ordinary typing -- a lone quote,
+ * a trailing "AND", "a-b", "a:b" all throw -- so the store quotes the whole
+ * query as a single FTS5 string literal and appends a prefix wildcard. The
+ * consequence is deliberate: FTS5 boolean operators are not exposed, and a
+ * typed "AND" is searched for literally.
+ */
+export interface SearchRequest {
+  /** Raw text as typed. Never pre-escaped by the caller. */
+  query: string;
+  /** Clamped to 1..MAX_SEARCH_LIMIT; omitted means DEFAULT_SEARCH_LIMIT. */
+  limit?: number;
+}
+
+export interface SearchHit {
+  conversationId: string;
+  /** The conversation's title, so a result identifies itself without a second lookup. */
+  title: string;
+  messageId: string;
+  role: Role;
+  /**
+   * A short excerpt around the match. Matched runs are wrapped in
+   * SNIPPET_MATCH_OPEN/CLOSE, which are private-use code points rather than
+   * markup: the renderer splits on them and renders text nodes, so a snippet
+   * can never inject markup no matter what the conversation contained.
+   */
+  snippet: string;
+  createdAt: number;
+  /** FTS5 bm25 relevance. Lower is a better match; hits arrive already sorted. */
+  score: number;
+}
+
+export interface SearchResult {
+  /** Best match first. Empty for an empty or non-indexable query -- never all conversations. */
+  hits: SearchHit[];
+  /** True when more matches existed than the limit allowed. */
+  truncated: boolean;
+  /** Set only when the search could not be completed; hits is then empty. */
+  error?: AppError;
+}
+
+/** Delimiters around matched runs inside SearchHit.snippet. */
+export const SNIPPET_MATCH_OPEN = '\uE000';
+export const SNIPPET_MATCH_CLOSE = '\uE001';
+
+export const DEFAULT_SEARCH_LIMIT = 50;
+export const MAX_SEARCH_LIMIT = 200;
+
 export type ExportFormat = 'markdown' | 'json';
 
 export interface ExportRequest {
