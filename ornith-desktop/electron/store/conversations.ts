@@ -1,5 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  SNIPPET_MATCH_OPEN,
+  SNIPPET_MATCH_CLOSE,
+} from '../../shared/types';
 import type {
   AppError,
   ChatMessage,
@@ -8,6 +14,9 @@ import type {
   GenerationStats,
   MessageStatus,
   Role,
+  SearchHit,
+  SearchRequest,
+  SearchResult,
 } from '../../shared/types';
 
 interface MessageRow {
@@ -65,6 +74,52 @@ function toMessage(row: MessageRow): ChatMessage {
   return message;
 }
 
+interface SearchRow {
+  conversation_id: string;
+  title: string;
+  message_id: string;
+  role: string;
+  created_at: number;
+  snippet: string;
+  score: number;
+}
+
+function toSearchHit(row: SearchRow): SearchHit {
+  return {
+    conversationId: row.conversation_id,
+    title: row.title,
+    messageId: row.message_id,
+    role: row.role as Role,
+    snippet: row.snippet,
+    createdAt: Number(row.created_at),
+    score: Number(row.score),
+  };
+}
+
+// unicode61 discards punctuation and symbols as token separators, so a query
+// built entirely from them (e.g. "...", "*") tokenizes to zero terms. This
+// guard short-circuits that case before it ever reaches MATCH, so "an empty
+// or non-indexable query returns nothing" is a guarantee this code makes
+// directly rather than a side effect of how the tokenizer happens to handle
+// a zero-token phrase today -- something we would otherwise have to
+// re-verify on every SQLite/FTS5 upgrade.
+const HAS_INDEXABLE_TOKEN = /[\p{L}\p{N}]/u;
+
+// The whole query is quoted as a single FTS5 string literal so none of FTS5's
+// query-language tokens (AND, OR, NOT, -, :, parentheses, ...) are
+// interpreted -- typing them is ordinary text, not a query language the user
+// opted into. The trailing * turns the quoted phrase into a prefix match on
+// its last token.
+function toFtsMatchQuery(query: string): string {
+  return `"${query.replace(/"/g, '""')}"*`;
+}
+
+function clampSearchLimit(limit: number | undefined): number {
+  if (limit === undefined || Number.isNaN(limit)) return DEFAULT_SEARCH_LIMIT;
+  const floored = Math.floor(limit);
+  return Math.min(Math.max(floored, 1), MAX_SEARCH_LIMIT);
+}
+
 export interface AppendedTurn {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
@@ -93,6 +148,8 @@ export interface ConversationStore {
   ): void;
   /** Rewrites rows left mid-stream by a crash. Returns how many were repaired. */
   recoverInterrupted(): number;
+  /** Full-text search over message content. Never throws; failures are reported via SearchResult.error. */
+  search(request: SearchRequest): SearchResult;
 }
 
 export function createConversationStore(db: DatabaseSync): ConversationStore {
@@ -101,6 +158,23 @@ export function createConversationStore(db: DatabaseSync): ConversationStore {
   function touchConversation(id: string, when = Date.now()): void {
     touch.run(when, id);
   }
+
+  const searchStatement = db.prepare(`
+    SELECT
+      c.id AS conversation_id,
+      c.title AS title,
+      m.id AS message_id,
+      m.role AS role,
+      m.created_at AS created_at,
+      snippet(messages_fts, 0, ?, ?, '…', 10) AS snippet,
+      bm25(messages_fts) AS score
+    FROM messages_fts
+    JOIN messages m ON m.rowid = messages_fts.rowid
+    JOIN conversations c ON c.id = m.conversation_id
+    WHERE messages_fts MATCH ?
+    ORDER BY score ASC, m.created_at DESC, m.id ASC
+    LIMIT ?
+  `);
 
   return {
     create(model, title = 'New chat') {
@@ -307,6 +381,41 @@ export function createConversationStore(db: DatabaseSync): ConversationStore {
         )
         .run();
       return Number(result.changes ?? 0);
+    },
+
+    search(request) {
+      const query = request.query.trim();
+      if (query === '' || !HAS_INDEXABLE_TOKEN.test(query)) {
+        return { hits: [], truncated: false };
+      }
+
+      const limit = clampSearchLimit(request.limit);
+
+      try {
+        // Ask for one extra row so a full page can be distinguished from an
+        // exact-fit page without a second COUNT query.
+        const rows = searchStatement.all(
+          SNIPPET_MATCH_OPEN,
+          SNIPPET_MATCH_CLOSE,
+          toFtsMatchQuery(query),
+          limit + 1,
+        ) as unknown as SearchRow[];
+
+        return {
+          hits: rows.slice(0, limit).map(toSearchHit),
+          truncated: rows.length > limit,
+        };
+      } catch {
+        return {
+          hits: [],
+          truncated: false,
+          error: {
+            code: 'STORAGE_CORRUPT',
+            message:
+              'Search is unavailable because the conversation database could not be read. Try restarting the app.',
+          },
+        };
+      }
     },
   };
 }

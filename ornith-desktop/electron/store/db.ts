@@ -34,6 +34,42 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       CREATE INDEX idx_conv_updated  ON conversations(updated_at DESC);
     `);
   },
+
+  function searchIndex(db) {
+    // External-content FTS5 index: the indexed text lives in `messages.content`;
+    // this virtual table stores only the inverted index and is kept in sync via
+    // the triggers below rather than duplicating the content itself.
+    db.exec(`
+      CREATE VIRTUAL TABLE messages_fts USING fts5(
+        content,
+        content='messages',
+        content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    `);
+
+    // Backfill so a user with existing conversations is searchable immediately
+    // after the upgrade, not only for messages created from this point on.
+    db.exec('INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages;');
+
+    // Keep the index in sync using the FTS5 external-content idiom: deletes and
+    // updates are expressed as an explicit 'delete' command against the shadow
+    // table before the new state (if any) is inserted.
+    db.exec(`
+      CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+
+      CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+      END;
+
+      CREATE TRIGGER messages_fts_au AFTER UPDATE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+    `);
+  },
 ];
 
 export function openDatabase(location: string): DatabaseSync {
