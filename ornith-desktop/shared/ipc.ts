@@ -10,6 +10,8 @@ import type {
   ChatMessage,
   Conversation,
   ConversationSummary,
+  ExportRequest,
+  ExportResult,
   AnsweredSource,
   OllamaStatus,
   PublicSettings,
@@ -36,6 +38,8 @@ export interface IpcInvokeMap {
   'conv:confirm-delete': { req: { title: string; messageCount: number }; res: boolean };
   'conv:delete': { req: string; res: void };
   'conv:clear': { req: string; res: void };
+  /** Opens a native save dialog and writes the file. The renderer never sees a path it did not receive back. */
+  'conv:export': { req: ExportRequest; res: ExportResult };
   'clipboard:write': { req: string; res: void };
 
   /* ---- voice layer ---- */
@@ -81,6 +85,7 @@ export interface IpcEventMap {
   'menu:stop-generating': Record<string, never>;
   'menu:prev-chat': Record<string, never>;
   'menu:next-chat': Record<string, never>;
+  'menu:export-chat': Record<string, never>;
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeMap;
@@ -105,6 +110,7 @@ export const INVOKE_CHANNELS = [
   'tts:stop',
   'conv:clear',
   'clipboard:write',
+  'conv:export',
 ] as const satisfies readonly IpcInvokeChannel[];
 
 export const EVENT_CHANNELS = [
@@ -124,4 +130,5 @@ export const EVENT_CHANNELS = [
   'menu:stop-generating',
   'menu:prev-chat',
   'menu:next-chat',
+  'menu:export-chat',
 ] as const satisfies readonly IpcEventChannel[];

@@ -68,6 +68,34 @@ export type ConversationSummary = Omit<Conversation, 'messages'> & {
   messageCount: number;
 };
 
+/**
+ * Conversation export.
+ *
+ * Markdown is for reading and sharing; JSON is for feeding a conversation into
+ * something else, so it stays close to the stored shape rather than being
+ * prettified. Reasoning is excluded by default: it is the model's scratch work,
+ * it is often long, and a transcript someone intends to share is rarely
+ * improved by it.
+ */
+export type ExportFormat = 'markdown' | 'json';
+
+export interface ExportRequest {
+  /** Conversation to export. */
+  id: string;
+  format: ExportFormat;
+  /** Include the reasoning/thinking text alongside each answer. */
+  includeReasoning: boolean;
+}
+
+/**
+ * Cancelling a save dialog is a normal outcome, not a failure — it is reported
+ * distinctly so the renderer never shows an error for a deliberate action.
+ */
+export type ExportResult =
+  | { status: 'saved'; path: string; bytes: number }
+  | { status: 'cancelled' }
+  | { status: 'error'; message: string };
+
 /** How the active model exposes reasoning, probed once per model per session. */
 export type ThinkingMode = 'structured' | 'inline' | 'none';
 

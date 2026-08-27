@@ -3,6 +3,8 @@ import type {
   AppInfo,
   Conversation,
   ConversationSummary,
+  ExportRequest,
+  ExportResult,
   OllamaStatus,
   PublicSettings,
   Settings,
@@ -32,6 +34,7 @@ export interface OrnithApi {
     confirmDelete(title: string, messageCount: number): Promise<boolean>;
     remove(id: string): Promise<void>;
     clear(id: string): Promise<void>;
+    export(request: ExportRequest): Promise<ExportResult>;
   };
   chat: {
     start(payload: { conversationId: string; requestId: string; userText: string }): void;
