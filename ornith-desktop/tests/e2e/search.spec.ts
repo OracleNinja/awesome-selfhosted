@@ -67,11 +67,33 @@ async function triggerSearchMenu(): Promise<void> {
  */
 async function seedConversation(text: string): Promise<void> {
   const existing = await page.getByTestId('conversation-item').count();
-  if (existing > 0) await page.getByTestId('new-chat').click();
+  if (existing > 0) {
+    await page.getByTestId('new-chat').click();
+    // handleNewChat is async (it may create a conversation over an IPC round
+    // trip) and the composer's draft is keyed by the active conversation id.
+    // Filling immediately after the click can land on the *previous*
+    // conversation's draft, which is then wiped the instant the new (empty)
+    // conversation becomes active — leaving the send button disabled when
+    // this helper clicks it below. Waiting for the empty-conversation state
+    // to render first guarantees the new conversation is already active, the
+    // same wait app.spec.ts's "keeps conversations separate" test relies on
+    // for this identical seeding step.
+    await expect(page.getByTestId('message-list')).toContainText('Ornith Desktop');
+  }
 
   await page.getByTestId('composer-input').fill(text);
   await page.getByTestId('send-button').click();
   await expect(page.getByTestId('message-assistant')).toContainText('Hello world');
+  // The assistant's text can land in the DOM slightly before `chat:end`
+  // actually fires: chat:delta streams "Hello" then " world" as separate
+  // IPC events, and only the following `done` chunk triggers chat:end, which
+  // is what flips the composer from Stop back to Send. Waiting for the text
+  // alone is not enough to know this turn is over — if the *next*
+  // seedConversation call clicks "New Chat" while a request is technically
+  // still in flight, handleNewChat aborts it out from under this one. The
+  // Send button reappearing is the same "generation has truly stopped"
+  // signal app.spec.ts's stop-generation test waits on.
+  await expect(page.getByTestId('send-button')).toBeVisible();
 }
 
 test.beforeEach(async () => {
