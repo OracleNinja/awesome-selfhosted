@@ -10,11 +10,14 @@ import type {
   ExportRequest,
   ExportResult,
   OllamaStatus,
+  SearchRequest,
+  SearchResult,
   Settings,
   ThinkingMode,
 } from '../shared/types';
 import { toPublicSettings } from '../shared/types';
 import { exportConversation } from './export';
+import { searchConversations } from './search';
 import { createOllamaBackend } from './backends/ollama';
 import { createGatewayBackend } from './backends/gateway';
 import type { ChatBackend } from './backends/types';
@@ -285,6 +288,13 @@ function registerIpc(): void {
         getWindow: () => BrowserWindow.getFocusedWindow() ?? mainWindow,
         showSaveDialog: (window, options) => dialog.showSaveDialog(window, options),
       }),
+  );
+
+  // Full-text search over message content; see electron/search.ts for the
+  // trust-boundary rationale (SPEC.md §11.3).
+  ipcMain.handle(
+    'conv:search',
+    (_e, req: SearchRequest): SearchResult => searchConversations(req, { store }),
   );
 
   ipcMain.handle('clipboard:write', (_e, text: string) => {
