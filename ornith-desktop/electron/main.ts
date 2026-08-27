@@ -5,8 +5,16 @@ import type { DatabaseSync } from 'node:sqlite';
 
 import { DEFAULT_MODEL, STATUS_POLL_INTERVAL_MS } from '../shared/defaults';
 import { IPC_VERSION } from '../shared/ipc';
-import type { AppInfo, OllamaStatus, Settings, ThinkingMode } from '../shared/types';
+import type {
+  AppInfo,
+  ExportRequest,
+  ExportResult,
+  OllamaStatus,
+  Settings,
+  ThinkingMode,
+} from '../shared/types';
 import { toPublicSettings } from '../shared/types';
+import { exportConversation } from './export';
 import { createOllamaBackend } from './backends/ollama';
 import { createGatewayBackend } from './backends/gateway';
 import type { ChatBackend } from './backends/types';
@@ -266,6 +274,18 @@ function registerIpc(): void {
   ipcMain.handle('conv:clear', (_e, id: string) => {
     if (typeof id === 'string') store.clear(id);
   });
+
+  // Opens a native save dialog and writes the file; see electron/export.ts
+  // for the trust-boundary rationale (SPEC.md §3.1, §11.3).
+  ipcMain.handle(
+    'conv:export',
+    (_e, req: ExportRequest): Promise<ExportResult> =>
+      exportConversation(req, {
+        store,
+        getWindow: () => BrowserWindow.getFocusedWindow() ?? mainWindow,
+        showSaveDialog: (window, options) => dialog.showSaveDialog(window, options),
+      }),
+  );
 
   ipcMain.handle('clipboard:write', (_e, text: string) => {
     if (typeof text === 'string') clipboard.writeText(text);

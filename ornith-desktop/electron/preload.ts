@@ -53,6 +53,7 @@ const api = {
       invoke('conv:confirm-delete', { title, messageCount }),
     remove: (id: string) => invoke('conv:delete', id),
     clear: (id: string) => invoke('conv:clear', id),
+    export: (request: IpcInvokeMap['conv:export']['req']) => invoke('conv:export', request),
   },
 
   chat: {
