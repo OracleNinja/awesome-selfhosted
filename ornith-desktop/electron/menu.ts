@@ -48,6 +48,17 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
           accelerator: 'CmdOrCtrl+Shift+Backspace',
           click: send('menu:delete-chat'),
         },
+        {
+          // `id` lets the e2e suite trigger this deterministically via
+          // Menu.getApplicationMenu()?.getMenuItemById(...) in the main
+          // process — Playwright's keyboard input reaches the renderer's
+          // web content, not Electron's native accelerator table, so a
+          // synthetic keypress cannot be trusted to fire this reliably.
+          id: 'menu-export-chat',
+          label: 'Export Chat…',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: send('menu:export-chat'),
+        },
         { type: 'separator' },
         ...(isMac
           ? ([{ role: 'close' }] as Electron.MenuItemConstructorOptions[])

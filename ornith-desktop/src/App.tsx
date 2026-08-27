@@ -15,6 +15,7 @@ import type {
   Conversation,
   ConversationSummary,
   AnsweredSource,
+  ExportFormat,
   OllamaStatus,
   PublicSettings,
   StreamState,
@@ -32,6 +33,17 @@ export default function App() {
   const [status, setStatus] = useState<OllamaStatus | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Export is a small in-app chooser (format + reasoning) rather than a
+  // native submenu-per-format: `menu:export-chat` carries no payload (see
+  // shared/ipc.ts), so the native menu has exactly one trigger point and the
+  // actual choice has to be made in the renderer, where the active
+  // conversation id already lives. Reuses the existing modal/field CSS
+  // classes (see ModeChooser/SettingsDialog) rather than introducing new
+  // styling.
+  const [exportPrompt, setExportPrompt] = useState(false);
+  const [exportIncludeReasoning, setExportIncludeReasoning] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
   const [stream, setStream] = useState<ActiveStream | null>(null);
   const [streamState, setStreamState] = useState<StreamState | null>(null);
   const [trimmed, setTrimmed] = useState<number | null>(null);
@@ -318,6 +330,54 @@ export default function App() {
     if (current) bridge.chat.abort(current.requestId);
   }, []);
 
+  /* --------------------------------------------------------------- export */
+
+  const closeExportPrompt = useCallback(() => {
+    setExportPrompt(false);
+    setExportError(null);
+    setExportBusy(false);
+  }, []);
+
+  // Menu-triggered. Opening with no active conversation would send a
+  // malformed request (no id to export), so it is a silent no-op instead.
+  const handleExportChat = useCallback(() => {
+    if (!activeIdRef.current) return;
+    setExportIncludeReasoning(false);
+    setExportError(null);
+    setExportPrompt(true);
+  }, []);
+
+  const runExport = useCallback(
+    async (format: ExportFormat) => {
+      const id = activeIdRef.current;
+      if (!id) {
+        closeExportPrompt();
+        return;
+      }
+
+      setExportBusy(true);
+      setExportError(null);
+      const result = await bridge.conversations.export({
+        id,
+        format,
+        includeReasoning: exportIncludeReasoning,
+      });
+      setExportBusy(false);
+
+      if (result.status === 'error') {
+        // Shown as-is: main already writes a message that is safe to display.
+        setExportError(result.message);
+        return;
+      }
+
+      // 'saved': confirmed quietly by simply closing — no extra toast.
+      // 'cancelled': a deliberate choice, not a failure, so it ends the same
+      // way with nothing alarming shown.
+      closeExportPrompt();
+    },
+    [exportIncludeReasoning, closeExportPrompt],
+  );
+
   const handleSend = useCallback(
     async (text: string) => {
       if (streamRef.current) return;
@@ -374,7 +434,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      if (settingsOpen) return; // the dialog closes itself
+      if (settingsOpen || exportPrompt) return; // these dialogs close themselves
       const tag = (document.activeElement?.tagName ?? '').toLowerCase();
       if (tag === 'input' || tag === 'textarea') return; // rename / composer
       if (!streamRef.current) return;
@@ -383,7 +443,16 @@ export default function App() {
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [settingsOpen]);
+  }, [settingsOpen, exportPrompt]);
+
+  useEffect(() => {
+    if (!exportPrompt) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeExportPrompt();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [exportPrompt, closeExportPrompt]);
 
   /* ----------------------------------------------------------- menu wiring */
 
@@ -406,9 +475,10 @@ export default function App() {
       bridge.on('menu:stop-generating', handleStop),
       bridge.on('menu:prev-chat', () => step(-1)),
       bridge.on('menu:next-chat', () => step(1)),
+      bridge.on('menu:export-chat', handleExportChat),
     ];
     return () => offs.forEach((off) => off());
-  }, [handleNewChat, handleDelete, handleStop, selectConversation]);
+  }, [handleNewChat, handleDelete, handleStop, selectConversation, handleExportChat]);
 
   /* ---------------------------------------------------------------- render */
 
@@ -507,6 +577,73 @@ export default function App() {
           onUpdate={(patch) => void bridge.settings.update(patch).then(setSettings)}
           onClose={() => setSettingsOpen(false)}
         />
+      ) : null}
+
+      {exportPrompt ? (
+        <div
+          className="modal-backdrop"
+          onMouseDown={closeExportPrompt}
+          data-testid="export-chat-dialog"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Export chat"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header className="modal-header">
+              <h2>Export chat</h2>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={closeExportPrompt}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="modal-body">
+              <label className="field field-inline">
+                <input
+                  type="checkbox"
+                  checked={exportIncludeReasoning}
+                  onChange={(e) => setExportIncludeReasoning(e.target.checked)}
+                  data-testid="export-include-reasoning"
+                />
+                <span>Include reasoning</span>
+              </label>
+
+              {exportError ? (
+                <p className="field-hint" role="alert" data-testid="export-error">
+                  {exportError}
+                </p>
+              ) : null}
+            </div>
+
+            <footer className="modal-footer">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void runExport('markdown')}
+                disabled={exportBusy}
+                data-testid="export-as-markdown"
+              >
+                Export as Markdown
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void runExport('json')}
+                disabled={exportBusy}
+                data-testid="export-as-json"
+              >
+                Export as JSON
+              </button>
+            </footer>
+          </div>
+        </div>
       ) : null}
     </div>
   );
