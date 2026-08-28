@@ -24,14 +24,19 @@ covers only what portability adds.
 │   ├── mac/Ornith Desktop.app
 │   ├── win/Ornith Desktop.exe
 │   └── linux/ornith-desktop
-├── runtime/
-│   ├── darwin-arm64/ollama
-│   ├── darwin-x64/ollama
-│   ├── win32-x64/ollama.exe
-│   └── linux-x64/ollama
+├── runtime/                           one slot per platform-arch
+│   ├── darwin-arm64/{ollama, whisper-cli, piper}
+│   ├── darwin-x64/…
+│   ├── win32-x64/{ollama.exe, whisper-cli.exe, piper.exe}
+│   ├── win32-arm64/…
+│   ├── linux-x64/…
+│   └── linux-arm64/…
 ├── models/                            OLLAMA_MODELS points here
 │   ├── blobs/
 │   └── manifests/
+├── voice/
+│   ├── whisper/ggml-base.en.bin       speech-to-text model
+│   └── piper/en_US-*.onnx(.json)      text-to-speech voice
 └── data/                              userData: everything the app writes
     ├── ornith.db
     ├── settings.json
@@ -137,6 +142,46 @@ start off USB takes tens of seconds and is not the same as failure), `bundled`,
 
 ---
 
+## Voice
+
+Both halves of the voice layer dispatch across two engines, preferring
+whichever can actually run rather than branching on the platform:
+
+| | On macOS | On Windows and Linux |
+|---|---|---|
+| **Speech-to-text** | the system Speech framework, via a small Swift helper, with `requiresOnDeviceRecognition` | `whisper-cli` and a GGML model, both off the drive |
+| **Text-to-speech** | `/usr/bin/say` | Piper and a voice, both off the drive |
+
+Preference is by availability, not by platform: a drive carrying whisper still
+dictates on a Mac whose Swift helper was never compiled — which is every
+packaged portable build, since compiling it needs Xcode.
+
+Neither engine sends anything anywhere. Audio is captured in the renderer,
+crosses IPC as WAV bytes, and is transcribed by a local process; nothing
+touches the network. The Web Speech API is deliberately unused, because
+Chromium's `webkitSpeechRecognition` streams microphone audio to Google's
+servers while looking like a browser API.
+
+**Where the audio comes out** differs, and it is the one place the two paths
+are not symmetrical. `say` talks to the speakers itself, so speech begins on
+the first word and stopping it is a signal. Piper only writes a WAV file, so
+the bytes go to the renderer and Web Audio plays them. Decoding an
+`ArrayBuffer` needs no blob or data URL, so the strict CSP (`default-src
+'self'`, `connect-src 'none'`) is untouched — an `<audio src>` would have
+forced `media-src blob:` open.
+
+Voice is optional. A drive with no speech binaries is a working chat client
+whose microphone button is disabled with a reason that names the missing file.
+
+**The Piper and whisper.cpp command-line contracts here are written from their
+documented interfaces and exercised against stand-in binaries, not against real
+ones** — no such binary was available in the environment this was built in. The
+argument construction is a pure, unit-tested function in each engine
+(`whisperArgs`, `piperArgs`), so if a real binary disagrees, one function is
+the fix.
+
+---
+
 ## Capacity: what fits on 128 GB
 
 Formatted capacity is about 119 GiB; the numbers below are approximate and
@@ -148,10 +193,12 @@ depend on quantisation.
 | Ollama runtime × 4 slots | ~1.5 GB | Binaries plus their GPU/accelerator libraries |
 | Ornith 1.0 9B (Q4_K_M) | ~5.5 GB | The default model |
 | Ornith 1.0 9B (Q8_0) | ~9.5 GB | If you want the higher-fidelity weights instead |
+| whisper.cpp model | ~150 MB | `ggml-base.en`; `tiny.en` is ~75 MB, `small.en` ~500 MB |
+| Piper voice | ~65 MB | Per voice, medium quality, including its config |
 | Conversation history | < 100 MB | SQLite; text only, and text is small |
 | Logs | ≤ 15 MB | Rotated at 5 MB, three files |
-| **Working total** | **~9 GB** | One platform, one model |
-| **Everything** | **~20 GB** | All platforms, all runtimes, both quantisations |
+| **Working total** | **~9 GB** | One platform, one model, voice included |
+| **Everything** | **~21 GB** | All platforms, all runtimes, both quantisations |
 
 The practical answer is that a 128 GB drive is not close to full with one
 model — it is sized for **several** models. Roughly 100 GB of headroom leaves
@@ -194,10 +241,19 @@ It never moves or modifies a source model store, and it leaves an existing
 
 ### Filling in the runtime slots
 
-Download an Ollama release for each platform you want the drive to serve, and
-put the binary at `runtime/<platform>-<arch>/ollama` (`ollama.exe` on Windows).
-On macOS and Linux it must be executable (`chmod +x`). Releases:
-<https://github.com/ollama/ollama/releases>
+Each platform slot holds up to three binaries, and the provisioning script
+prints the exact path for every one it cannot find:
+
+| Binary | Needed for | Releases |
+|---|---|---|
+| `ollama` | chat — required | <https://github.com/ollama/ollama/releases> |
+| `whisper-cli` | dictation off macOS — optional | <https://github.com/ggml-org/whisper.cpp/releases> |
+| `piper` | spoken replies off macOS — optional | <https://github.com/rhasspy/piper/releases> |
+
+Windows binaries take a `.exe` suffix. On macOS and Linux each must be
+executable (`chmod +x`). Models go in `voice/whisper/` (a `ggml-*.bin`) and
+`voice/piper/` (an `.onnx` **and** its `.onnx.json` — a voice without its
+config cannot be loaded, so it is not offered).
 
 ### Cross-platform builds
 
@@ -235,11 +291,11 @@ is worth not doing.
 Stated plainly, because a portability claim is only useful if its edges are
 known:
 
-- **Speech-to-text is macOS-only** and depends on a Swift helper compiled
-  against the system Speech framework. It degrades to "unavailable" elsewhere,
-  as it already did before portable mode.
-- **Text-to-speech uses the host's `say`**, so it is macOS-only for the same
-  reason.
+- **Voice needs binaries the drive carries** away from macOS, as described
+  above. A drive provisioned without them still chats; it just cannot listen
+  or speak, and says which file is missing.
+- **The Piper and whisper.cpp CLI contracts are unverified against real
+  binaries** — see the Voice section. Everything around them is tested.
 - **Chromium may still write outside the drive.** Electron's `userData` is
   redirected, which covers the app's own storage and cache, but crash reporting
   and some OS-level integrations use platform paths this app does not control.
@@ -259,6 +315,8 @@ known:
 | `tests/unit/portable-detect.test.ts` | The marker walk, resolution order, layout-version refusal, volume probing |
 | `tests/integration/runtime-supervisor.test.ts` | Reuse vs. spawn, drive-scoped environment, port selection, shutdown escalation |
 | `tests/e2e/portable.spec.ts` | The real app on a real tree: data location, restart persistence, a genuinely spawned server, and that an installed launch is unaffected |
+| `tests/unit/whisper.test.ts`, `tests/unit/piper.test.ts` | Engine discovery, argument construction, transcript cleaning, voice resolution and its traversal rejections, and failure surfacing |
+| `tests/e2e/voice.spec.ts` | The real app dictating and speaking off a provisioned drive, through spawned stand-in binaries and real Web Audio playback |
 
 The E2E suite spawns a stand-in for the Ollama binary from the drive and asserts
 on the environment that process actually received, so "everything the child

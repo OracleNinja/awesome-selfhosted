@@ -12,6 +12,7 @@ export default defineConfig({
         'electron/store/**',
         'electron/portable/**',
         'electron/runtime/**',
+        'electron/voice/**',
         'shared/**',
       ],
       reporter: ['text-summary', 'json-summary'],

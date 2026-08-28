@@ -77,7 +77,9 @@ button {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-muted);
-  padding-left: 62px; /* clears the macOS traffic lights */
+  /* Room for the macOS traffic lights. Other platforms draw a native title
+     bar instead, so reserving it there just indents the wordmark into space. */
+  padding-left: 12px;
 }
 
 .new-chat-button {
@@ -266,6 +268,35 @@ button {
 
 .portable-badge[data-capacity='critical'] .portable-detail {
   color: var(--danger);
+}
+
+/* A failing status needs room for its explanation and its fix, not one line. */
+.status-line.is-stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.status-help {
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* Wrapped, not truncated: this text names the file the user has to add. */
+.portable-reason {
+  color: var(--warning);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .retry-button {

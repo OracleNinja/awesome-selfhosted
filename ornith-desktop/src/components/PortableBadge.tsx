@@ -45,6 +45,12 @@ export default function PortableBadge({ info }: Props) {
       {info.volume && !info.volume.writable ? (
         <span className="portable-detail status-error">Drive is read-only</span>
       ) : null}
+
+      {info.runtime.source === 'unavailable' && info.runtime.reason ? (
+        <span className="portable-reason" data-testid="portable-reason">
+          {info.runtime.reason}
+        </span>
+      ) : null}
     </div>
   );
 }

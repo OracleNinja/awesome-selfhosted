@@ -1,4 +1,4 @@
-import { app, Menu, shell, type BrowserWindow } from 'electron';
+import { app, dialog, Menu, shell, type BrowserWindow } from 'electron';
 
 /**
  * A full native menu. The Edit menu's standard roles are not optional: without
@@ -137,6 +137,26 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
           label: 'Ollama Documentation',
           click: () => void shell.openExternal('https://github.com/ollama/ollama'),
         },
+        // macOS already has About in the application menu; without this,
+        // Windows and Linux have no way to see which build they are running.
+        ...(isMac
+          ? []
+          : ([
+              { type: 'separator' },
+              {
+                label: `About ${app.name}`,
+                click: () => {
+                  const win = getWindow();
+                  if (!win || win.isDestroyed()) return;
+                  void dialog.showMessageBox(win, {
+                    type: 'info',
+                    message: app.name,
+                    detail: `Version ${app.getVersion()}\nElectron ${process.versions.electron}`,
+                    buttons: ['OK'],
+                  });
+                },
+              },
+            ] satisfies Electron.MenuItemConstructorOptions[])),
       ],
     },
   ];

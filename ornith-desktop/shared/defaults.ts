@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showThinkingByDefault: false,
   sendOnEnter: true,
 
-  // Off by default: typing a message and having the Mac start talking is a
+  // Off by default: typing a message and having the computer start talking is a
   // surprise. Replies to spoken prompts are spoken regardless of this setting.
   speakResponses: false,
   voiceName: '',

@@ -8,9 +8,22 @@ export interface EngineAvailability {
   reason?: string;
 }
 
+/**
+ * Where the audio for a spoken reply is produced.
+ *
+ * `native` — the engine talks to the speakers itself (macOS `say`). Speech
+ * starts on the first word, and killing the process stops it instantly.
+ *
+ * `renderer` — the engine writes a WAV and the renderer plays it through Web
+ * Audio. This is how a drive-bundled engine works on Windows and Linux, where
+ * there is no dependable system audio player to shell out to. Decoding an
+ * ArrayBuffer needs no blob or data URL, so the strict CSP is untouched.
+ */
+export type TtsPlayback = 'native' | 'renderer';
+
 export interface VoiceCapabilities {
   stt: EngineAvailability;
-  tts: EngineAvailability & { voices: string[] };
+  tts: EngineAvailability & { voices: string[]; playback: TtsPlayback };
 }
 
 export interface TranscriptionRequest {
@@ -40,8 +53,30 @@ export interface TtsState {
   requestId: string | null;
 }
 
+/** Sent to the renderer to play, when the engine's playback mode is `renderer`. */
+export interface SpokenAudio {
+  requestId: string;
+  /** A complete RIFF/WAVE file. */
+  wav: Uint8Array;
+}
+
+export interface SynthesisResult {
+  wav: Uint8Array | null;
+  /** Present when synthesis failed; `wav` is then null. */
+  error?: string;
+}
+
 /** Sample rate the Speech framework expects; also keeps payloads small. */
 export const STT_SAMPLE_RATE = 16_000;
 
 /** Guard against a runaway recording filling memory. */
 export const MAX_RECORDING_SECONDS = 60;
+
+/**
+ * `en-US` → `en`. whisper.cpp and Piper both take a bare ISO-639-1 code, while
+ * the settings store and the macOS Speech framework use BCP-47.
+ */
+export function languageOf(locale: string): string {
+  const base = locale.trim().split(/[-_]/)[0].toLowerCase();
+  return /^[a-z]{2,3}$/.test(base) ? base : 'en';
+}

@@ -61,7 +61,7 @@ export default function MessageList({
             🐦
           </div>
           <h1>Ornith Desktop</h1>
-          <p>Everything runs locally through Ollama. Nothing leaves this Mac.</p>
+          <p>Everything runs locally through Ollama. Nothing leaves this device.</p>
         </div>
       </div>
     );

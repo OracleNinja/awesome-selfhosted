@@ -2,7 +2,7 @@
   "name": "ornith-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "A native macOS desktop chat app for local Ollama models.",
+  "description": "A desktop chat app for local Ollama models, runnable from a portable drive.",
   "author": "Ornith Desktop",
   "license": "MIT",
   "main": "dist-electron/main.js",

@@ -47,6 +47,7 @@ export interface OrnithApi {
     transcribe(wav: Uint8Array, locale: string): Promise<TranscriptionResult>;
     speak(request: SpeakRequest): Promise<void>;
     stopSpeaking(): Promise<void>;
+    finishedSpeaking(requestId: string): void;
   };
   on<K extends keyof IpcEventMap>(
     channel: K,

@@ -1,6 +1,6 @@
 # Ornith Desktop
 
-A macOS desktop chat application for local models served by [Ollama](https://ollama.com). No cloud API, no telemetry, no account — inference stays on your machine.
+A desktop chat application for local models served by [Ollama](https://ollama.com). No cloud API, no telemetry, no account — inference stays on your machine. Developed on macOS; the portable build runs on Windows and Linux too.
 
 It also runs as **Ornith Portable**: the same build, carrying its app, runtime, models and history on a drive, so it works on a machine that has never had Ollama installed. See [`PORTABLE.md`](./PORTABLE.md).
 
@@ -46,6 +46,7 @@ On Linux CI, run the E2E suite under a virtual display: `xvfb-run -a npm run tes
 - Settings for model, Ollama URL, temperature, top-p, context window, keep-alive, and theme
 - Live connection status that distinguishes "Ollama is down" from "that model isn't installed"
 - Portable mode: keeps everything on a drive and starts the Ollama the drive carries, reusing one that is already running rather than competing with it
+- Dictation and spoken replies, entirely on-device: the macOS Speech framework and `say` where they exist, otherwise whisper.cpp and Piper carried on the drive
 
 ## Architecture in one paragraph
 
@@ -59,7 +60,7 @@ Version 1 has **no agent capabilities**: `electron/agent/` contains the tool-reg
 
 ## Data locations
 
-Everything lives under Electron's `userData` directory — on macOS, `~/Library/Application Support/Ornith Desktop/`:
+Everything lives under Electron's `userData` directory — `~/Library/Application Support/Ornith Desktop/` on macOS, `%APPDATA%\Ornith Desktop\` on Windows, `~/.config/Ornith Desktop/` on Linux:
 
 - `ornith.db` — conversations and messages (SQLite, WAL mode)
 - `settings.json` — settings, written atomically

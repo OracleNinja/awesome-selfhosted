@@ -28,7 +28,8 @@ export default function ModeChooser({ onChoose }: Props) {
           >
             <span className="mode-option-title">Local</span>
             <span className="mode-option-body">
-              Runs through Ollama on this Mac. Private and offline. Requires a local model.
+              Runs through Ollama on this computer, or on the drive Ornith is running from.
+              Private and offline. Requires a local model.
             </span>
           </button>
 
@@ -48,8 +49,8 @@ export default function ModeChooser({ onChoose }: Props) {
 
         <footer className="modal-footer">
           <span className="field-hint">
-            You can change this at any time in Settings. Voice input and speech stay on this Mac in
-            both modes.
+            You can change this at any time in Settings. Where voice is available, speech is
+            recognised and spoken on this device in both modes — never uploaded.
           </span>
         </footer>
       </div>

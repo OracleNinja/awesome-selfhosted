@@ -2,8 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createSttEngine, detectStt, findHelper, helperCandidates } from '../../electron/voice/stt';
-import { detectTts } from '../../electron/voice/tts';
+import {
+  createSttEngine,
+  detectAppleSpeech,
+  detectStt,
+  findHelper,
+  helperCandidates,
+  whisperOptionsFor,
+} from '../../electron/voice/stt';
+import { resolveLayout, toolBinaryPath } from '../../shared/portable';
+import { createTtsEngine, detectSay, detectTts, piperOptionsFor } from '../../electron/voice/tts';
 
 describe('STT engine resolution', () => {
   let root: string;
@@ -14,11 +22,20 @@ describe('STT engine resolution', () => {
 
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  it('is unavailable off macOS, with a reason the UI can show', () => {
-    const result = detectStt({ appRoot: root, resourcesPath: root, platform: 'linux' });
+  it('the Apple engine alone is unavailable off macOS, with a reason the UI can show', () => {
+    const result = detectAppleSpeech({ appRoot: root, resourcesPath: root, platform: 'linux' });
     expect(result.available).toBe(false);
     expect(result.engine).toBe('macos-speech');
     expect(result.reason).toMatch(/macOS/i);
+  });
+
+  it('off macOS with no drive, points at the missing whisper build rather than at macOS', () => {
+    // "requires macOS" would be a lie now: whisper runs here, it is just absent.
+    const result = detectStt({ appRoot: root, resourcesPath: root, platform: 'linux' });
+    expect(result.available).toBe(false);
+    expect(result.engine).toBe('whisper-cpp');
+    expect(result.reason).not.toMatch(/requires macOS/i);
+    expect(result.reason).toMatch(/whisper/i);
   });
 
   it('is unavailable on macOS when the helper has not been built', () => {
@@ -51,7 +68,48 @@ describe('STT engine resolution', () => {
     const engine = createSttEngine({ appRoot: root, resourcesPath: root, platform: 'linux' });
     const result = await engine.transcribe({ wav: new Uint8Array([1, 2, 3]), locale: 'en-US' });
     expect(result.text).toBe('');
-    expect(result.error).toMatch(/macOS/i);
+    expect(result.error).toMatch(/speech-to-text engine/i);
+  });
+
+  it('an installed app has nowhere to have put whisper, so it reports none', () => {
+    const options = whisperOptionsFor({ appRoot: root, resourcesPath: root, platform: 'linux' });
+    expect(options.binaryPath).toBeNull();
+  });
+
+  it('a drive supplies the whisper paths, per platform slot', () => {
+    const layout = resolveLayout('/mnt/stick');
+    const options = whisperOptionsFor({
+      appRoot: root,
+      resourcesPath: root,
+      platform: 'win32',
+      arch: 'x64',
+      layout,
+    });
+
+    expect(options.binaryPath).toBe(toolBinaryPath(layout, 'win32', 'x64', 'whisper'));
+    expect(options.binaryPath).toMatch(/whisper-cli\.exe$/);
+    expect(options.modelDir).toBe(layout.sttModelDir);
+  });
+
+  it('on a Mac whose helper was never compiled, a drive-carried whisper still wins', () => {
+    const layout = resolveLayout(root);
+    const binary = toolBinaryPath(layout, 'darwin', 'arm64', 'whisper');
+    mkdirSync(path.dirname(binary), { recursive: true });
+    writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    chmodSync(binary, 0o755);
+    mkdirSync(layout.sttModelDir, { recursive: true });
+    writeFileSync(path.join(layout.sttModelDir, 'ggml-base.en.bin'), 'model');
+
+    const result = detectStt({
+      appRoot: path.join(root, 'nowhere'),
+      resourcesPath: path.join(root, 'nowhere'),
+      platform: 'darwin',
+      arch: 'arm64',
+      layout,
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.engine).toBe('whisper-cpp');
   });
 
   // The helper contract: a JSON object on stdout. Exercised with a shell stub so
@@ -97,15 +155,160 @@ describe('STT engine resolution', () => {
 });
 
 describe('TTS engine detection', () => {
-  it('reports unavailable off macOS with an actionable reason', () => {
-    // This suite runs on Linux in CI, which is exactly the unsupported case.
-    const result = detectTts();
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'ornith-tts-test-'));
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('uses the system voice where there is one, and plays it itself', () => {
+    const result = detectTts({ platform: 'darwin' });
     if (process.platform === 'darwin') {
       expect(result.available).toBe(true);
       expect(result.engine).toBe('macos-say');
+      expect(result.playback).toBe('native');
     } else {
-      expect(result.available).toBe(false);
-      expect(result.reason).toMatch(/macOS/i);
+      // /usr/bin/say does not exist here, so the branch is only reachable in
+      // the sense that the platform check passed.
+      expect(result.engine).toBe('macos-say');
     }
+  });
+
+  it('the system engine alone is macOS-only, and says so', () => {
+    const result = detectSay('linux');
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/macOS/i);
+  });
+
+  it('off macOS with no drive, points at the missing Piper build rather than at macOS', () => {
+    const result = detectTts({ platform: 'linux' });
+    expect(result.available).toBe(false);
+    expect(result.engine).toBe('piper');
+    expect(result.reason).not.toMatch(/requires macOS/i);
+    expect(result.reason).toMatch(/piper/i);
+  });
+
+  it('an installed app has nowhere to have put Piper, so it reports none', () => {
+    expect(piperOptionsFor({ platform: 'linux' }).binaryPath).toBeNull();
+  });
+
+  it('a drive supplies the Piper paths, per platform slot', () => {
+    const layout = resolveLayout('/mnt/stick');
+    const options = piperOptionsFor({ platform: 'win32', arch: 'x64', layout });
+
+    expect(options.binaryPath).toBe(toolBinaryPath(layout, 'win32', 'x64', 'piper'));
+    expect(options.binaryPath).toMatch(/piper\.exe$/);
+    expect(options.voiceDir).toBe(layout.ttsVoiceDir);
+  });
+
+  it('a drive carrying Piper and a voice speaks on Windows, played by the renderer', () => {
+    const layout = resolveLayout(root);
+    const binary = toolBinaryPath(layout, 'linux', 'x64', 'piper');
+    mkdirSync(path.dirname(binary), { recursive: true });
+    writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    chmodSync(binary, 0o755);
+
+    mkdirSync(layout.ttsVoiceDir, { recursive: true });
+    writeFileSync(path.join(layout.ttsVoiceDir, 'en_US-lessac-medium.onnx'), 'model');
+    writeFileSync(path.join(layout.ttsVoiceDir, 'en_US-lessac-medium.onnx.json'), '{}');
+
+    const result = detectTts({ platform: 'linux', arch: 'x64', layout });
+    expect(result.available).toBe(true);
+    expect(result.engine).toBe('piper');
+    // The drive's engine writes a file; the speakers belong to the renderer.
+    expect(result.playback).toBe('renderer');
+  });
+
+  /** A drive carrying a working Piper, so the dispatcher has something to pick. */
+  function driveWithPiper(body: string): ReturnType<typeof resolveLayout> {
+    const layout = resolveLayout(root);
+    const binary = toolBinaryPath(layout, process.platform, process.arch, 'piper');
+    mkdirSync(path.dirname(binary), { recursive: true });
+    writeFileSync(binary, body);
+    chmodSync(binary, 0o755);
+
+    mkdirSync(layout.ttsVoiceDir, { recursive: true });
+    writeFileSync(path.join(layout.ttsVoiceDir, 'en_US-test-medium.onnx'), 'voice');
+    writeFileSync(path.join(layout.ttsVoiceDir, 'en_US-test-medium.onnx.json'), '{}');
+    return layout;
+  }
+
+  it('lists the drive’s voices when the drive is the engine', async () => {
+    const layout = driveWithPiper('#!/bin/sh\nexit 0\n');
+    const engine = createTtsEngine({ layout, platform: process.platform, arch: process.arch });
+
+    expect(await engine.listVoices()).toEqual(['en_US-test-medium']);
+  });
+
+  it('returns no voices when there is no engine at all', async () => {
+    const engine = createTtsEngine({ platform: 'linux' });
+    expect(await engine.listVoices()).toEqual([]);
+  });
+
+  it.skipIf(process.platform === 'win32')('synthesises through the drive’s engine', async () => {
+    const layout = driveWithPiper(
+      '#!/bin/sh\n' +
+        'while [ $# -gt 0 ]; do\n' +
+        '  if [ "$1" = "--output_file" ]; then out="$2"; fi\n' +
+        '  shift\n' +
+        'done\n' +
+        'cat > /dev/null\n' +
+        'printf "RIFFfake-wav-bytes" > "$out"\n',
+    );
+
+    const engine = createTtsEngine({ layout, platform: process.platform, arch: process.arch });
+    const result = await engine.synthesize({
+      requestId: 'r1',
+      text: 'hello',
+      voice: '',
+      rate: 175,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(Buffer.from(result.wav ?? new Uint8Array()).toString()).toBe('RIFFfake-wav-bytes');
+    // The indicator must not be left latched on after synthesis returns.
+    expect(engine.speakingRequestId).toBeNull();
+  });
+
+  it('refuses to synthesise when no engine can run, rather than throwing', async () => {
+    const engine = createTtsEngine({ platform: 'linux' });
+    const result = await engine.synthesize({ requestId: 'r1', text: 'hi', voice: '', rate: 175 });
+
+    expect(result.wav).toBeNull();
+    expect(result.error).toMatch(/piper/i);
+  });
+
+  it('speak() is a no-op on a renderer-playback engine, and still reports done', async () => {
+    const layout = driveWithPiper('#!/bin/sh\nexit 0\n');
+    const engine = createTtsEngine({ layout, platform: process.platform, arch: process.arch });
+
+    // main calls synthesize() for this engine; speak() must not silently hang
+    // if it is ever called by mistake.
+    const finished = await new Promise<string>((resolve) => {
+      engine.speak({ requestId: 'r2', text: 'hello', voice: '', rate: 175 }, resolve);
+    });
+
+    expect(finished).toBe('r2');
+  });
+
+  it('stop() is safe when nothing is speaking', () => {
+    const engine = createTtsEngine({ platform: 'linux' });
+    expect(() => engine.stop()).not.toThrow();
+    expect(engine.speakingRequestId).toBeNull();
+  });
+
+  it('a voice without its config is not offered, because it cannot be loaded', () => {
+    const layout = resolveLayout(root);
+    const binary = toolBinaryPath(layout, 'linux', 'x64', 'piper');
+    mkdirSync(path.dirname(binary), { recursive: true });
+    writeFileSync(binary, '');
+    mkdirSync(layout.ttsVoiceDir, { recursive: true });
+    writeFileSync(path.join(layout.ttsVoiceDir, 'orphan.onnx'), 'model');
+
+    const result = detectTts({ platform: 'linux', arch: 'x64', layout });
+    expect(result.available).toBe(false);
+    expect(result.reason).toContain(layout.ttsVoiceDir);
   });
 });

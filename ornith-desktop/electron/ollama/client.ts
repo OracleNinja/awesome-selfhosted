@@ -56,7 +56,7 @@ export function connectionError(host: string, err: unknown): AppError {
   }
   return {
     code: 'OLLAMA_UNREACHABLE',
-    message: `Can't reach Ollama at ${host}. Is it running? Try \`ollama serve\` in Terminal.`,
+    message: `Can't reach Ollama at ${host}. Is it running? Start it with \`ollama serve\`.`,
     action: { label: 'Retry', kind: 'retry' },
     detail: message,
   };

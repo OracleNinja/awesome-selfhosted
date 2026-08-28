@@ -74,6 +74,8 @@ const api = {
     transcribe: (wav: Uint8Array, locale: string) => invoke('voice:transcribe', { wav, locale }),
     speak: (request: IpcInvokeMap['tts:speak']['req']) => invoke('tts:speak', request),
     stopSpeaking: () => invoke('tts:stop'),
+    /** Renderer playback only: tells main the audio it sent has finished. */
+    finishedSpeaking: (requestId: string) => send('tts:finished', { requestId }),
   },
 
   on,

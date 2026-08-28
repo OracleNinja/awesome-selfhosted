@@ -11,8 +11,10 @@
  *   <root>/                        e.g. /Volumes/ORNITH/Ornith
  *   ├── ornith-portable.json       marker + manifest; its presence IS portable mode
  *   ├── app/                       packaged Electron builds, one dir per platform
- *   ├── runtime/<platform>-<arch>/ bundled Ollama binary
+ *   ├── runtime/<platform>-<arch>/ bundled binaries: ollama, whisper-cli, piper
  *   ├── models/                    OLLAMA_MODELS points here (blobs/ + manifests/)
+ *   ├── voice/whisper/             speech-to-text models
+ *   ├── voice/piper/               text-to-speech voices
  *   └── data/                      userData: ornith.db, settings.json, logs/
  *
  * Why a marker file rather than asking "am I on a removable volume":
@@ -70,6 +72,15 @@ export interface PortableLayout {
   runtimeHomeDir: string;
   /** `OLLAMA_TMPDIR`: model-loading scratch space follows the drive too. */
   runtimeTmpDir: string;
+  /**
+   * Speech models. Separate from `models/`, which is Ollama's own store and is
+   * laid out by Ollama — dropping a whisper model in there would confuse it.
+   */
+  voiceDir: string;
+  /** whisper.cpp GGML models, e.g. `ggml-base.en.bin`. */
+  sttModelDir: string;
+  /** Piper voices: an `.onnx` and its `.onnx.json` config, side by side. */
+  ttsVoiceDir: string;
 }
 
 /**
@@ -215,6 +226,9 @@ export function resolveLayout(
     appDir: join(root, dirs.app),
     runtimeHomeDir: join(dataDir, 'runtime-home'),
     runtimeTmpDir: join(dataDir, 'runtime-tmp'),
+    voiceDir: join(root, 'voice'),
+    sttModelDir: join(root, 'voice', 'whisper'),
+    ttsVoiceDir: join(root, 'voice', 'piper'),
   };
 }
 
@@ -229,8 +243,35 @@ export function runtimeSlug(platform: NodeJS.Platform, arch: string): string {
   return `${platform}-${arch}`;
 }
 
+/**
+ * The executables a provisioned drive carries, per platform slot. Inference and
+ * both halves of the voice layer are all just binaries on the drive, found the
+ * same way, so they share one naming rule.
+ */
+export const RUNTIME_TOOLS = {
+  ollama: 'ollama',
+  /** whisper.cpp's CLI. Upstream renamed `main` to `whisper-cli` in 2024. */
+  whisper: 'whisper-cli',
+  piper: 'piper',
+} as const;
+
+export type RuntimeTool = keyof typeof RUNTIME_TOOLS;
+
+export function toolBinaryName(tool: RuntimeTool, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? `${RUNTIME_TOOLS[tool]}.exe` : RUNTIME_TOOLS[tool];
+}
+
+export function toolBinaryPath(
+  layout: PortableLayout,
+  platform: NodeJS.Platform,
+  arch: string,
+  tool: RuntimeTool,
+): string {
+  return join(layout.runtimeDir, runtimeSlug(platform, arch), toolBinaryName(tool, platform));
+}
+
 export function runtimeBinaryName(platform: NodeJS.Platform): string {
-  return platform === 'win32' ? 'ollama.exe' : 'ollama';
+  return toolBinaryName('ollama', platform);
 }
 
 export function runtimeBinaryPath(
@@ -238,15 +279,21 @@ export function runtimeBinaryPath(
   platform: NodeJS.Platform,
   arch: string,
 ): string {
-  return join(layout.runtimeDir, runtimeSlug(platform, arch), runtimeBinaryName(platform));
+  return toolBinaryPath(layout, platform, arch, 'ollama');
 }
 
-/** The slugs a provisioned drive should carry to cover mainstream hardware. */
+/**
+ * The slugs a provisioned drive should carry to cover mainstream hardware.
+ * Both arm64 rows matter: the packaging config builds arm64 for Windows and
+ * Linux, and without a slot those machines find no runtime at all.
+ */
 export const SUPPORTED_RUNTIME_SLUGS = [
   'darwin-arm64',
   'darwin-x64',
   'win32-x64',
+  'win32-arm64',
   'linux-x64',
+  'linux-arm64',
 ] as const;
 
 /* --------------------------------------------------------------- capacity */

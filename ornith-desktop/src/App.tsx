@@ -8,9 +8,11 @@ import SourceList from './components/SourceList';
 import { bridge, newRequestId } from './lib/bridge';
 import { useStreamBuffer } from './lib/useStreamBuffer';
 import { useVoiceInput } from './lib/useVoiceInput';
+import { useSpokenAudio } from './lib/useSpokenAudio';
 import { speakableText } from '../shared/speakable';
 import type { VoiceCapabilities } from '../shared/voice';
 import type {
+  AppInfo,
   ChatMessage,
   Conversation,
   ConversationSummary,
@@ -41,9 +43,14 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sources, setSources] = useState<AnsweredSource[]>([]);
   const [portable, setPortable] = useState<PortableInfo | null>(null);
+  const [platform, setPlatform] = useState<AppInfo['platform'] | null>(null);
 
   const buffer = useStreamBuffer();
   const composerRef = useRef<ComposerHandle>(null);
+
+  // No-op where the engine plays its own audio; the speakers on Windows and
+  // Linux belong to the renderer.
+  useSpokenAudio();
 
   // Listeners are registered once and read live values from refs, so they never
   // close over stale state.
@@ -104,6 +111,15 @@ export default function App() {
 
   useEffect(() => {
     void bridge.voice.capabilities().then(setVoice);
+  }, []);
+
+  // Published on <html> so the stylesheet can reserve room for the macOS
+  // traffic lights only where macOS actually draws them.
+  useEffect(() => {
+    void bridge.appInfo().then((info) => {
+      setPlatform(info.platform);
+      document.documentElement.dataset.platform = info.platform;
+    });
   }, []);
 
   // Re-probed whenever the connection state moves, because that is also when
@@ -368,7 +384,7 @@ export default function App() {
     [handleSend],
   );
 
-  const voiceInput = useVoiceInput(settings?.sttLocale ?? 'en-US', handleTranscript);
+  const voiceInput = useVoiceInput(settings?.sttLocale ?? 'en-US', handleTranscript, platform);
 
   const handleMicToggle = useCallback(() => {
     if (voiceInput.state === 'recording') void voiceInput.stop();

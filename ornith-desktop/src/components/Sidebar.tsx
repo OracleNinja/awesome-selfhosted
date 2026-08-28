@@ -133,7 +133,13 @@ export default function Sidebar({
         <button type="button" className="ghost-button" onClick={onOpenSettings} data-testid="open-settings">
           Settings
         </button>
-        <StatusIndicator status={status} onRetry={onRetryConnection} mode={mode} onlineConfigured={onlineConfigured} />
+        <StatusIndicator
+          status={status}
+          onRetry={onRetryConnection}
+          mode={mode}
+          onlineConfigured={onlineConfigured}
+          onOpenSettings={onOpenSettings}
+        />
         <PortableBadge info={portable} />
       </div>
     </aside>

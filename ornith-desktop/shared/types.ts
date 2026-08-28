@@ -123,16 +123,16 @@ export interface Settings {
 
   /** Speak every assistant reply. A reply to a spoken prompt is always spoken. */
   speakResponses: boolean;
-  /** macOS voice name; empty means the system default. */
+  /** Engine voice name; empty means the engine default. */
   voiceName: string;
-  /** Words per minute passed to `say`. */
+  /** Speaking rate in words per minute, mapped onto whatever the engine takes. */
   speechRate: number;
   /** BCP-47 locale for on-device speech recognition. */
   sttLocale: string;
 
   /* ---- online mode ---- */
 
-  /** Which backend answers. Local keeps everything on this Mac. */
+  /** Which backend answers. Local keeps everything on this device. */
   mode: AiMode;
   /** True once the user has made a first-run choice, so it is asked only once. */
   modeChosen: boolean;

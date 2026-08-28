@@ -37,7 +37,7 @@ import {
   SUPPORTED_RUNTIME_SLUGS,
   formatBytes,
   resolveLayout,
-  runtimeBinaryName,
+  toolBinaryName,
 } from '../shared/portable.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -192,7 +192,7 @@ start "" "%~dp0app\\win\\Ornith Desktop.exe" %*
 }
 
 function copyApp(source, layout) {
-  const resolved = path.resolve(source);
+  const resolved = path.resolve(expandHome(source));
   if (!existsSync(resolved)) fail(`--app path does not exist: ${resolved}`);
 
   const destination = path.join(layout.appDir, path.basename(resolved));
@@ -201,8 +201,19 @@ function copyApp(source, layout) {
   return destination;
 }
 
+/**
+ * `~/x` and, on Windows, `~\x`. Windows sets USERPROFILE rather than HOME, and
+ * without both checks a tilde survives into the path and `path.resolve` quietly
+ * invents a directory literally named `~` under the working directory.
+ */
+export function expandHome(value) {
+  const home = process.env.HOME ?? process.env.USERPROFILE;
+  if (!home) return value;
+  return value.replace(/^~(?=$|[/\\])/, home);
+}
+
 function copyModels(source, layout) {
-  const resolved = path.resolve(source.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'));
+  const resolved = path.resolve(expandHome(source));
   if (!existsSync(resolved)) fail(`--copy-models path does not exist: ${resolved}`);
 
   const size = directorySize(resolved);
@@ -243,6 +254,9 @@ function main() {
     layout.appDir,
     layout.runtimeHomeDir,
     layout.runtimeTmpDir,
+    layout.voiceDir,
+    layout.sttModelDir,
+    layout.ttsVoiceDir,
   ]) {
     mkdirSync(dir, { recursive: true });
   }
@@ -265,22 +279,52 @@ function main() {
   console.log(`  data      ${layout.dataDir}`);
   console.log(`  models    ${layout.modelsDir}${copiedModels ? ` (+${formatBytes(copiedModels)})` : ''}`);
   console.log(`  runtime   ${layout.runtimeDir}`);
+  console.log(`  voice     ${layout.voiceDir}`);
   if (copiedApp) console.log(`  app       ${copiedApp}`);
   for (const launcher of launchers) console.log(`  launcher  ${launcher}`);
   if (available !== null) console.log(`  free      ${formatBytes(available)}`);
 
-  const slotFor = (slug) =>
-    path.join(layout.runtimeDir, slug, runtimeBinaryName(slug.startsWith('win32') ? 'win32' : 'linux'));
+  // Every tool the drive carries is found the same way, so report them the
+  // same way: a slot per platform, named after the binary the app looks for.
+  const platformOf = (slug) => (slug.startsWith('win32') ? 'win32' : 'linux');
+  const slotFor = (slug, tool) =>
+    path.join(layout.runtimeDir, slug, toolBinaryName(tool, platformOf(slug)));
 
-  const missingRuntimes = SUPPORTED_RUNTIME_SLUGS.filter((slug) => !existsSync(slotFor(slug)));
+  const missing = (tool) => SUPPORTED_RUNTIME_SLUGS.filter((slug) => !existsSync(slotFor(slug, tool)));
+
+  const missingRuntimes = missing('ollama');
+  const missingWhisper = missing('whisper');
+  const missingPiper = missing('piper');
+
+  const hasSttModel = readdirSync(layout.sttModelDir).some((n) => n.toLowerCase().endsWith('.bin'));
+  const hasTtsVoice = readdirSync(layout.ttsVoiceDir).some((n) => n.toLowerCase().endsWith('.onnx'));
 
   console.log('\nStill to do by hand:');
   if (missingRuntimes.length > 0) {
     console.log(`  - Drop an Ollama binary into each runtime slot you need:`);
-    for (const slug of missingRuntimes) console.log(`      ${slotFor(slug)}`);
+    for (const slug of missingRuntimes) console.log(`      ${slotFor(slug, 'ollama')}`);
     console.log('    Downloads: https://github.com/ollama/ollama/releases');
     console.log('    On macOS and Linux the binary must be executable: chmod +x <path>');
   }
+
+  // Voice is optional — chat works without it — so these are listed after the
+  // runtime and phrased as an addition, not a failure.
+  if (missingWhisper.length > 0 || !hasSttModel) {
+    console.log('  - Optional, for dictation away from macOS: whisper.cpp');
+    for (const slug of missingWhisper) console.log(`      ${slotFor(slug, 'whisper')}`);
+    if (!hasSttModel) console.log(`      a ggml-*.bin model in ${layout.sttModelDir}`);
+    console.log('    Binaries: https://github.com/ggml-org/whisper.cpp/releases');
+    console.log('    Models:   https://huggingface.co/ggerganov/whisper.cpp');
+  }
+  if (missingPiper.length > 0 || !hasTtsVoice) {
+    console.log('  - Optional, for spoken replies away from macOS: Piper');
+    for (const slug of missingPiper) console.log(`      ${slotFor(slug, 'piper')}`);
+    if (!hasTtsVoice) {
+      console.log(`      a voice (.onnx AND its .onnx.json) in ${layout.ttsVoiceDir}`);
+    }
+    console.log('    Binaries and voices: https://github.com/rhasspy/piper/releases');
+  }
+
   if (!copiedModels) {
     console.log(`  - Put your models under ${layout.modelsDir} (blobs/ and manifests/),`);
     console.log('    or re-run with --copy-models ~/.ollama/models');

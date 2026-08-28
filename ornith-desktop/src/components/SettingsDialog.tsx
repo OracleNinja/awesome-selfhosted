@@ -53,13 +53,13 @@ export default function SettingsDialog({ settings, status, voice, onUpdate, onCl
               onChange={(e) => onUpdate({ mode: e.target.value as Settings['mode'], modeChosen: true })}
               data-testid="settings-mode"
             >
-              <option value="local">Local — Ollama on this Mac</option>
+              <option value="local">Local — Ollama on this device</option>
               <option value="online">Online — cloud AI with web retrieval</option>
             </select>
             <span className="field-hint">
               {settings.mode === 'online'
                 ? 'Conversations are sent to the configured gateway.'
-                : 'Everything stays on this Mac.'}
+                : 'Everything stays on this device.'}
             </span>
           </label>
 

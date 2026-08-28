@@ -1,5 +1,6 @@
 import type {
   SpeakRequest,
+  SpokenAudio,
   TranscriptionRequest,
   TranscriptionResult,
   TtsState,
@@ -56,6 +57,12 @@ export interface IpcInvokeMap {
 export interface IpcSendMap {
   'chat:start': { conversationId: string; requestId: string; userText: string };
   'chat:abort': { requestId: string };
+  /**
+   * Renderer-played audio has finished or was stopped. Main owns the speaking
+   * indicator for both engines, so it has to be told when the half it cannot
+   * see is done.
+   */
+  'tts:finished': { requestId: string };
 }
 
 /** Main → renderer events. */
@@ -78,6 +85,8 @@ export interface IpcEventMap {
   /** Sources the online backend consulted for this turn. */
   'chat:sources': { requestId: string; sources: AnsweredSource[] };
   'tts:state': TtsState;
+  /** A synthesised reply for the renderer to play. See TtsPlayback. */
+  'tts:audio': SpokenAudio;
   /** Emitted once the runtime settles, so a cold start is not polled for. */
   'portable:changed': PortableInfo;
 
@@ -126,6 +135,7 @@ export const EVENT_CHANNELS = [
   'ollama:status-changed',
   'settings:changed',
   'tts:state',
+  'tts:audio',
   'portable:changed',
   'menu:new-chat',
   'menu:delete-chat',

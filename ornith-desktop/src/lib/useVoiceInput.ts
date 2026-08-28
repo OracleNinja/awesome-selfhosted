@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { bridge } from './bridge';
 import { downsample, encodeWav, peakAmplitude, SILENCE_THRESHOLD } from '../../shared/wav';
 import { MAX_RECORDING_SECONDS, STT_SAMPLE_RATE } from '../../shared/voice';
+import type { AppInfo } from '../../shared/types';
 
 export type RecordingState = 'idle' | 'recording' | 'transcribing';
 
@@ -19,7 +20,11 @@ export interface VoiceInputError {
  * Raw PCM is collected rather than using MediaRecorder, because MediaRecorder
  * emits WebM/Opus and AVFoundation cannot read it.
  */
-export function useVoiceInput(locale: string, onTranscript: (text: string) => void) {
+export function useVoiceInput(
+  locale: string,
+  onTranscript: (text: string) => void,
+  platform: AppInfo['platform'] | null = null,
+) {
   const [state, setState] = useState<RecordingState>('idle');
   const [error, setError] = useState<VoiceInputError | null>(null);
 
@@ -43,12 +48,19 @@ export function useVoiceInput(locale: string, onTranscript: (text: string) => vo
 
   useEffect(() => teardown, [teardown]);
 
+  // The panel to send someone to is different on every OS, and on Linux there
+  // is no single one — so name it only where naming it is actually true.
+  const microphoneRemedy = (): string => {
+    if (platform === 'darwin') return 'System Settings → Privacy & Security → Microphone';
+    if (platform === 'win32') return 'Settings → Privacy & security → Microphone';
+    return "your system's sound or privacy settings";
+  };
+
   const describeError = (err: unknown): VoiceInputError => {
     const name = (err as { name?: string })?.name ?? '';
     if (name === 'NotAllowedError' || name === 'SecurityError') {
       return {
-        message:
-          'Microphone access was denied. Enable it in System Settings → Privacy & Security → Microphone.',
+        message: `Microphone access was denied. Allow it in ${microphoneRemedy()}, then try again.`,
         permanent: true,
       };
     }

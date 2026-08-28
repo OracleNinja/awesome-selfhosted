@@ -207,6 +207,13 @@ async function refreshStatus(): Promise<OllamaStatus> {
   if (!next.connected) {
     // Force a re-probe once the server comes back.
     probedModel = null;
+
+    // On a drive, "is Ollama running?" is the wrong question — the drive was
+    // supposed to start it. The supervisor knows why it could not, and names
+    // the file that is missing, so its reason replaces the generic one.
+    if (runtime.source === 'unavailable' && runtime.reason && next.error) {
+      next.error = { ...next.error, message: runtime.reason };
+    }
   }
 
   if (statusChanged(status, next)) {
@@ -364,26 +371,51 @@ function registerIpc(): void {
     },
   );
 
-  ipcMain.handle('tts:speak', (_e, req: SpeakRequest) => {
+  ipcMain.handle('tts:speak', async (_e, req: SpeakRequest) => {
     if (!req || typeof req.text !== 'string' || typeof req.requestId !== 'string') return;
 
     const settings = settingsStore.get();
-    broadcast('tts:state', { speaking: true, requestId: req.requestId });
+    const request: SpeakRequest = {
+      requestId: req.requestId,
+      text: req.text,
+      voice: typeof req.voice === 'string' ? req.voice : settings.voiceName,
+      rate: Number.isFinite(req.rate) ? req.rate : settings.speechRate,
+    };
 
-    ttsEngine.speak(
-      {
-        requestId: req.requestId,
-        text: req.text,
-        voice: typeof req.voice === 'string' ? req.voice : settings.voiceName,
-        rate: Number.isFinite(req.rate) ? req.rate : settings.speechRate,
-      },
-      (finishedId) => broadcast('tts:state', { speaking: false, requestId: finishedId }),
-    );
+    broadcast('tts:state', { speaking: true, requestId: request.requestId });
+
+    if (ttsEngine.availability().playback === 'native') {
+      ttsEngine.speak(request, (finishedId) =>
+        broadcast('tts:state', { speaking: false, requestId: finishedId }),
+      );
+      return;
+    }
+
+    // The drive's engine writes a file; the renderer is what has speakers.
+    // Synthesis can take seconds, so the indicator is already on by now.
+    const result = await ttsEngine.synthesize(request);
+
+    if (!result.wav) {
+      log.warn('tts.synthesis.failed', { detail: result.error });
+      broadcast('tts:state', { speaking: false, requestId: request.requestId });
+      return;
+    }
+
+    broadcast('tts:audio', { requestId: request.requestId, wav: result.wav });
+  });
+
+  // Renderer playback has finished or was stopped: main owns the indicator for
+  // both engines, so it has to be told when the half it cannot see is done.
+  ipcMain.on('tts:finished', (_e, req: { requestId: string }) => {
+    if (typeof req?.requestId !== 'string') return;
+    broadcast('tts:state', { speaking: false, requestId: req.requestId });
   });
 
   ipcMain.handle('tts:stop', () => {
     const id = ttsEngine.speakingRequestId;
     ttsEngine.stop();
+    // Renderer playback stops on this too: the player listens for its own id
+    // going quiet, so one message covers both engines.
     broadcast('tts:state', { speaking: false, requestId: id });
   });
 
@@ -538,10 +570,13 @@ function bootstrap(): void {
     getBackend: resolveBackend,
   });
 
-  ttsEngine = createTtsEngine();
+  ttsEngine = createTtsEngine({ layout: portable.layout });
   sttEngine = createSttEngine({
     appRoot: path.join(__dirname, '..'),
     resourcesPath: process.resourcesPath ?? path.join(__dirname, '..'),
+    // The drive is where a cross-platform speech engine can live, so the
+    // layout is what lets dictation work off a Mac at all.
+    layout: portable.layout,
   });
 
   log.info('startup', {
