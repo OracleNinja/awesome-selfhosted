@@ -97,6 +97,50 @@ Both sit under ignored paths, so neither can reach a manifest.
 `NO_WORKTREE`. Genuine loss still reports as loss; the distinction is the whole
 point, so the negative case is asserted too.
 
+## The state store: guarding without touching a managed file
+
+Two defects in the `~/.claude` state-store installation:
+
+1. `schemas/state-store.schema.json` was **missing entirely**, so every write
+   through the installed copy threw `ENOENT` during validation. Reads worked,
+   which is why it survived several phases unnoticed.
+2. `createStateStore` silently ignored unrecognised options. A caller passing
+   `repoRoot` — a plausible key the API does not have — received the **default
+   production database** rather than an error. That is the worst outcome
+   available to a misconfigured caller, and it happened: a Lead script intending
+   a repo-scoped database quietly read and wrote the real ledger.
+
+The schema was simply restored; it is not a managed file, and its absence was
+pure breakage.
+
+The option guard took a wrong turn worth recording. The obvious fix — add the
+check to `scripts/lib/state-store/index.js` — was implemented, and it worked.
+It also registered as **install drift**: that file is ECC-managed, the install
+manifest records its content hash, and changing it flipped install health to
+`warning`. That extra attention item then broke **four ECC tests**, which build
+a temporary database but read the real `~/.claude` while asserting on it.
+Causation was confirmed by counterfactual: the manifest-matching file passes
+21/0, the patched one fails 17/4.
+
+Carrying four permanently red tests to guard against a typo is a bad trade. A
+regression baseline nobody trusts is worse than the bug it hides, and "those
+four are expected" is how a baseline rots.
+
+So the guard moved to `scripts/lib/ecc-state.js`, a file this workforce owns.
+Every ECC script opens the store through `openStateStore`, the managed copy
+stays byte-identical to what ECC installed, and drift is back to zero.
+
+The limitation is real and stated rather than hidden: code calling
+`createStateStore` directly is still unguarded. That is acceptable only because
+the ECC workforce is the sole writer to this database and goes through the
+wrapper. `state-store-install.test.js` asserts the managed file stays pristine,
+so the tempting shortcut fails loudly if anyone takes it again.
+
+**Separately, an ECC test-isolation defect was found and not fixed** (it is
+third-party): a unit test that constructs a temp database should not have its
+assertions depend on the developer's real `~/.claude` install state. Any
+legitimate local install change breaks it. Recorded, not worked around.
+
 ## What was deliberately not done
 
 **Local-vs-CI Electron divergence (P2N-FINDING-2) was left alone.** Phase 2N saw
