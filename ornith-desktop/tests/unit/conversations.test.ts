@@ -12,8 +12,8 @@ describe('conversation store', () => {
     store = createConversationStore(db);
   });
 
-  it('migrates a fresh database to version 2', () => {
-    expect(schemaVersion(db)).toBe(2);
+  it('migrates a fresh database to version 3', () => {
+    expect(schemaVersion(db)).toBe(3);
   });
 
   it('is idempotent when reopened', () => {

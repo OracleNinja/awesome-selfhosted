@@ -70,6 +70,50 @@ const MIGRATIONS: Array<(db: DatabaseSync) => void> = [
       END;
     `);
   },
+
+  function titleSearchIndex(db) {
+    // Second external-content FTS5 index, alongside messages_fts: title
+    // matching (see shared/types.ts SearchMatchField) needs its own virtual
+    // table because external content maps every indexed column to exactly
+    // one base table.
+    db.exec(`
+      CREATE VIRTUAL TABLE conversations_fts USING fts5(
+        title,
+        content='conversations',
+        content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+    `);
+
+    // Backfill so a user's existing conversation titles are searchable
+    // immediately after the upgrade, mirroring the messages_fts backfill above.
+    db.exec('INSERT INTO conversations_fts(rowid, title) SELECT rowid, title FROM conversations;');
+
+    // Same external-content idiom as the messages_fts triggers above: deletes
+    // and updates are expressed as an explicit 'delete' command against the
+    // shadow table before the new state (if any) is inserted.
+    //
+    // Unlike messages_fts_au, the UPDATE trigger here is scoped to `OF title`.
+    // conversations.updated_at changes on every message turn (see touch() in
+    // conversations.ts), and an unscoped trigger would rebuild this
+    // conversation's title index entry on every one of those touches even
+    // though the title never changed. messages_fts_au stays unscoped because
+    // message content genuinely does change mid-stream.
+    db.exec(`
+      CREATE TRIGGER conversations_fts_ai AFTER INSERT ON conversations BEGIN
+        INSERT INTO conversations_fts(rowid, title) VALUES (new.rowid, new.title);
+      END;
+
+      CREATE TRIGGER conversations_fts_ad AFTER DELETE ON conversations BEGIN
+        INSERT INTO conversations_fts(conversations_fts, rowid, title) VALUES('delete', old.rowid, old.title);
+      END;
+
+      CREATE TRIGGER conversations_fts_au AFTER UPDATE OF title ON conversations BEGIN
+        INSERT INTO conversations_fts(conversations_fts, rowid, title) VALUES('delete', old.rowid, old.title);
+        INSERT INTO conversations_fts(rowid, title) VALUES (new.rowid, new.title);
+      END;
+    `);
+  },
 ];
 
 export function openDatabase(location: string): DatabaseSync {

@@ -15,6 +15,7 @@ import type {
   MessageStatus,
   Role,
   SearchHit,
+  SearchMatchField,
   SearchRequest,
   SearchResult,
 } from '../../shared/types';
@@ -75,27 +76,29 @@ function toMessage(row: MessageRow): ChatMessage {
 }
 
 interface SearchRow {
+  matched_in: string;
   conversation_id: string;
   title: string;
-  message_id: string;
-  role: string;
+  message_id: string | null;
+  role: string | null;
   created_at: number;
   snippet: string;
   score: number;
 }
 
 function toSearchHit(row: SearchRow): SearchHit {
+  // A title match's row carries SQL NULL for message_id/role (see the title
+  // branch of searchStatement below); spread in nothing rather than a null
+  // so the shape matches SearchHit's optional `messageId?`/`role?`.
   return {
     conversationId: row.conversation_id,
     title: row.title,
-    // v1 searched message content only; every hit this mapper produces is a
-    // content match. Title matching arrives with the conversations_fts index.
-    matchedIn: 'content',
-    messageId: row.message_id,
-    role: row.role as Role,
+    matchedIn: row.matched_in as SearchMatchField,
     snippet: row.snippet,
     createdAt: Number(row.created_at),
     score: Number(row.score),
+    ...(row.message_id !== null ? { messageId: row.message_id } : {}),
+    ...(row.role !== null ? { role: row.role as Role } : {}),
   };
 }
 
@@ -151,7 +154,7 @@ export interface ConversationStore {
   ): void;
   /** Rewrites rows left mid-stream by a crash. Returns how many were repaired. */
   recoverInterrupted(): number;
-  /** Full-text search over message content. Never throws; failures are reported via SearchResult.error. */
+  /** Full-text search over message content and conversation titles. Never throws; failures are reported via SearchResult.error. */
   search(request: SearchRequest): SearchResult;
 }
 
@@ -162,20 +165,46 @@ export function createConversationStore(db: DatabaseSync): ConversationStore {
     touch.run(when, id);
   }
 
+  // Content hits and title hits come from two different FTS5 tables, unioned
+  // in one statement so a single ORDER BY + LIMIT decides the combined page
+  // (truncated must reflect both indexes together, not either alone). bm25
+  // scores from the two indexes are not calibrated against each other --
+  // titles are short documents and bm25 tends to reward them -- so this
+  // ordering is deterministic, not a claim that cross-index ranking is
+  // precise. Ties are broken by conversationId, then title-before-content,
+  // then messageId.
   const searchStatement = db.prepare(`
-    SELECT
-      c.id AS conversation_id,
-      c.title AS title,
-      m.id AS message_id,
-      m.role AS role,
-      m.created_at AS created_at,
-      snippet(messages_fts, 0, ?, ?, '…', 10) AS snippet,
-      bm25(messages_fts) AS score
-    FROM messages_fts
-    JOIN messages m ON m.rowid = messages_fts.rowid
-    JOIN conversations c ON c.id = m.conversation_id
-    WHERE messages_fts MATCH ?
-    ORDER BY score ASC, m.created_at DESC, m.id ASC
+    SELECT * FROM (
+      SELECT
+        'content' AS matched_in,
+        c.id AS conversation_id,
+        c.title AS title,
+        m.id AS message_id,
+        m.role AS role,
+        m.created_at AS created_at,
+        snippet(messages_fts, 0, ?, ?, '…', 10) AS snippet,
+        bm25(messages_fts) AS score
+      FROM messages_fts
+      JOIN messages m ON m.rowid = messages_fts.rowid
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE messages_fts MATCH ?
+
+      UNION ALL
+
+      SELECT
+        'title' AS matched_in,
+        c.id AS conversation_id,
+        c.title AS title,
+        NULL AS message_id,
+        NULL AS role,
+        c.created_at AS created_at,
+        snippet(conversations_fts, 0, ?, ?, '…', 10) AS snippet,
+        bm25(conversations_fts) AS score
+      FROM conversations_fts
+      JOIN conversations c ON c.rowid = conversations_fts.rowid
+      WHERE conversations_fts MATCH ?
+    )
+    ORDER BY score ASC, conversation_id ASC, (matched_in = 'content') ASC, message_id ASC
     LIMIT ?
   `);
 
@@ -393,14 +422,20 @@ export function createConversationStore(db: DatabaseSync): ConversationStore {
       }
 
       const limit = clampSearchLimit(request.limit);
+      const matchQuery = toFtsMatchQuery(query);
 
       try {
-        // Ask for one extra row so a full page can be distinguished from an
-        // exact-fit page without a second COUNT query.
+        // Ask for one extra row across the combined (title + content) result
+        // set so a full page can be distinguished from an exact-fit page
+        // without a second COUNT query. The same escaped query is bound to
+        // both MATCH clauses inside searchStatement.
         const rows = searchStatement.all(
           SNIPPET_MATCH_OPEN,
           SNIPPET_MATCH_CLOSE,
-          toFtsMatchQuery(query),
+          matchQuery,
+          SNIPPET_MATCH_OPEN,
+          SNIPPET_MATCH_CLOSE,
+          matchQuery,
           limit + 1,
         ) as unknown as SearchRow[];
 
