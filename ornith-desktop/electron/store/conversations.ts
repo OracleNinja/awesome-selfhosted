@@ -158,22 +158,22 @@ export interface ConversationStore {
   search(request: SearchRequest): SearchResult;
 }
 
-export function createConversationStore(db: DatabaseSync): ConversationStore {
-  const touch = db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?');
-
-  function touchConversation(id: string, when = Date.now()): void {
-    touch.run(when, id);
-  }
-
-  // Content hits and title hits come from two different FTS5 tables, unioned
-  // in one statement so a single ORDER BY + LIMIT decides the combined page
-  // (truncated must reflect both indexes together, not either alone). bm25
-  // scores from the two indexes are not calibrated against each other --
-  // titles are short documents and bm25 tends to reward them -- so this
-  // ordering is deterministic, not a claim that cross-index ranking is
-  // precise. Ties are broken by conversationId, then title-before-content,
-  // then messageId.
-  const searchStatement = db.prepare(`
+// Content hits and title hits come from two different FTS5 tables, unioned
+// in one statement so a single ORDER BY + LIMIT decides the combined page
+// (truncated must reflect both indexes together, not either alone). bm25
+// scores from the two indexes are not calibrated against each other --
+// titles are short documents and bm25 tends to reward them -- so this
+// ordering is deterministic, not a claim that cross-index ranking is
+// precise. Ties are broken by conversationId, then title-before-content,
+// then messageId.
+//
+// Exported as a testability seam: lifted verbatim out of
+// createConversationStore's closure so a test can run `EXPLAIN QUERY PLAN`
+// against the exact statement production prepares and executes, rather than
+// against a hand-duplicated copy that could silently drift from this one.
+// This is introspection only -- nothing about the query text, ordering, or
+// escaping changes by being named.
+export const SEARCH_SQL = `
     SELECT * FROM (
       SELECT
         'content' AS matched_in,
@@ -206,7 +206,16 @@ export function createConversationStore(db: DatabaseSync): ConversationStore {
     )
     ORDER BY score ASC, conversation_id ASC, (matched_in = 'content') ASC, message_id ASC
     LIMIT ?
-  `);
+  `;
+
+export function createConversationStore(db: DatabaseSync): ConversationStore {
+  const touch = db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?');
+
+  function touchConversation(id: string, when = Date.now()): void {
+    touch.run(when, id);
+  }
+
+  const searchStatement = db.prepare(SEARCH_SQL);
 
   return {
     create(model, title = 'New chat') {

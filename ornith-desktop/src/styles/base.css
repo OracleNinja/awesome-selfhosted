@@ -881,6 +881,17 @@ button {
   line-height: 1.5;
 }
 
+/* Same visual language as .group-label / .message-role: a small uppercase
+   muted tag, reused here rather than introducing a new style for what is the
+   same kind of thing -- a label identifying what a piece of content is. */
+.search-result-kind {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .search-result-snippet mark {
   background: none;
   color: var(--accent);

@@ -804,7 +804,7 @@ export default function App() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search messages…"
+                  placeholder="Search titles and messages…"
                   autoComplete="off"
                   data-testid="search-input"
                 />
@@ -831,15 +831,42 @@ export default function App() {
                 ) : (
                   <ul className="search-results" data-testid="search-results">
                     {searchResult.hits.map((hit) => (
-                      <li key={hit.messageId}>
+                      // messageId is present on a content hit and absent on a
+                      // title hit (see shared/types.ts SearchHit), so it alone
+                      // cannot key every row -- every title hit for this query
+                      // would collapse to the same undefined key. conversationId
+                      // is unique per title hit (conversations_fts mirrors
+                      // conversations 1:1, so a query matches a conversation's
+                      // title at most once), so it stands in for the missing
+                      // messageId. The matchedIn prefix keeps a content hit's
+                      // messageId and a title hit's conversationId from ever
+                      // colliding even in principle, since they are drawn from
+                      // different id spaces.
+                      <li key={`${hit.matchedIn}-${hit.messageId ?? hit.conversationId}`}>
                         <button
                           type="button"
                           className="search-result"
                           onClick={() => handleSelectSearchResult(hit.conversationId)}
                           data-testid="search-result"
                         >
-                          <span className="search-result-title">{hit.title}</span>
+                          {/*
+                            A content hit's snippet excerpts the matching
+                            message, so the plain title above it tells the user
+                            which conversation that message lives in. A title
+                            hit's snippet *is* the title (highlighted) -- see
+                            shared/types.ts -- so repeating the plain title
+                            above it would show the same text twice with only
+                            highlighting as the difference. Showing the
+                            highlighted title once, labelled, carries the same
+                            information without the duplication.
+                          */}
+                          {hit.matchedIn === 'content' ? (
+                            <span className="search-result-title">{hit.title}</span>
+                          ) : null}
                           <span className="search-result-snippet">{renderSnippet(hit.snippet)}</span>
+                          {hit.matchedIn === 'title' ? (
+                            <span className="search-result-kind">Title match</span>
+                          ) : null}
                           <span className="search-result-time">
                             {formatSearchTimestamp(hit.createdAt)}
                           </span>
