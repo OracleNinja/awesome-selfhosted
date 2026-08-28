@@ -101,26 +101,65 @@ export interface SearchRequest {
   limit?: number;
 }
 
+/**
+ * Which index produced a hit.
+ *
+ * v2 adds title matching. It is a SECOND external-content FTS5 table over
+ * `conversations.title` rather than an extension of the message index, because
+ * external content maps every indexed column to one base table — verified:
+ * adding a `title` column to the messages index makes `rebuild` fail with
+ * `no such column: T.title`.
+ *
+ * A non-FTS title match (LIKE) was measured and rejected: it loses diacritic
+ * folding (`cafe` stops finding `café`), it has no bm25 and no snippet, and it
+ * substring-matches punctuation, so a query of `"` alone would return title
+ * hits — breaking the guarantee that a non-indexable query returns nothing.
+ */
+export type SearchMatchField = 'title' | 'content';
+
 export interface SearchHit {
   conversationId: string;
   /** The conversation's title, so a result identifies itself without a second lookup. */
   title: string;
-  messageId: string;
-  role: Role;
+  /** Which index matched. Both kinds carry conversationId and title. */
+  matchedIn: SearchMatchField;
+  /**
+   * Present only on a content match. A title match is a property of the
+   * conversation and is not tied to any one message, so these are absent
+   * rather than filled with a placeholder.
+   */
+  messageId?: string;
+  role?: Role;
   /**
    * A short excerpt around the match. Matched runs are wrapped in
    * SNIPPET_MATCH_OPEN/CLOSE, which are private-use code points rather than
    * markup: the renderer splits on them and renders text nodes, so a snippet
    * can never inject markup no matter what the conversation contained.
    */
+  /**
+   * For a content match, an excerpt of the message. For a title match, an
+   * excerpt of the title. Match runs are delimited the same way in both.
+   */
   snippet: string;
+  /** Message time for a content match; conversation update time for a title match. */
   createdAt: number;
-  /** FTS5 bm25 relevance. Lower is a better match; hits arrive already sorted. */
+  /**
+   * FTS5 bm25 relevance. Lower is a better match; hits arrive already sorted.
+   *
+   * Scores from the title and content indexes are computed over different
+   * corpora and are therefore not strictly comparable to each other. Ordering
+   * within one kind of match is meaningful; the relative position of a title
+   * hit against a content hit is approximate, and deliberately not presented
+   * to the user as a precise ranking.
+   */
   score: number;
 }
 
 export interface SearchResult {
-  /** Best match first. Empty for an empty or non-indexable query -- never all conversations. */
+  /**
+   * Best match first, across both indexes. Empty for an empty or
+   * non-indexable query -- never all conversations.
+   */
   hits: SearchHit[];
   /** True when more matches existed than the limit allowed. */
   truncated: boolean;

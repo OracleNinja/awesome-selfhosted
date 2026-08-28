@@ -88,6 +88,9 @@ function toSearchHit(row: SearchRow): SearchHit {
   return {
     conversationId: row.conversation_id,
     title: row.title,
+    // v1 searched message content only; every hit this mapper produces is a
+    // content match. Title matching arrives with the conversations_fts index.
+    matchedIn: 'content',
     messageId: row.message_id,
     role: row.role as Role,
     snippet: row.snippet,
