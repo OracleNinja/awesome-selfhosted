@@ -110,8 +110,17 @@ export function detectTts(options: TtsOptions = {}): TtsAvailability {
   // Neither runs. Report whichever failure the user can act on: on a drive
   // that is the missing Piper build; on an installed Mac it is `say` itself,
   // whose absence is a broken system rather than a missing download.
-  if (options.layout || platform !== 'darwin') return { ...piper, playback: 'renderer' };
-  return { ...say, playback: 'native' };
+  if (options.layout) return { ...piper, playback: 'renderer' };
+  if (platform === 'darwin') return { ...say, playback: 'native' };
+
+  // Installed, off macOS: there is no drive for Piper's reason to refer to.
+  return {
+    ...piper,
+    playback: 'renderer',
+    reason:
+      'Spoken replies need an on-device speech engine. macOS provides one; ' +
+      'elsewhere the Ornith Portable drive carries one.',
+  };
 }
 
 export function createTtsEngine(options: TtsOptions = {}): TtsEngine {

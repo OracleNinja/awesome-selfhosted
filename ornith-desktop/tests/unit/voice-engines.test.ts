@@ -29,13 +29,29 @@ describe('STT engine resolution', () => {
     expect(result.reason).toMatch(/macOS/i);
   });
 
-  it('off macOS with no drive, points at the missing whisper build rather than at macOS', () => {
-    // "requires macOS" would be a lie now: whisper runs here, it is just absent.
+  it('off macOS with no drive, blames neither macOS nor a drive that is not there', () => {
+    // "requires macOS" would be a lie — whisper runs here, it is just absent.
+    // "this drive" would be a different lie: an installed app has no drive.
     const result = detectStt({ appRoot: root, resourcesPath: root, platform: 'linux' });
     expect(result.available).toBe(false);
     expect(result.engine).toBe('whisper-cpp');
     expect(result.reason).not.toMatch(/requires macOS/i);
-    expect(result.reason).toMatch(/whisper/i);
+    expect(result.reason).not.toMatch(/this drive/i);
+    expect(result.reason).toMatch(/speech engine/i);
+  });
+
+  it('on a drive, names the exact file the user has to add', () => {
+    const layout = resolveLayout(root);
+    const result = detectStt({
+      appRoot: root,
+      resourcesPath: root,
+      platform: 'linux',
+      arch: 'x64',
+      layout,
+    });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toContain(toolBinaryPath(layout, 'linux', 'x64', 'whisper'));
   });
 
   it('is unavailable on macOS when the helper has not been built', () => {
@@ -68,7 +84,7 @@ describe('STT engine resolution', () => {
     const engine = createSttEngine({ appRoot: root, resourcesPath: root, platform: 'linux' });
     const result = await engine.transcribe({ wav: new Uint8Array([1, 2, 3]), locale: 'en-US' });
     expect(result.text).toBe('');
-    expect(result.error).toMatch(/speech-to-text engine/i);
+    expect(result.error).toMatch(/speech engine/i);
   });
 
   it('an installed app has nowhere to have put whisper, so it reports none', () => {
@@ -182,12 +198,21 @@ describe('TTS engine detection', () => {
     expect(result.reason).toMatch(/macOS/i);
   });
 
-  it('off macOS with no drive, points at the missing Piper build rather than at macOS', () => {
+  it('off macOS with no drive, blames neither macOS nor a drive that is not there', () => {
     const result = detectTts({ platform: 'linux' });
     expect(result.available).toBe(false);
     expect(result.engine).toBe('piper');
     expect(result.reason).not.toMatch(/requires macOS/i);
-    expect(result.reason).toMatch(/piper/i);
+    expect(result.reason).not.toMatch(/this drive/i);
+    expect(result.reason).toMatch(/speech engine/i);
+  });
+
+  it('on a drive, names the exact file the user has to add', () => {
+    const layout = resolveLayout(root);
+    const result = detectTts({ platform: 'linux', arch: 'x64', layout });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toContain(toolBinaryPath(layout, 'linux', 'x64', 'piper'));
   });
 
   it('an installed app has nowhere to have put Piper, so it reports none', () => {
@@ -277,7 +302,8 @@ describe('TTS engine detection', () => {
     const result = await engine.synthesize({ requestId: 'r1', text: 'hi', voice: '', rate: 175 });
 
     expect(result.wav).toBeNull();
-    expect(result.error).toMatch(/piper/i);
+    // The installed-mode wording deliberately names no engine and no drive.
+    expect(result.error).toMatch(/speech engine/i);
   });
 
   it('speak() is a no-op on a renderer-playback engine, and still reports done', async () => {

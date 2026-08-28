@@ -222,14 +222,24 @@ dramatically better than a thumb drive here, and worth the difference.
 
 ```bash
 # 1. Build the app for the platform you are on.
-npm run package:portable          # → release/<platform>-unpacked/
+npm run package:portable          # → release/<platform>-unpacked/ (or release/mac-<arch>/)
 
-# 2. Lay out the drive.
-npm run provision -- --dest /Volumes/ORNITH/Ornith --label "My drive"
+# 2. Lay out the drive and copy the build onto it.
+npm run provision -- --dest /Volumes/ORNITH/Ornith --label "My drive" \
+  --app release/linux-unpacked
 
 # 3. Optionally copy an existing model store across (copies; never modifies the source).
 npm run provision -- --dest /Volumes/ORNITH/Ornith --copy-models ~/.ollama/models
 ```
+
+`--app` reads the platform out of the build directory's name and copies its
+*contents* into `app/mac`, `app/win` or `app/linux` — the paths the launcher
+scripts actually read. Pass `--app-platform mac|win|linux` when the name does
+not say (it refuses to guess rather than putting the build where nothing will
+find it).
+
+Every step is safe to repeat: re-running `--app` replaces that platform's slot
+and leaves the others, the models and `data/` alone.
 
 `provision-portable.mjs` creates the tree, writes the marker, and drops the
 launcher scripts. It deliberately **downloads nothing** — Ollama binaries and
@@ -277,12 +287,134 @@ is the default recommendation. Two caveats:
 
 ---
 
+## Using the drive
+
+What a person actually does, in order, and what they see when a piece is
+missing. Everything here is reachable from the app itself; none of it needs
+this document.
+
+**1. Launch.** Double-click `Ornith.command` (macOS), `Ornith.bat` (Windows) or
+run `./ornith.sh` (Linux) at the drive root. The launcher pins the drive as the
+portable root, so the app finds its own tree even if it was copied somewhere
+unexpected. Opening the app inside `app/<platform>/` directly works too — it
+walks up and finds the marker.
+
+**2. First run** asks one question: Local or Online. It blocks until answered,
+because a silent online default would transmit the first message before the
+user knew there was a choice. Local is the portable case.
+
+**3. The status line, bottom-left,** is the whole health story:
+
+| It says | It means | The button next to it |
+|---|---|---|
+| `Local · <model>` | Working | — |
+| `Ornith Portable · N GB free · starting the runtime…` | A cold start off USB; can take tens of seconds | — |
+| `<model> isn't installed` | The server runs, that model is not there | **Choose a model** / **Open settings** |
+| A sentence naming a missing file | The drive has no runtime for this computer | **Retry** |
+| `Drive is read-only` | Write-protected or mounted read-only | — |
+
+**4. Installing or selecting a model.** With the drive's Ollama running, add a
+model to `models/` — either by copying an existing store during provisioning,
+or with `OLLAMA_MODELS=<drive>/models ollama pull <name>` against the drive.
+Then pick it in Settings → Model. When the configured model is absent but
+others are present, the status line says so and offers the button that opens
+Settings.
+
+**5. Chatting.** Type and press Enter. Replies stream; reasoning, where the
+model produces it, appears in a separate collapsible panel. Stop halts a reply
+and keeps what arrived.
+
+**6. Voice.** The microphone button sits left of the composer. Enabled means an
+engine was found; disabled means none was, and hovering it says which file is
+missing and where it goes. Click to start, click again to send. Spoken replies
+are off by default — Settings → Speak responses — but a dictated prompt always
+gets a spoken reply.
+
+**7. Finding conversations.** All of them are in the sidebar, newest first,
+grouped by date. Double-click a title to rename. They live in `data/ornith.db`
+on the drive and come back on any machine the drive is plugged into.
+
+**8. When something is missing,** the app names the file rather than the
+symptom. Add it at the path shown and either press Retry or relaunch; nothing
+needs reprovisioning.
+
+---
+
 ## Ejecting safely
 
 Quit Ornith before unplugging. Quitting signals the bundled server, which is
 what releases the model files; pulling the drive with the server still running
 risks a torn write to the SQLite database, which WAL will recover from but which
 is worth not doing.
+
+---
+
+## Physical drive test
+
+The procedure for validating a real 128 GB USB-C drive. Everything above this
+line is exercised by the automated suite against temporary directories and
+stand-in binaries; this is what only real hardware can answer.
+
+### Prepare
+
+```bash
+# On each machine you want the drive to serve, from this repo:
+npm ci
+npm run typecheck && npm run lint && npm test
+npm run package:portable            # → release/<platform>-unpacked (or release/mac-<arch>)
+
+# First machine only — lay out the drive. Use the real mount point.
+npm run provision -- --dest /Volumes/ORNITH/Ornith --label "Ornith" \
+  --app release/mac-arm64
+
+# Subsequent machines — add that platform's build to the same drive.
+npm run provision -- --dest /Volumes/ORNITH/Ornith --app release/win-unpacked
+npm run provision -- --dest /Volumes/ORNITH/Ornith --app release/linux-unpacked
+```
+
+Then fill the slots the script printed. Per platform you intend to use:
+
+```bash
+D=/Volumes/ORNITH/Ornith
+SLOT=$D/runtime/darwin-arm64          # or win32-x64, linux-x64, …
+
+cp <downloaded>/ollama       "$SLOT/ollama"        # required
+cp <downloaded>/whisper-cli  "$SLOT/whisper-cli"   # optional: dictation
+cp <downloaded>/piper        "$SLOT/piper"         # optional: spoken replies
+chmod +x "$SLOT"/*                                  # not needed on Windows
+
+cp ggml-base.en.bin              "$D/voice/whisper/"
+cp en_US-lessac-medium.onnx      "$D/voice/piper/"
+cp en_US-lessac-medium.onnx.json "$D/voice/piper/"   # both files, or the voice is skipped
+
+# A model, either copied during provisioning or pulled straight onto the drive:
+OLLAMA_MODELS="$D/models" "$SLOT/ollama" pull ornith-en
+```
+
+### Check
+
+| # | Step | Expected |
+|---|---|---|
+| 1 | Launch `Ornith.command` / `Ornith.bat` / `./ornith.sh` | Window opens; first run asks Local or Online |
+| 2 | Choose Local | Status shows the drive label and free space |
+| 3 | Wait for a cold start | `starting the runtime…` becomes `Local · <model>`; tens of seconds off USB is normal |
+| 4 | Send a message | Reply streams |
+| 5 | `ls ~/Library/Application\ Support/` (or `%APPDATA%`, `~/.config`) | **No** `Ornith Desktop` directory — everything is on the drive |
+| 6 | `ls "$D/data"` | `ornith.db`, `settings.json`, `logs/`, `runtime-home/` |
+| 7 | Click the microphone, speak, click again | Transcript lands in the composer |
+| 8 | Settings → Speak responses, send a message | The reply is spoken |
+| 9 | Press Stop mid-speech | Audio stops immediately |
+| 10 | Quit, unplug, plug into a **different** machine, launch | Same conversations, no setup |
+| 11 | Rename `runtime/<slot>/ollama` away and relaunch | Status names the exact missing file |
+| 12 | Set the model to a name that is not installed | Status offers **Choose a model** |
+| 13 | Quit, then eject | Eject succeeds with no "in use" warning |
+| 14 | `ollama list` on the host machine | Unchanged from before the test (SPEC §19 ground rule 1) |
+
+Steps 7 and 8 are the first execution of a **real** whisper.cpp and Piper
+binary anywhere in this project's history. If either misbehaves, the argument
+construction is one pure function each — `whisperArgs` in
+`electron/voice/whisper.ts`, `piperArgs` in `electron/voice/piper.ts` — and
+their unit tests pin the expected shape.
 
 ---
 

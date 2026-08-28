@@ -150,7 +150,16 @@ export function detectStt(options: SttOptions): EngineAvailability {
   // helper, which is one command away.
   const platform = options.platform ?? process.platform;
   if (options.layout) return whisper;
-  return platform === 'darwin' ? apple : whisper;
+  if (platform === 'darwin') return apple;
+
+  // Installed, off macOS: there is no drive, so whisper's reason would be
+  // talking about one that does not exist.
+  return {
+    ...whisper,
+    reason:
+      'Dictation needs an on-device speech engine. macOS provides one; ' +
+      'elsewhere the Ornith Portable drive carries one.',
+  };
 }
 
 export function createSttEngine(options: SttOptions): SttEngine {

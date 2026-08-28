@@ -54,6 +54,13 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 let portable: PortableContext = { portable: false, root: null, manifest: DEFAULT_MANIFEST, layout: null };
 let supervisor: RuntimeSupervisor | null = null;
+/**
+ * The utterance speech is currently for, or null when nothing should be
+ * heard. Renderer-played synthesis takes seconds, and both a Stop and a
+ * newer reply can land inside that window; without this, audio produced for
+ * an abandoned request still reached the speakers.
+ */
+let speakingFor: string | null = null;
 let runtime: RuntimeState = { source: 'unavailable', host: DEFAULT_OLLAMA_URL };
 
 /**
@@ -382,12 +389,14 @@ function registerIpc(): void {
       rate: Number.isFinite(req.rate) ? req.rate : settings.speechRate,
     };
 
+    speakingFor = request.requestId;
     broadcast('tts:state', { speaking: true, requestId: request.requestId });
 
     if (ttsEngine.availability().playback === 'native') {
-      ttsEngine.speak(request, (finishedId) =>
-        broadcast('tts:state', { speaking: false, requestId: finishedId }),
-      );
+      ttsEngine.speak(request, (finishedId) => {
+        if (speakingFor === finishedId) speakingFor = null;
+        broadcast('tts:state', { speaking: false, requestId: finishedId });
+      });
       return;
     }
 
@@ -395,8 +404,16 @@ function registerIpc(): void {
     // Synthesis can take seconds, so the indicator is already on by now.
     const result = await ttsEngine.synthesize(request);
 
+    // Stopped, or superseded by a newer reply, while we were synthesising.
+    // Saying it anyway is worse than saying nothing.
+    if (speakingFor !== request.requestId) {
+      log.info('tts.discarded', { requestId: request.requestId });
+      return;
+    }
+
     if (!result.wav) {
       log.warn('tts.synthesis.failed', { detail: result.error });
+      speakingFor = null;
       broadcast('tts:state', { speaking: false, requestId: request.requestId });
       return;
     }
@@ -408,11 +425,15 @@ function registerIpc(): void {
   // both engines, so it has to be told when the half it cannot see is done.
   ipcMain.on('tts:finished', (_e, req: { requestId: string }) => {
     if (typeof req?.requestId !== 'string') return;
+    if (speakingFor === req.requestId) speakingFor = null;
     broadcast('tts:state', { speaking: false, requestId: req.requestId });
   });
 
   ipcMain.handle('tts:stop', () => {
-    const id = ttsEngine.speakingRequestId;
+    const id = speakingFor ?? ttsEngine.speakingRequestId;
+    // Cleared before stopping, so a synthesis still in flight sees that it has
+    // been abandoned and drops its audio instead of broadcasting it.
+    speakingFor = null;
     ttsEngine.stop();
     // Renderer playback stops on this too: the player listens for its own id
     // going quiet, so one message covers both engines.

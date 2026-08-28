@@ -10,6 +10,7 @@ import {
   SUPPORTED_RUNTIME_SLUGS,
   resolveLayout,
   runtimeBinaryName,
+  toolBinaryPath,
 } from '../../shared/portable';
 import { detectPortable } from '../../electron/portable/detect';
 
@@ -74,6 +75,61 @@ describe('provision-portable', () => {
 
     expect(output).toContain(path.join(layout.runtimeDir, 'darwin-arm64', runtimeBinaryName('darwin')));
     expect(output).toContain(path.join(layout.runtimeDir, 'win32-x64', runtimeBinaryName('win32')));
+  });
+
+  it('puts a build where the launchers look for it, not under its own name', () => {
+    // electron-builder names its output `mac-arm64` / `win-unpacked` /
+    // `linux-unpacked`; the launchers read `app/mac`, `app/win`, `app/linux`.
+    const builds: Array<[string, string]> = [
+      ['mac-arm64', 'Ornith Desktop.app'],
+      ['win-unpacked', 'Ornith Desktop.exe'],
+      ['linux-unpacked', 'ornith-desktop'],
+    ];
+
+    for (const [dirName, artefact] of builds) {
+      const source = path.join(workspace, dirName);
+      mkdirSync(source, { recursive: true });
+      writeFileSync(path.join(source, artefact), 'build');
+      provision(['--dest', root, '--app', source]);
+    }
+
+    const layout = resolveLayout(root);
+    expect(existsSync(path.join(layout.appDir, 'mac', 'Ornith Desktop.app'))).toBe(true);
+    expect(existsSync(path.join(layout.appDir, 'win', 'Ornith Desktop.exe'))).toBe(true);
+    expect(existsSync(path.join(layout.appDir, 'linux', 'ornith-desktop'))).toBe(true);
+
+    // And not nested under the build directory's own name.
+    expect(existsSync(path.join(layout.appDir, 'mac-arm64'))).toBe(false);
+  });
+
+  it('refuses a build directory whose platform it cannot tell, rather than guessing', () => {
+    const source = path.join(workspace, 'mystery');
+    mkdirSync(source, { recursive: true });
+    writeFileSync(path.join(source, 'thing'), 'build');
+
+    expect(() => provision(['--dest', root, '--app', source])).toThrow();
+    // With the platform named, the same directory is accepted.
+    provision(['--dest', root, '--app', source, '--app-platform', 'linux']);
+    expect(existsSync(path.join(resolveLayout(root).appDir, 'linux', 'thing'))).toBe(true);
+  });
+
+  it('creates the voice tree, so the drive has somewhere to put speech models', () => {
+    provision(['--dest', root]);
+    const layout = resolveLayout(root);
+
+    expect(existsSync(layout.voiceDir)).toBe(true);
+    expect(existsSync(layout.sttModelDir)).toBe(true);
+    expect(existsSync(layout.ttsVoiceDir)).toBe(true);
+  });
+
+  it('names every missing voice binary, per platform slot', () => {
+    const output = provision(['--dest', root]);
+    const layout = resolveLayout(root);
+
+    expect(output).toContain(toolBinaryPath(layout, 'linux', 'x64', 'whisper'));
+    expect(output).toContain(toolBinaryPath(layout, 'win32', 'x64', 'piper'));
+    expect(output).toContain(layout.sttModelDir);
+    expect(output).toContain(layout.ttsVoiceDir);
   });
 
   it('leaves existing user data alone when re-run', () => {

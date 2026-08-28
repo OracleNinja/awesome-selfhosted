@@ -5,5 +5,7 @@ release/
 coverage/
 test-results/
 playwright-report/
+# The compiled Swift speech helper: a build artifact, not source.
+native/build/
 *.log
 .DS_Store

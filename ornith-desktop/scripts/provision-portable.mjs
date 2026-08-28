@@ -45,7 +45,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 /* -------------------------------------------------------------------- args */
 
 function parseArgs(argv) {
-  const args = { dest: null, app: null, copyModels: null, label: null, force: false };
+  const args = {
+    dest: null,
+    app: null,
+    appPlatform: null,
+    copyModels: null,
+    label: null,
+    force: false,
+  };
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -58,6 +65,10 @@ function parseArgs(argv) {
         break;
       case '--app':
         args.app = value;
+        i += 1;
+        break;
+      case '--app-platform':
+        args.appPlatform = value;
         i += 1;
         break;
       case '--copy-models':
@@ -89,7 +100,10 @@ Ornith Portable — drive provisioning
   node scripts/provision-portable.mjs --dest <dir> [options]
 
   --dest <dir>           Where the portable tree goes, e.g. /Volumes/ORNITH/Ornith
-  --app <dir>            A built app directory to copy into <dest>/app/
+  --app <dir>            A built app directory; its contents go into
+                         <dest>/app/{mac,win,linux}/, where the launchers look
+  --app-platform <p>     mac | win | linux. Only needed when the build
+                         directory's name does not say which it is
   --copy-models <dir>    Copy an existing Ollama model store onto the drive.
                          Copies only; the source is never modified.
   --label <text>         Name shown in the app's status bar
@@ -191,13 +205,52 @@ start "" "%~dp0app\\win\\Ornith Desktop.exe" %*
   return files.map(([name]) => path.join(layout.root, name));
 }
 
-function copyApp(source, layout) {
+/** The three slots the launcher scripts look in. */
+const APP_SLOTS = ['mac', 'win', 'linux'];
+
+/**
+ * electron-builder names its output after the platform and arch it built for
+ * (`release/mac-arm64`, `release/win-unpacked`, `release/linux-unpacked`), but
+ * the launchers look in `app/mac`, `app/win` and `app/linux`. Copying the
+ * source directory under its own name would put the build somewhere no
+ * launcher would ever find it, so the slot is worked out here.
+ */
+export function appSlotFor(source, override) {
+  if (override) {
+    if (!APP_SLOTS.includes(override)) {
+      fail(`--app-platform must be one of ${APP_SLOTS.join(', ')} (got "${override}").`);
+    }
+    return override;
+  }
+
+  const name = path.basename(source).toLowerCase();
+  if (/(^|[-_])(mac|darwin|osx)/.test(name)) return 'mac';
+  if (/(^|[-_])win/.test(name)) return 'win';
+  if (/(^|[-_])linux/.test(name)) return 'linux';
+
+  fail(
+    `Could not tell which platform "${path.basename(source)}" was built for. ` +
+      `Pass --app-platform <${APP_SLOTS.join('|')}>.`,
+  );
+  return 'linux'; // unreachable; fail() exits
+}
+
+function copyApp(source, layout, platformOverride) {
   const resolved = path.resolve(expandHome(source));
   if (!existsSync(resolved)) fail(`--app path does not exist: ${resolved}`);
 
-  const destination = path.join(layout.appDir, path.basename(resolved));
-  mkdirSync(layout.appDir, { recursive: true });
-  cpSync(resolved, destination, { recursive: true, dereference: false });
+  const destination = path.join(layout.appDir, appSlotFor(resolved, platformOverride));
+  mkdirSync(destination, { recursive: true });
+
+  // The CONTENTS of the build directory, not the directory itself: the
+  // launcher expects `app/mac/Ornith Desktop.app`, not `app/mac/mac-arm64/…`.
+  for (const entry of readdirSync(resolved)) {
+    cpSync(path.join(resolved, entry), path.join(destination, entry), {
+      recursive: true,
+      dereference: false,
+    });
+  }
+
   return destination;
 }
 
@@ -267,7 +320,7 @@ function main() {
   const manifest = writeMarker(layout, args.label, args.force);
   const launchers = writeLaunchers(root, layout);
 
-  const copiedApp = args.app ? copyApp(args.app, layout) : null;
+  const copiedApp = args.app ? copyApp(args.app, layout, args.appPlatform) : null;
   const copiedModels = args.copyModels ? copyModels(args.copyModels, layout) : 0;
 
   /* ---- report ---- */

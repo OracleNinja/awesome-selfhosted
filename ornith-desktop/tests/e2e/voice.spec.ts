@@ -94,10 +94,11 @@ function installWhisper(layout: PortableLayout, transcript = 'dictated from the 
  * A stand-in for piper. Writes a real, decodable WAV — the renderer runs it
  * through Web Audio, which rejects anything that is not one.
  */
-function installPiper(layout: PortableLayout): void {
+function installPiper(layout: PortableLayout, delaySeconds = 0): void {
   shellBinary(
     toolBinaryPath(layout, process.platform, process.arch, 'piper'),
     '#!/bin/sh\n' +
+      (delaySeconds > 0 ? `sleep ${delaySeconds}\n` : '') +
       'while [ $# -gt 0 ]; do\n' +
       '  if [ "$1" = "--output_file" ]; then out="$2"; fi\n' +
       '  shift\n' +
@@ -283,4 +284,49 @@ test('asking for speech with no engine resolves quietly instead of hanging', asy
 
   // The indicator must come back down, or the UI shows "speaking" forever.
   expect(finished).toBe(true);
+});
+
+test('stopping during synthesis keeps the reply from being spoken afterwards', async () => {
+  // Synthesis is slow enough here to press Stop inside it — the real window on
+  // a USB drive, where Piper takes seconds on a long reply.
+  installPiper(resolveLayout(root), 3);
+  await open();
+
+  const outcome = await page.evaluate(async () => {
+    const win = window as unknown as OrnithWindow;
+
+    return new Promise<{ audio: boolean; quiet: boolean }>((resolve) => {
+      let audio = false;
+      let quiet = false;
+
+      const offAudio = win.ornith.on('tts:audio', () => {
+        audio = true;
+      });
+      const offState = win.ornith.on('tts:state', (payload) => {
+        const state = payload as { speaking: boolean; requestId: string | null };
+        if (!state.speaking) quiet = true;
+      });
+
+      void win.ornith.voice.speak({
+        requestId: 'e2e-stopped',
+        text: 'this should never be heard',
+        voice: '',
+        rate: 175,
+      });
+
+      // Stop well before the synthesiser finishes.
+      setTimeout(() => void win.ornith.voice.stopSpeaking(), 300);
+
+      // Then wait past the point the audio would otherwise have arrived.
+      setTimeout(() => {
+        offAudio();
+        offState();
+        resolve({ audio, quiet });
+      }, 8000);
+    });
+  });
+
+  // The audio must never reach the renderer, and the indicator must be down.
+  expect(outcome.audio).toBe(false);
+  expect(outcome.quiet).toBe(true);
 });

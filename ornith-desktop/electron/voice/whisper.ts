@@ -54,13 +54,23 @@ export function resolveModel(modelDir: string): string | null {
 export function detectWhisper(options: WhisperOptions): EngineAvailability {
   const engine = 'whisper-cpp';
 
-  if (!options.binaryPath || !existsSync(options.binaryPath)) {
+  if (!options.binaryPath) {
     return {
       available: false,
       engine,
       reason:
         'This drive carries no speech-to-text engine for this computer. ' +
         'Add a whisper.cpp build to the drive to dictate here.',
+    };
+  }
+
+  if (!existsSync(options.binaryPath)) {
+    return {
+      available: false,
+      engine,
+      // The exact path, because that is the file the user has to put there and
+      // it is what the provisioning script prints.
+      reason: `The speech-to-text engine is missing from ${options.binaryPath}.`,
     };
   }
 

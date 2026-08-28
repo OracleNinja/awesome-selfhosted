@@ -1,8 +1,20 @@
 # ORNITH DESKTOP — VERSION 1 ENGINEERING SPECIFICATION
 
-**Status:** Approved for implementation
+**Status:** Approved for implementation — v1 delivered
 **Audience:** The coding agent that will build this application, and any human reviewing its work
-**Authority:** This document is authoritative. Where it conflicts with any existing code in this repository, this document wins.
+**Authority:** This document is authoritative for v1. Where it conflicts with any existing code in this repository, this document wins.
+
+> **Superseded in part by [`PORTABLE.md`](./PORTABLE.md).** V1 was specified as a
+> macOS application; Ornith Portable added a mode that runs the same build from
+> a drive on macOS, Windows and Linux. Where this document assumes macOS —
+> §8.4's shortcut table, §14.4's Finder and notarization gates, §16.1's `.app`
+> criterion, and every "on this Mac" — `PORTABLE.md` describes what was actually
+> built. Nothing else here is withdrawn: the process model (§3), the IPC
+> contract (§3.3), the persistence decision (§9.1), the security posture (§11)
+> and the ground rules in §19 all still hold, and portable mode was built to
+> them. In particular the v1 rule that the user's own Ollama models are never
+> touched (§19 ground rule 1) is why the drive's runtime stands down whenever a
+> server is already running.
 
 ---
 
