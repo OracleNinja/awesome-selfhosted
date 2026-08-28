@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 
-import { DEFAULT_MODEL, STATUS_POLL_INTERVAL_MS } from '../shared/defaults';
+import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL, STATUS_POLL_INTERVAL_MS } from '../shared/defaults';
 import { IPC_VERSION } from '../shared/ipc';
 import type { AppInfo, OllamaStatus, Settings, ThinkingMode } from '../shared/types';
 import { toPublicSettings } from '../shared/types';
@@ -26,6 +26,14 @@ import { createOrchestrator, type Orchestrator } from './chat/orchestrator';
 import { createDenyAllBroker, createToolRegistry } from './agent/registry';
 import { buildAppMenu } from './menu';
 import { initLogger, log } from './log';
+import { detectPortable, ensurePortableDirs, type PortableContext } from './portable/detect';
+import { probeWritable, readVolumeStats } from './portable/volume';
+import { DEFAULT_MANIFEST, classifyCapacity, type PortableInfo } from '../shared/portable';
+import {
+  createRuntimeSupervisor,
+  type RuntimeState,
+  type RuntimeSupervisor,
+} from './runtime/supervisor';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
@@ -43,6 +51,21 @@ let status: OllamaStatus | null = null;
 let thinkingMode: ThinkingMode = 'none';
 let probedModel: string | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+let portable: PortableContext = { portable: false, root: null, manifest: DEFAULT_MANIFEST, layout: null };
+let supervisor: RuntimeSupervisor | null = null;
+let runtime: RuntimeState = { source: 'unavailable', host: DEFAULT_OLLAMA_URL };
+
+/**
+ * The host that actually answers this session. A supervised runtime picks its
+ * own port — the configured one may have been taken — and that choice wins
+ * without being written back to settings, so an ephemeral port never becomes
+ * permanent configuration on the drive.
+ */
+function ollamaHost(): string {
+  if (runtime.source === 'bundled') return runtime.host;
+  return settingsStore.get().ollamaUrl;
+}
 
 // V1 agent surface: registered but empty, and every request is denied.
 const toolRegistry = createToolRegistry();
@@ -168,12 +191,13 @@ function statusChanged(a: OllamaStatus | null, b: OllamaStatus): boolean {
 
 async function refreshStatus(): Promise<OllamaStatus> {
   const settings = settingsStore.get();
-  const next = await fetchStatus(settings.ollamaUrl, settings.model, DEFAULT_MODEL, thinkingMode);
+  const host = ollamaHost();
+  const next = await fetchStatus(host, settings.model, DEFAULT_MODEL, thinkingMode);
 
   // Probe reasoning support once per model, only when it is actually installed.
   if (next.connected && next.activeModelInstalled && probedModel !== next.activeModel) {
     probedModel = next.activeModel;
-    thinkingMode = await probeThinkingMode(settings.ollamaUrl, next.activeModel);
+    thinkingMode = await probeThinkingMode(host, next.activeModel);
     next.thinkingMode = thinkingMode;
     log.info('thinking.probed', { model: next.activeModel, mode: thinkingMode });
   } else {
@@ -198,6 +222,52 @@ async function refreshStatus(): Promise<OllamaStatus> {
   }
 
   return next;
+}
+
+/* ---------------------------------------------------------------- portable */
+
+/**
+ * Started only in portable mode. An installed Ornith keeps its existing
+ * contract with the machine's own Ollama: it connects to one, it never starts
+ * one. Portable mode is the case where there may be nothing to connect to.
+ */
+async function startRuntime(): Promise<void> {
+  if (!portable.portable || !portable.layout) return;
+
+  supervisor = createRuntimeSupervisor({
+    layout: portable.layout,
+    configuredHost: settingsStore.get().ollamaUrl,
+    platform: process.platform,
+    arch: process.arch,
+    onLog: (event, fields) => log.info(event, fields),
+  });
+
+  runtime = await supervisor.start();
+
+  if (runtime.source === 'unavailable') {
+    log.warn('runtime.unavailable', { reason: runtime.reason });
+  }
+
+  // Pushed rather than polled: a cold start can outlast the renderer's first
+  // read, and the status poll only broadcasts when the status itself changes.
+  broadcast('portable:changed', portableInfo());
+}
+
+/** Volume stats are probed per call: free space moves while the app runs. */
+function portableInfo(): PortableInfo {
+  const layout = portable.layout;
+  const volume = layout ? readVolumeStats(layout.dataDir) : null;
+
+  return {
+    portable: portable.portable,
+    root: portable.root,
+    label: portable.manifest.label,
+    dataDir: layout?.dataDir ?? app.getPath('userData'),
+    modelsDir: layout?.modelsDir ?? '',
+    runtime: { ...runtime, host: ollamaHost() },
+    volume,
+    capacity: classifyCapacity(volume),
+  };
 }
 
 /* --------------------------------------------------------------------- ipc */
@@ -270,6 +340,8 @@ function registerIpc(): void {
   ipcMain.handle('clipboard:write', (_e, text: string) => {
     if (typeof text === 'string') clipboard.writeText(text);
   });
+
+  ipcMain.handle('portable:info', (): PortableInfo => portableInfo());
 
   /* ---- voice layer ---------------------------------------------------- */
 
@@ -353,18 +425,83 @@ function resolveBackend(): ChatBackend {
     log.warn('backend.online_unconfigured', { hasUrl: Boolean(settings.gatewayUrl) });
   }
 
-  return createOllamaBackend(settings.ollamaUrl);
+  return createOllamaBackend(ollamaHost());
 }
 
 /* ---------------------------------------------------------------- lifecycle */
 
-function bootstrap(): void {
-  // Test hook: lets E2E point at a scratch profile without touching real data.
+/**
+ * Decides where this launch keeps its data, and returns that directory.
+ *
+ * Must run before anything opens the database or the settings file, because
+ * the whole point of portable mode is that those land on the drive rather than
+ * in the host's home directory.
+ */
+function resolveDataRoot(): string {
+  // Test hook first: E2E points at a scratch profile, and it must win over a
+  // marker that happens to sit above the checkout.
   const overrideUserData = process.env.ORNITH_USER_DATA;
-  if (overrideUserData) app.setPath('userData', overrideUserData);
+  if (overrideUserData) {
+    app.setPath('userData', overrideUserData);
+    return app.getPath('userData');
+  }
 
-  const userData = app.getPath('userData');
+  try {
+    portable = detectPortable({ startDir: path.dirname(app.getPath('exe')) });
+  } catch (err) {
+    // Detection failing must never stop the app starting; it just means this
+    // launch is an ordinary installed one. The reason is logged below.
+    portable = { ...portable, reason: `Portable detection failed: ${String(err)}` };
+  }
+
+  if (!portable.portable || !portable.layout) return app.getPath('userData');
+
+  // A write-protected or read-only drive is an ordinary state for removable
+  // media. Say so plainly here rather than failing later inside SQLite, where
+  // the message would mean nothing. `mkdir -p` succeeds on an existing tree
+  // even when the mount is read-only, so the probe write is the real test.
+  let failure: string | null = null;
+  try {
+    ensurePortableDirs(portable.layout);
+    if (!probeWritable(portable.layout.dataDir)) failure = 'The drive is read-only.';
+  } catch (err) {
+    failure = String(err);
+  }
+
+  if (failure) {
+    dialog.showErrorBox(
+      'Ornith Portable',
+      `The drive at ${portable.root} can't be written to.\n\n` +
+        `${failure}\n\n` +
+        'Check that it is not write-protected or mounted read-only, then launch Ornith again.',
+    );
+    app.exit(1);
+    return app.getPath('userData');
+  }
+
+  app.setPath('userData', portable.layout.dataDir);
+  return portable.layout.dataDir;
+}
+
+function bootstrap(): void {
+  const userData = resolveDataRoot();
   initLogger(path.join(userData, 'logs'));
+
+  if (portable.portable && portable.layout) {
+    // Set before the window exists, so the first thing the renderer reads is
+    // "starting" rather than the "unavailable" that has not been tried yet.
+    runtime = { source: 'starting', host: DEFAULT_OLLAMA_URL };
+    log.info('portable.active', {
+      root: portable.root,
+      label: portable.manifest.label,
+      models: portable.layout.modelsDir,
+    });
+  } else if (portable.reason) {
+    // Logged here rather than at the decision point, which runs before the log
+    // file exists — and this is exactly the line someone reads to find out why
+    // their drive was not picked up.
+    log.warn('portable.declined', { reason: portable.reason });
+  }
 
   try {
     db = openDatabase(path.join(userData, 'ornith.db'));
@@ -425,6 +562,10 @@ void app.whenReady().then(async () => {
   buildAppMenu(() => mainWindow);
   createWindow();
 
+  // After the window exists: a cold start off a USB drive can take tens of
+  // seconds, and the user should be looking at the app while it happens.
+  await startRuntime();
+
   await refreshStatus();
   pollTimer = setInterval(() => void refreshStatus(), STATUS_POLL_INTERVAL_MS);
 
@@ -441,6 +582,9 @@ app.on('before-quit', () => {
   if (pollTimer) clearInterval(pollTimer);
   orchestrator?.abortAll();
   ttsEngine?.stop();
+  // stop() sends SIGTERM synchronously; only the SIGKILL fallback is deferred.
+  // A server left holding the drive open would block the user from ejecting it.
+  void supervisor?.stop();
   try {
     db?.close();
   } catch {

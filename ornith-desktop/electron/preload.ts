@@ -64,6 +64,10 @@ const api = {
   // over file://, which is not a secure context for the web API.
   copyText: (text: string) => invoke('clipboard:write', text),
 
+  portable: {
+    info: () => invoke('portable:info'),
+  },
+
   voice: {
     capabilities: () => invoke('voice:capabilities'),
     /** WAV bytes go to main over IPC; they never touch the network. */

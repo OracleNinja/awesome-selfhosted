@@ -18,6 +18,8 @@
     "test:e2e": "playwright test",
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder --mac",
+    "package:portable": "npm run build && electron-builder --dir",
+    "provision": "node scripts/provision-portable.mjs",
     "build:stt": "node scripts/build-stt-helper.mjs"
   },
   "dependencies": {
@@ -65,6 +67,36 @@
           "arch": [
             "arm64",
             "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64",
+            "arm64"
           ]
         }
       ]

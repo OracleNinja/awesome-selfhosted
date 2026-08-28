@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import StatusIndicator from './StatusIndicator';
+import PortableBadge from './PortableBadge';
 import { groupConversations } from '../lib/dates';
 import type { AiMode, ConversationSummary, OllamaStatus } from '../../shared/types';
+import type { PortableInfo } from '../../shared/portable';
 
 interface Props {
   conversations: ConversationSummary[];
@@ -15,6 +17,8 @@ interface Props {
   onRetryConnection: () => void;
   mode: AiMode;
   onlineConfigured: boolean;
+  /** Null until probed, and absent entirely for an installed app. */
+  portable: PortableInfo | null;
 }
 
 export default function Sidebar({
@@ -29,6 +33,7 @@ export default function Sidebar({
   onRetryConnection,
   mode,
   onlineConfigured,
+  portable,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -129,6 +134,7 @@ export default function Sidebar({
           Settings
         </button>
         <StatusIndicator status={status} onRetry={onRetryConnection} mode={mode} onlineConfigured={onlineConfigured} />
+        <PortableBadge info={portable} />
       </div>
     </aside>
   );

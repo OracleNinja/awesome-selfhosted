@@ -7,6 +7,7 @@ import type {
   PublicSettings,
   Settings,
 } from '../../shared/types';
+import type { PortableInfo } from '../../shared/portable';
 import type {
   SpeakRequest,
   TranscriptionResult,
@@ -38,6 +39,9 @@ export interface OrnithApi {
     abort(requestId: string): void;
   };
   copyText(text: string): Promise<void>;
+  portable: {
+    info(): Promise<PortableInfo>;
+  };
   voice: {
     capabilities(): Promise<VoiceCapabilities>;
     transcribe(wav: Uint8Array, locale: string): Promise<TranscriptionResult>;

@@ -7,7 +7,13 @@ export default defineConfig({
     environment: 'node',
     coverage: {
       provider: 'v8',
-      include: ['electron/ollama/**', 'electron/store/**', 'shared/**'],
+      include: [
+        'electron/ollama/**',
+        'electron/store/**',
+        'electron/portable/**',
+        'electron/runtime/**',
+        'shared/**',
+      ],
       reporter: ['text-summary', 'json-summary'],
     },
   },

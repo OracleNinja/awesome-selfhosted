@@ -17,6 +17,7 @@ import type {
   StreamOutcome,
   StreamState,
 } from './types';
+import type { PortableInfo } from './portable';
 
 export const IPC_VERSION = 1;
 
@@ -37,6 +38,11 @@ export interface IpcInvokeMap {
   'conv:delete': { req: string; res: void };
   'conv:clear': { req: string; res: void };
   'clipboard:write': { req: string; res: void };
+  /**
+   * Where this install keeps its data, which runtime is answering, and how
+   * much room is left on the drive. Probed on call: free space moves.
+   */
+  'portable:info': { req: void; res: PortableInfo };
 
   /* ---- voice layer ---- */
   'voice:capabilities': { req: void; res: VoiceCapabilities };
@@ -72,6 +78,8 @@ export interface IpcEventMap {
   /** Sources the online backend consulted for this turn. */
   'chat:sources': { requestId: string; sources: AnsweredSource[] };
   'tts:state': TtsState;
+  /** Emitted once the runtime settles, so a cold start is not polled for. */
+  'portable:changed': PortableInfo;
 
   /** Menu accelerators, forwarded to the renderer as commands. */
   'menu:new-chat': Record<string, never>;
@@ -105,6 +113,7 @@ export const INVOKE_CHANNELS = [
   'tts:stop',
   'conv:clear',
   'clipboard:write',
+  'portable:info',
 ] as const satisfies readonly IpcInvokeChannel[];
 
 export const EVENT_CHANNELS = [
@@ -117,6 +126,7 @@ export const EVENT_CHANNELS = [
   'ollama:status-changed',
   'settings:changed',
   'tts:state',
+  'portable:changed',
   'menu:new-chat',
   'menu:delete-chat',
   'menu:open-settings',

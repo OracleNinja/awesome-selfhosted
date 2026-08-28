@@ -19,6 +19,7 @@ import type {
   PublicSettings,
   StreamState,
 } from '../shared/types';
+import type { PortableInfo } from '../shared/portable';
 
 interface ActiveStream {
   requestId: string;
@@ -39,6 +40,7 @@ export default function App() {
   const [voice, setVoice] = useState<VoiceCapabilities | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sources, setSources] = useState<AnsweredSource[]>([]);
+  const [portable, setPortable] = useState<PortableInfo | null>(null);
 
   const buffer = useStreamBuffer();
   const composerRef = useRef<ComposerHandle>(null);
@@ -103,6 +105,18 @@ export default function App() {
   useEffect(() => {
     void bridge.voice.capabilities().then(setVoice);
   }, []);
+
+  // Re-probed whenever the connection state moves, because that is also when
+  // free space is most likely to have changed — a model just finished loading,
+  // or writes started failing.
+  useEffect(() => {
+    void bridge.portable.info().then(setPortable);
+  }, [status?.connected, status?.activeModel]);
+
+  // Main pushes this once the runtime settles: a cold start off a drive can
+  // outlast the first read above, and the status poll is silent when nothing
+  // about the status itself changed.
+  useEffect(() => bridge.on('portable:changed', setPortable), []);
 
   // Theme: clearing the attribute lets prefers-color-scheme take over.
   useEffect(() => {
@@ -441,6 +455,7 @@ export default function App() {
         onRetryConnection={() => void bridge.ollama.refresh().then(setStatus)}
         mode={settings?.mode ?? 'local'}
         onlineConfigured={Boolean(settings?.gatewayTokenConfigured && settings?.gatewayUrl)}
+        portable={portable}
       />
 
       <main className="main">

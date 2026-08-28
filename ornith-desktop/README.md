@@ -2,12 +2,15 @@
 
 A macOS desktop chat application for local models served by [Ollama](https://ollama.com). No cloud API, no telemetry, no account — inference stays on your machine.
 
+It also runs as **Ornith Portable**: the same build, carrying its app, runtime, models and history on a drive, so it works on a machine that has never had Ollama installed. See [`PORTABLE.md`](./PORTABLE.md).
+
 Built to [`SPEC.md`](./SPEC.md), which remains the authoritative description of the architecture and the rationale behind it.
 
 ## Requirements
 
 - Node.js 22 or newer
-- [Ollama](https://ollama.com) running locally, with a model installed
+- [Ollama](https://ollama.com) running locally, with a model installed — except in portable
+  mode, where the drive carries its own Ollama and starts it
 - The default model is `ornith-en`; if it is absent the app falls back to the first installed model and says so in the status bar
 
 ## Getting started
@@ -30,6 +33,8 @@ npm run dev     # Vite + Electron, single Ctrl-C tears both down
 | `npm run build` | Production build → `dist/` + `dist-electron/` |
 | `npm start` | Build, then run the production bundle unpackaged |
 | `npm run package` | `electron-builder --mac` → `release/*.app`, `*.dmg` |
+| `npm run package:portable` | Unpacked build for this platform → `release/<platform>-unpacked/` |
+| `npm run provision -- --dest <dir>` | Lay out an Ornith Portable drive at `<dir>` |
 
 On Linux CI, run the E2E suite under a virtual display: `xvfb-run -a npm run test:e2e`.
 
@@ -40,6 +45,7 @@ On Linux CI, run the E2E suite under a virtual display: `xvfb-run -a npm run tes
 - Multiple conversations: create, switch, rename (double-click), delete — stored in SQLite and safe across a crash
 - Settings for model, Ollama URL, temperature, top-p, context window, keep-alive, and theme
 - Live connection status that distinguishes "Ollama is down" from "that model isn't installed"
+- Portable mode: keeps everything on a drive and starts the Ollama the drive carries, reusing one that is already running rather than competing with it
 
 ## Architecture in one paragraph
 
@@ -58,3 +64,7 @@ Everything lives under Electron's `userData` directory — on macOS, `~/Library/
 - `ornith.db` — conversations and messages (SQLite, WAL mode)
 - `settings.json` — settings, written atomically
 - `logs/main.log` — structured JSON logs, rotated at 5 MB. Conversation text is never logged.
+
+In portable mode the same three live in `<drive>/Ornith/data/` instead, decided
+before anything opens them. Which mode a launch is in, and how much room is left
+on the drive, are shown in the status bar. See [`PORTABLE.md`](./PORTABLE.md).

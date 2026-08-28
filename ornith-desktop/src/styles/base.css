@@ -233,6 +233,41 @@ button {
   color: var(--warning);
 }
 
+/* -------------------------------------------------------------- portable */
+
+/* Only rendered when running from a drive; absent for an installed app. */
+.portable-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.portable-label {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portable-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A full drive stops conversations from saving, so it earns real colour. */
+.portable-badge[data-capacity='low'] .portable-detail {
+  color: var(--warning);
+}
+
+.portable-badge[data-capacity='critical'] .portable-detail {
+  color: var(--danger);
+}
+
 .retry-button {
   flex: none;
   padding: 1px 7px;
