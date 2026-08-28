@@ -71,10 +71,14 @@ weakening a property that is working. What was removed is the waste.
    to catch here than after implementation.
 4. Message the worker: *your worktree is current, proceed.*
 
-Turn one now yields a reviewable plan instead of the string `ready`, and the
-Lead no longer deletes a placeholder. `PLAN.md` must still be removed before
-integration, because `ecc-integrate` requires the change set to match the
-approved manifest exactly.
+Turn one now yields a reviewable plan instead of the string `ready`. `PLAN.md`
+must still be removed before integration, because `ecc-integrate` requires the
+change set to match the approved manifest exactly — and **the Lead removes it,
+not the worker.** A confined worker's tools are Read/Grep/Glob/Edit/Write;
+`Write` can overwrite a file's contents but cannot unlink a path, so a worker
+has no way to delete anything. An early version of this protocol told the worker
+to delete its own plan, which is an instruction it cannot follow. A worker
+correctly reported the limitation rather than routing around it.
 
 ## Landing records
 
