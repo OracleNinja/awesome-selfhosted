@@ -141,7 +141,12 @@ export interface SearchHit {
    * excerpt of the title. Match runs are delimited the same way in both.
    */
   snippet: string;
-  /** Message time for a content match; conversation update time for a title match. */
+  /**
+   * When the matched thing was created: the message for a content match, the
+   * conversation for a title match. Deliberately not the conversation's
+   * `updated_at` — a field named `createdAt` fed from an `updated_at` column
+   * is the kind of quiet inconsistency that misleads the next reader.
+   */
   createdAt: number;
   /**
    * FTS5 bm25 relevance. Lower is a better match; hits arrive already sorted.
