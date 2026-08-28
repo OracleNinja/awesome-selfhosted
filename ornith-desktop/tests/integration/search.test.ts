@@ -193,4 +193,101 @@ describe('searchConversations', () => {
       });
     });
   });
+
+  describe('title-only search reaches the IPC boundary', () => {
+    it('returns a hit for a term that matches only a conversation title, not any message content', async () => {
+      await withFixtures(async ({ store }) => {
+        // The query term lives only in the title and is deliberately absent
+        // from every seeded message body, including the distractor's -- a
+        // content-only search path has nothing here it could match. This
+        // only passes if the handler actually reaches the store's title
+        // index, not merely its message-content index.
+        const target = store.create('ornith-en');
+        store.rename(target.id, 'Quokka retrospective');
+        store.beginTurn(target.id, 'an unrelated note about wetlands', 'ornith-en');
+
+        const distractor = store.create('ornith-en', 'Generic');
+        store.beginTurn(distractor.id, 'nothing to do with today at all', 'ornith-en');
+
+        const result = searchConversations({ query: 'Quokka' }, { store });
+
+        expect(result.error).toBeUndefined();
+        expect(result.hits).toHaveLength(1);
+        expect(result.hits[0]).toMatchObject({
+          conversationId: target.id,
+          title: 'Quokka retrospective',
+          matchedIn: 'title',
+        });
+        // A title hit describes the conversation, not any one message.
+        expect(result.hits[0].messageId).toBeUndefined();
+        expect(result.hits[0].role).toBeUndefined();
+      });
+    });
+  });
+
+  describe('hostile input through the IPC boundary', () => {
+    // Every case runs against a store that already has a matching
+    // conversation seeded. An empty database would make "zero hits" true
+    // for the wrong reason (nothing to find, ever) instead of the reason
+    // this is meant to prove (the hostile string was never interpreted as
+    // FTS5 syntax against real, present content). The seeded phrase is
+    // chosen so none of its tokens share a prefix with any hazardous query
+    // below (in particular, avoiding "not*"-prefixed words like "note",
+    // which unicode61's prefix matching on a bare "NOT" query would
+    // otherwise match, and that would be a correct match, not a leak).
+    const hazardousQueries = [
+      '"',
+      'a"b',
+      'AND',
+      'OR',
+      'NOT',
+      'a-b',
+      'a:b',
+      'foo(',
+      'x AND',
+      '*',
+      '***',
+      '!!!',
+    ];
+
+    it.each(hazardousQueries)(
+      'does not throw and does not match unrelated seeded content for %j',
+      async (query) => {
+        await withFixtures(async ({ store }) => {
+          const c = store.create('ornith-en', 'Museum ticket');
+          store.beginTurn(c.id, 'the museum exhibit closes early on weekends', 'ornith-en');
+
+          let result: SearchResult | undefined;
+          expect(() => {
+            result = searchConversations({ query }, { store });
+          }).not.toThrow();
+
+          expect(result?.error).toBeUndefined();
+          expect(result?.hits).toEqual([]);
+        });
+      },
+    );
+
+    it('finds content that literally contains FTS5 syntax when queried for that same literal text', async () => {
+      // Positive proof, not just "did not crash": a query built from FTS5's
+      // own reserved words is escaped into a literal phrase, so content that
+      // actually contains that phrase is still found -- it is neither
+      // rejected outright for containing special characters nor treated as
+      // boolean syntax that would match far more broadly than the literal
+      // text the user typed.
+      await withFixtures(async ({ store }) => {
+        const c = store.create('ornith-en', 'Support ticket');
+        store.beginTurn(c.id, 'error code is foo AND bar: check the log', 'ornith-en');
+
+        const decoy = store.create('ornith-en', 'Unrelated ticket');
+        store.beginTurn(decoy.id, 'a completely different issue about printers', 'ornith-en');
+
+        const result = searchConversations({ query: 'foo AND bar' }, { store });
+
+        expect(result.error).toBeUndefined();
+        expect(result.hits.some((h) => h.conversationId === c.id)).toBe(true);
+        expect(result.hits.some((h) => h.conversationId === decoy.id)).toBe(false);
+      });
+    });
+  });
 });
