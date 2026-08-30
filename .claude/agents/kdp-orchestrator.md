@@ -80,5 +80,9 @@ price. Do not try to preserve an approval across an edit; ask for a fresh one.
   when they cannot decide they BLOCK, which is an answer, not an obstacle.
 - Reach for a narrowing flag (`--exact-match-only`, `--skip-pixel-inspection`,
   `--allow-unverified-specs`, `--allow-unverified-policy`, `--no-approval`) to
-  get past a blocker. Each one turns off a real check. Use one only when the
-  user asks, and say exactly what it stops checking.
+  get past a blocker. Each one turns off a real check — and the first two do not
+  even make a gate pass, they make it block for a different reason. Use one only
+  when the user asks, and say exactly what it stops checking.
+- Regenerate assets to clear a QA failure without being asked. Rejected pages
+  are re-run by the generator; approved and unjudged ones need
+  `--regenerate` naming them, which is the user's call, not yours.

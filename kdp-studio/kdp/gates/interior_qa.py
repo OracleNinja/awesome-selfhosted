@@ -11,12 +11,18 @@ disk and stops if they differ.
 
 A PDF that cannot be opened BLOCKS. "The reader is missing" is not "the PDF is
 fine".
+
+The reading is done by ``pypdf`` — a different implementation from the writer
+in ``kdp/pdfwrite.py`` that produced the file. A writer that verified its own
+output would certify its own bugs.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from ..inspection.checks import check_interior
+from ..inspection.pdf import PDFLoadError, inspect_pdf, pdf_reader_available
 from ..models.artifacts import ArtifactKind
 from ..models.manifest import BookManifest
 from ..models.provenance import hash_file
@@ -24,26 +30,17 @@ from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G10.interior_qa"
 STAGE = "production_qa"
-VALIDATOR_VERSION = "1"
+VALIDATOR_VERSION = "2"
 
 PDF_CHECKS = (
+    "PDF opens and is not encrypted",
     "page count matches the specification",
     "page dimensions match trim plus bleed",
-    "page ordering matches the spec",
-    "margins and gutter respected",
-    "no clipped artwork",
-    "image resolution at or above 300 DPI",
-    "blank versos where single-sided art is declared",
-    "no unexpected text or colour",
+    "every interior page is the same size",
+    "artwork present on exactly the pages the spec describes",
+    "embedded image resolution at or above 300 DPI",
+    "drawings on versos where single-sided art is declared",
 )
-
-
-def pdf_reader_available() -> bool:
-    try:
-        import pypdf  # noqa: F401
-    except ImportError:
-        return False
-    return True
 
 
 def run(manifest: BookManifest) -> GateResult:
@@ -115,12 +112,32 @@ def run(manifest: BookManifest) -> GateResult:
         )
 
     blocked_reason = None
-    if not pdf_reader_available():
+    try:
+        inspection = inspect_pdf(path)
+        evidence["inspection"] = inspection.to_dict()
+        for issue in check_interior(manifest, inspection):
+            findings.append(
+                Finding(
+                    code=issue.code,
+                    severity=Severity.BLOCKER if issue.blocking else Severity.MAJOR,
+                    message=issue.message,
+                    subject="interior",
+                    detail=issue.detail,
+                )
+            )
+        for note in inspection.not_checked:
+            findings.append(
+                Finding(
+                    code="interior_qa.not_checked",
+                    severity=Severity.INFO,
+                    message=f"Not checked: {note}",
+                    subject="interior",
+                )
+            )
+    except PDFLoadError as exc:
         blocked_reason = (
-            "PDF inspection is unavailable: pypdf is not installed, so none of "
-            "the following were checked — "
-            + "; ".join(PDF_CHECKS)
-            + ". Install the production extras (pip install -r requirements.txt)."
+            f"The interior PDF could not be inspected ({exc}), so none of the "
+            "following were checked — " + "; ".join(PDF_CHECKS) + "."
         )
 
     return decide(GATE_ID, STAGE, findings, evidence=evidence, blocked_reason=blocked_reason)

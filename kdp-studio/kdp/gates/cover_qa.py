@@ -15,6 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..errors import SpecError
+from ..inspection.checks import check_cover
+from ..inspection.pdf import PDFLoadError, inspect_pdf, pdf_reader_available
 from ..models.artifacts import ArtifactKind
 from ..models.manifest import BookManifest
 from ..models.provenance import hash_file
@@ -23,25 +25,16 @@ from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G11.cover_qa"
 STAGE = "production_qa"
-VALIDATOR_VERSION = "1"
+VALIDATOR_VERSION = "2"
 
 COVER_CHECKS = (
-    "canvas dimensions match the computed full-wrap size",
-    "spine width matches the current page count",
-    "safe areas respected on front, back and spine",
-    "barcode area left clear",
-    "title and author legible at print size",
-    "resolution at or above 300 DPI",
-    "no prohibited elements",
+    "PDF opens, is not encrypted, and is a single page",
+    "canvas width matches back cover + spine + front cover + bleed",
+    "canvas height matches trim plus bleed",
+    "the spine implied by the width matches the current page count",
+    "spine text fits inside its safety margins",
+    "the cover carries text at all",
 )
-
-
-def pdf_reader_available() -> bool:
-    try:
-        import pypdf  # noqa: F401
-    except ImportError:
-        return False
-    return True
 
 
 def run(manifest: BookManifest) -> GateResult:
@@ -153,12 +146,23 @@ def run(manifest: BookManifest) -> GateResult:
             )
 
     blocked_reason = None
-    if not pdf_reader_available():
+    try:
+        inspection = inspect_pdf(path)
+        evidence["inspection"] = inspection.to_dict()
+        for issue in check_cover(manifest, inspection):
+            findings.append(
+                Finding(
+                    code=issue.code,
+                    severity=Severity.BLOCKER if issue.blocking else Severity.MAJOR,
+                    message=issue.message,
+                    subject="cover",
+                    detail=issue.detail,
+                )
+            )
+    except PDFLoadError as exc:
         blocked_reason = (
-            "Cover inspection is unavailable: pypdf is not installed, so none "
-            "of the following were checked — "
-            + "; ".join(COVER_CHECKS)
-            + ". Install the production extras (pip install -r requirements.txt)."
+            f"The cover PDF could not be inspected ({exc}), so none of the "
+            "following were checked — " + "; ".join(COVER_CHECKS) + "."
         )
 
     return decide(GATE_ID, STAGE, findings, evidence=evidence, blocked_reason=blocked_reason)

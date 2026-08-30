@@ -209,54 +209,107 @@ def test_orphan_image_is_reported_without_stopping_the_book(manifest):
 # --- G4 originality ---------------------------------------------------------
 
 
-def test_distinct_pages_pass_exact_match_check(manifest):
-    result = originality.run(manifest, require_perceptual=False)
-    assert result.status is Status.PASS
+def test_distinct_pages_pass_both_duplication_checks(built_manifest):
+    manifest, assets_dir = built_manifest
+    result = originality.run(manifest, assets_dir=assets_dir)
+    assert result.status is Status.PASS, result.to_json()
+    assert result.evidence["pages_hashed"] == len(manifest.spec.art_pages)
 
 
-def test_repeated_page_inside_a_book_fails(manifest):
+def test_repeated_page_inside_a_book_fails(built_manifest):
+    manifest, assets_dir = built_manifest
     last = manifest.assets[-1]
+    from dataclasses import replace
+
     duplicated = manifest.assets[:-1] + (
-        AssetProvenance(
-            last.asset_id,
-            last.kind,
-            last.ai_role,
-            manifest.assets[0].content_hash,
-            tool=last.tool,
-            prompt_version=last.prompt_version,
-        ),
+        replace(last, content_hash=manifest.assets[0].content_hash),
     )
     result = originality.run(
-        manifest.with_assets(duplicated), require_perceptual=False
+        manifest.with_assets(duplicated), assets_dir=assets_dir
     )
     assert result.status is Status.FAIL
     assert "originality.intra_book_duplicate" in codes(result)
 
 
-def test_page_reused_from_a_published_book_fails(manifest):
+def test_a_rescaled_repeat_is_caught_by_perceptual_hashing(built_manifest):
+    """Different bytes, same drawing — invisible to an exact-match check."""
+    from dataclasses import replace
+
+    from kdp.models import content_hash
+    from kdp.providers.mock import _png
+
+    manifest, assets_dir = built_manifest
+    first, second = manifest.spec.art_pages[0], manifest.spec.art_pages[1]
+
+    # Redraw page one's artwork smaller, keeping its aspect ratio — which is
+    # what a genuine rescaled repeat looks like — and put it on page two.
+    original = manifest.approved_for(first.page_id)
+    width = original.width * 3 // 4
+    height = original.height * 3 // 4
+    rescaled = _png(width, height, first.page_id.encode())
+    (assets_dir / f"{second.page_id}.png").write_bytes(rescaled)
+    updated = tuple(
+        replace(a, content_hash=content_hash(rescaled), width=width, height=height)
+        if a.page == second.page_id
+        else a
+        for a in manifest.assets
+    )
+
+    result = originality.run(manifest.with_assets(updated), assets_dir=assets_dir)
+    assert result.status is Status.FAIL
+    assert "originality.near_duplicate" in codes(result)
+    # The bytes differ, so only the perceptual check could have found it.
+    assert "originality.intra_book_duplicate" not in codes(result)
+
+
+def test_page_reused_from_a_published_book_fails(built_manifest):
+    manifest, assets_dir = built_manifest
     catalogue = {manifest.assets[0].content_hash: "book-000"}
     result = originality.run(
-        manifest, catalogue_hashes=catalogue, require_perceptual=False
+        manifest, catalogue_hashes=catalogue, assets_dir=assets_dir
     )
     assert result.status is Status.FAIL
     assert "originality.catalogue_duplicate" in codes(result)
 
 
-def test_the_book_s_own_prior_hashes_are_not_self_duplicates(manifest):
+def test_a_catalogue_near_duplicate_is_caught(built_manifest):
+    from kdp.inspection.image import perceptual_hash
+
+    manifest, assets_dir = built_manifest
+    first = manifest.spec.art_pages[0].page_id
+    prior = str(perceptual_hash(assets_dir / f"{first}.png"))
+
+    result = originality.run(
+        manifest, catalogue_phashes={prior: "book-000"}, assets_dir=assets_dir
+    )
+    assert result.status is Status.FAIL
+    assert "originality.catalogue_near_duplicate" in codes(result)
+
+
+def test_the_book_s_own_prior_hashes_are_not_self_duplicates(built_manifest):
+    manifest, assets_dir = built_manifest
     catalogue = {manifest.assets[0].content_hash: manifest.book_id}
     result = originality.run(
-        manifest, catalogue_hashes=catalogue, require_perceptual=False
+        manifest, catalogue_hashes=catalogue, assets_dir=assets_dir
     )
     assert result.status is Status.PASS
 
 
-def test_missing_perceptual_hashing_blocks_rather_than_passes(manifest):
-    # The safety property: an uninstalled dependency must never read as clean.
+def test_unreadable_pages_block_rather_than_pass(manifest):
+    # The safety property: a page nobody could read must never read as clean.
     result = originality.run(manifest, require_perceptual=True)
-    if originality.perceptual_hashing_available():
-        pytest.skip("Pillow is installed; the blocked path is unreachable here")
     assert result.status is Status.BLOCKED
     assert result.status.allows_advance is False
+    assert "could not be read" in result.findings[0].message
+
+
+def test_skipping_the_perceptual_check_blocks(built_manifest):
+    manifest, assets_dir = built_manifest
+    result = originality.run(
+        manifest, require_perceptual=False, assets_dir=assets_dir
+    )
+    assert result.status is Status.BLOCKED
+    assert "skipped by request" in result.findings[0].message
 
 
 # --- G5 print preflight -----------------------------------------------------

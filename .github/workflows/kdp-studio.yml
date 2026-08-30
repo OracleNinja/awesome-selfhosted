@@ -41,21 +41,41 @@ jobs:
           import sys
           sys.path = [p for p in sys.path if 'site-packages' not in p]
           sys.path.insert(0, '.')
-          import kdp.cli, kdp.gates, kdp.models, kdp.pipeline, kdp.specs, kdp.assembly
+          import kdp.cli, kdp.gates, kdp.models, kdp.pipeline, kdp.specs
+          import kdp.assembly, kdp.inspection, kdp.review, kdp.package
           print('core imports cleanly with no site-packages')
           PY
 
       - name: Run tests
         run: python -m pytest
 
+      - name: Assert PDF inspection blocks rather than passes
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, '.')
+          from kdp.inspection.pdf import PDFLoadError, inspect_pdf, pdf_reader_available
+          assert not pdf_reader_available(), "pypdf should not be installed in this job"
+          try:
+              inspect_pdf(__file__)
+          except PDFLoadError as exc:
+              assert "pypdf is not installed" in str(exc)
+              print("PDF inspection correctly reports missing capability")
+          else:
+              raise SystemExit("inspect_pdf returned a result with no reader installed")
+          PY
+
       - name: Exercise the CLI
         run: |
           python -m kdp stages
           python -m kdp gates
+          python -m kdp verify-specs || true   # exits non-zero while unverified
           python -m kdp specs --trim 8.5x11 --pages 60 > /dev/null
 
-  # The same suite with the optional extras present, so the paths that only
-  # run when Pillow and pypdf are installed are covered too.
+  # The same suite with the optional extras present. PDF inspection only runs
+  # here — without pypdf there is no independent reader, so G5/G10/G11 block —
+  # and this job is where the end-to-end fixture clears every gate with real
+  # inspection rather than a skipped check.
   extras:
     name: with optional extras
     runs-on: ubuntu-latest

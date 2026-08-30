@@ -3,11 +3,14 @@
 Where each KDP policy constraint is enforced in code, and what is still a
 human's job.
 
-> **Source caveat.** `kdp.amazon.com` was unreachable from the environment this
-> was written in (blocked by the network egress proxy), so the policy details
-> below were gathered from secondary summaries and **have not been confirmed
-> against Amazon's own pages**. Treat this document as a starting checklist,
-> not as authority.
+> **Source caveat.** Every `amazon.com` host is refused by network policy in
+> the environment this package is developed in — the proxy answers 403 to
+> CONNECT — so the policy details below were gathered from secondary summaries
+> and **have not been confirmed against Amazon's own pages**. Treat this
+> document as a starting checklist, not as authority.
+>
+> `python3 -m kdp verify-specs` prints, table by table, the page to read and
+> what to confirm on it.
 >
 > `kdp/specs/revision.py` carries the same caveat as machine state: one
 > `SourceRecord` per table (`trim`, `paper`, `interior`, `cover`, `royalty`,
@@ -72,9 +75,11 @@ duplication; gate G6 for keyword stuffing, duplicate keyword slots and thin
 descriptions; gate G1 for a research brief that names no opportunity — a book
 with no stated gap to fill is the undifferentiated kind.
 
-**Not yet enforced:** near-duplicate detection needs Pillow. Until it is
-installed, G4 reports `BLOCKED` rather than passing, because "no exact
-byte-matches" is a weaker claim than "no duplicates".
+Near-duplicate detection is implemented: a difference hash over the pixels
+flags pages within 10 bits of 64 of each other, catching a rescaled or mirrored
+repeat that an exact byte-match would miss. A page that could not be read is
+reported as unchecked and blocks the gate, because "no exact byte-matches" is a
+weaker claim than "no duplicates".
 
 **A similarity score is a QA signal, never a legal determination.** G4 finds
 repeated and near-repeated images; it does not and cannot decide a copyright
@@ -126,9 +131,17 @@ of clearance each side. Interior artwork at 300 DPI or better.
 
 **Enforced by:** `kdp/specs/` and gates G2 and G5.
 
-**Not yet enforced:** everything that requires opening the PDF — actual page
-dimensions, embedded fonts, image DPI, colour space. G5 reports `BLOCKED`
-without `pypdf`, because those cannot be inferred from a manifest.
+**Enforced by inspection:** the built PDFs are opened and measured — page
+count, page dimensions against trim-plus-bleed, uniform page size, artwork on
+the pages the spec describes, embedded image resolution, single-sided layout,
+cover canvas and spine geometry. The reader is `pypdf`, deliberately a
+different implementation from the writer in `kdp/pdfwrite.py`: a writer that
+verified its own output would certify its own bugs. Without it, G5/G10/G11
+block.
+
+**Not enforced:** colour space and embedded font subsetting. KDP's own
+previewer is the authority on both and should be run before publishing; the
+review package says so rather than implying they were checked.
 
 ## Human approval
 
@@ -163,3 +176,6 @@ states plainly that these are projections rather than income.
 - Treat a missing dependency as a passing check.
 - Claim legal certainty about copyright or trademark.
 - Present an estimate as an observation, or a projection as income.
+- Report a check as clean when nothing looked. Text detection needs OCR, which
+  is not installed, so the review package lists it under "not attempted"
+  instead.

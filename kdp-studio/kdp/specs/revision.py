@@ -44,12 +44,26 @@ class SourceRecord:
     #: Which table this describes: "trim", "paper", "interior", "cover",
     #: "royalty", "policy".
     table: str
-    #: Primary KDP Help URL. Secondary sources do not count as verification.
+    #: Primary KDP Help URL the values were confirmed against. Secondary
+    #: sources — blogs, calculators, summaries — do not count as verification
+    #: and must not be recorded here.
     source_url: str | None = None
     #: ISO date the values were last confirmed against ``source_url``.
     verified_on: str | None = None
     #: Marketplace the values apply to. KDP's limits differ by marketplace.
     marketplace: str = "amazon.com"
+    #: The version or revision label the source page carried, where it shows
+    #: one. Free text; KDP does not version its help pages consistently, so an
+    #: access date is often all there is.
+    spec_version: str = ""
+    #: Where to go and read, when the exact URL is known. Left empty rather
+    #: than guessed: a confidently wrong link sends someone to the wrong page
+    #: and they verify against it. ``find`` names the page instead.
+    expected_url: str = ""
+    #: The KDP Help page title to search for, when no URL is recorded.
+    find: str = ""
+    #: What specifically to confirm on that page.
+    confirm: tuple[str, ...] = field(default_factory=tuple)
     #: Free-form note: caveats, values that could not be confirmed, ambiguity.
     notes: str = ""
 
@@ -79,6 +93,10 @@ class SourceRecord:
             "source_url": self.source_url,
             "verified_on": self.verified_on,
             "marketplace": self.marketplace,
+            "spec_version": self.spec_version,
+            "expected_url": self.expected_url,
+            "find": self.find,
+            "confirm": list(self.confirm),
             "state": self.state,
             "notes": self.notes,
         }
@@ -91,51 +109,142 @@ def _ttl():
 
 
 _UNVERIFIED_NOTE = (
-    "Transcribed from public secondary summaries. kdp.amazon.com was "
-    "unreachable from the environment this revision was authored in, so no "
-    "value here has been confirmed against a primary source."
+    "Transcribed from public secondary summaries. Every amazon.com host is "
+    "blocked by network policy in the environment this package is developed "
+    "in, so no value here has been confirmed against a primary source."
 )
 
-#: One record per table. Fill in ``source_url`` and ``verified_on`` after
-#: checking the primary page; that alone flips the table to VERIFIED.
+#: One record per table. Fill in ``source_url``, ``verified_on`` and, where the
+#: page shows one, ``spec_version`` after reading the primary page. That alone
+#: flips the table to VERIFIED — ``kdp verify-specs`` prints the checklist.
 SOURCES: Final[dict[str, SourceRecord]] = {
     record.table: record
     for record in (
         SourceRecord(
             "trim",
-            notes=_UNVERIFIED_NOTE + " Verify at KDP Help > Paperback Submission "
-            "Guidelines > Trim Size.",
+            expected_url="https://kdp.amazon.com/en_US/help/topic/G201857950",
+            confirm=(
+                "the list of trim sizes offered, and which are standard",
+                "which sizes are available for expanded distribution",
+            ),
+            notes=_UNVERIFIED_NOTE + " Values live in kdp/specs/trim.py.",
         ),
         SourceRecord(
             "paper",
-            notes=_UNVERIFIED_NOTE + " Verify caliper and page-count limits at "
-            "KDP Help > Paperback Paper & Ink Options.",
+            find="KDP Help > Print Options (paper type, ink, page count limits)",
+            confirm=(
+                "paper stocks offered and their per-page caliper",
+                "minimum and maximum page count for each stock",
+            ),
+            notes=_UNVERIFIED_NOTE + " Values live in kdp/specs/paper.py.",
         ),
         SourceRecord(
             "interior",
-            notes=_UNVERIFIED_NOTE + " Verify bleed, margins and gutter bands at "
-            "KDP Help > Set Trim Size, Bleed, and Margins.",
+            expected_url="https://kdp.amazon.com/en_US/help/topic/GVBQ3CMEQW3W2VL6",
+            confirm=(
+                "bleed dimensions, and that a bleed page grows 0.125 in in "
+                "width but 0.25 in in height",
+                "minimum outside/top/bottom margins with and without bleed",
+                "the inside (gutter) margin bands by page count",
+            ),
+            notes=_UNVERIFIED_NOTE + " Values live in kdp/specs/interior.py.",
         ),
         SourceRecord(
             "cover",
-            notes=_UNVERIFIED_NOTE + " Verify spine calculation and the "
-            "page-count threshold for spine text at KDP Help > Cover "
-            "Requirements. Secondary sources disagree on the threshold (79 vs "
-            "100 pages); 100 is encoded as the conservative choice.",
+            find="KDP Help > Format Your Paperback Cover / Cover Requirements",
+            confirm=(
+                "the full-wrap cover formula and its bleed allowance",
+                "the spine width calculation",
+                "the page count at or above which spine text is printed",
+            ),
+            notes=_UNVERIFIED_NOTE
+            + " Values live in kdp/specs/cover.py. One value is known to be "
+            "contested between secondary sources: the page-count threshold for "
+            "spine text is variously reported as 79 and as 100. 100 is encoded "
+            "as the conservative choice and MUST be confirmed rather than "
+            "assumed.",
         ),
         SourceRecord(
             "royalty",
-            notes=_UNVERIFIED_NOTE + " Verify the royalty rate and printing-cost "
-            "formula at KDP Help > Paperback Printing Cost and Royalty.",
+            find="KDP Help > Printing Cost & Royalty Calculation (paperback)",
+            confirm=(
+                "the paperback royalty rate for this marketplace",
+                "the printing-cost formula: fixed charge plus per-page charge",
+            ),
+            notes=_UNVERIFIED_NOTE
+            + " Values live in kdp/models/economics.py as ASSUMED_* constants. "
+            "Until confirmed, every projection reports at UNKNOWN confidence.",
         ),
         SourceRecord(
             "policy",
-            notes=_UNVERIFIED_NOTE + " Verify AI-content disclosure wording, "
-            "low-content policy and the daily title limit at KDP Help > Content "
-            "Guidelines.",
+            find="KDP Help > Content Guidelines, and the AI-generated content page",
+            confirm=(
+                "the AI-generated content disclosure wording, and the "
+                "generated/assisted distinction",
+                "the low-content and duplicative-content policy",
+                "the limit on new titles per 24 hours",
+            ),
+            notes=_UNVERIFIED_NOTE
+            + " Drives G12. Cross-check the disclosure wording quoted in "
+            "COMPLIANCE.md against the live page.",
         ),
     )
 }
+
+
+def checklist() -> str:
+    """What a human needs to do to verify the tables, as readable text.
+
+    Exists because the verification cannot be automated from inside this
+    package — the pages are not reachable here — and a blocker with no
+    instructions is just an obstacle.
+    """
+    lines = [
+        "KDP specification verification checklist",
+        "=" * 40,
+        "",
+        "Each table below is UNVERIFIED until a human reads the primary KDP",
+        "Help page and confirms the values. Secondary sources — blogs,",
+        "calculators, summaries — do not count and must not be recorded.",
+        "",
+        "Where a URL is shown it was seen in a search result and is a starting",
+        "point, not a guarantee: confirm the page you land on is the one named.",
+        "Where only a page title is shown, no URL is recorded because none was",
+        "confirmed, and guessing one would send you to the wrong page.",
+        "",
+        f"Verifications expire after {VERIFICATION_TTL_DAYS} days.",
+        "",
+    ]
+    for name in sorted(SOURCES):
+        record = SOURCES[name]
+        lines.append(f"[{record.state}] {name}")
+        if record.expected_url:
+            lines.append(f"  read:    {record.expected_url}")
+        else:
+            # No URL is recorded rather than a guessed one: being sent to the
+            # wrong page is worse than being asked to find the right one.
+            lines.append(f"  find:    {record.find or '(page not identified)'}")
+        for item in record.confirm:
+            lines.append(f"  confirm: {item}")
+        if record.state == "VERIFIED":
+            lines.append(f"  checked: {record.verified_on} ({record.marketplace})")
+            if record.is_stale():
+                lines.append("  STALE — re-check; the values may have moved.")
+        lines.append("")
+
+    lines += [
+        "To record a verification, edit kdp/specs/revision.py and set on that",
+        "table's SourceRecord:",
+        "",
+        '    source_url="<the page you actually read>",',
+        '    verified_on="YYYY-MM-DD",',
+        '    spec_version="<any revision label the page shows>",',
+        '    marketplace="amazon.com",',
+        "",
+        "Then bump SPEC_REVISION and run the test suite: the geometry tests",
+        "assert the arithmetic, so a changed constant shows up immediately.",
+    ]
+    return "\n".join(lines)
 
 
 def source(table: str) -> SourceRecord:

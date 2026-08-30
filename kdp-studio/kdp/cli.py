@@ -107,6 +107,8 @@ def cmd_generation(args: argparse.Namespace) -> int:
 def cmd_qa(args: argparse.Namespace) -> int:
     manifest = BookManifest.read(args.manifest)
     catalogue = _load_json(args.catalogue) if args.catalogue else {}
+    phashes = _load_json(args.catalogue_phashes) if args.catalogue_phashes else {}
+    assets_dir = Path(args.manifest).parent / "assets"
     return _emit(
         run_stage(
             "qa",
@@ -114,10 +116,14 @@ def cmd_qa(args: argparse.Namespace) -> int:
                 originality.run(
                     manifest,
                     catalogue_hashes=catalogue,
+                    catalogue_phashes=phashes,
                     require_perceptual=not args.exact_match_only,
+                    assets_dir=assets_dir,
                 ),
                 asset_qa.run(
-                    manifest, require_pixel_inspection=not args.skip_pixel_inspection
+                    manifest,
+                    require_pixel_inspection=not args.skip_pixel_inspection,
+                    assets_dir=assets_dir,
                 ),
             ],
         ),
@@ -253,8 +259,19 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return EXIT_STOP
 
     book_dir = Path(args.manifest).parent
+    if args.regenerate and args.provider in METERED and not args.confirm_spend:
+        sys.stderr.write(
+            "regenerating named pages on a metered provider still costs money; "
+            "re-run with --confirm-spend\n"
+        )
+        return EXIT_STOP
+
     outcome = generate_book(
-        manifest, provider, book_dir / "assets", max_attempts=args.max_attempts
+        manifest,
+        provider,
+        book_dir / "assets",
+        max_attempts=args.max_attempts,
+        regenerate=tuple(args.regenerate or ()),
     )
     outcome.manifest.write(args.manifest)
 
@@ -390,6 +407,24 @@ def cmd_package(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_verify_specs(args: argparse.Namespace) -> int:
+    """Print what must be confirmed before any book can be certified."""
+    from .specs.revision import SOURCES, checklist, is_verified
+
+    if args.json:
+        sys.stdout.write(
+            json.dumps(
+                {name: record.to_dict() for name, record in SOURCES.items()},
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        )
+    else:
+        sys.stdout.write(checklist() + "\n")
+    return EXIT_OK if is_verified() else EXIT_STOP
+
+
 def cmd_gates(args: argparse.Namespace) -> int:
     """List every gate, what it checks, and what it needs to run."""
     if args.json:
@@ -454,14 +489,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest")
     p.add_argument("--catalogue", help="JSON map of content_hash -> prior book_id")
     p.add_argument(
+        "--catalogue-phashes",
+        help="JSON map of perceptual hash -> prior book_id, for near-duplicates",
+    )
+    p.add_argument(
         "--exact-match-only",
         action="store_true",
-        help="record an exact-match-only result instead of blocking on Pillow",
+        help="skip near-duplicate detection; the gate then BLOCKS rather than "
+        "passing, because only exact copies were checked",
     )
     p.add_argument(
         "--skip-pixel-inspection",
         action="store_true",
-        help="record a record-level-only asset QA result instead of blocking",
+        help="skip the pixel pass; the gate then BLOCKS rather than passing",
     )
     p.set_defaults(func=cmd_qa)
 
@@ -517,6 +557,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="required before using a metered provider",
     )
+    p.add_argument(
+        "--regenerate",
+        nargs="+",
+        metavar="PAGE_ID",
+        help="redo these pages even though they are approved or awaiting a QA "
+        "verdict. Pages must be named individually: there is no redo-everything "
+        "switch, because naming them is what makes the spend deliberate.",
+    )
     p.set_defaults(func=cmd_generate)
 
     p = sub.add_parser("asset", help="approve or reject one generated asset version")
@@ -557,6 +605,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("gates", help="list every gate and what it needs")
     p.set_defaults(func=cmd_gates)
+
+    p = sub.add_parser(
+        "verify-specs",
+        help="show which KDP specification tables are unverified, and what to check",
+    )
+    p.set_defaults(func=cmd_verify_specs)
 
     p = sub.add_parser("stages", help="list the pipeline stages in order")
     p.set_defaults(func=lambda a: (sys.stdout.write("\n".join(STAGES) + "\n"), EXIT_OK)[1])

@@ -40,7 +40,30 @@ matching the spec. Categories chosen deliberately.
 - A reminder of KDP's three-new-titles-per-24-hours cap, so a batch is paced
   rather than throttled mid-upload.
 
+## Pricing
+
+Compare scenarios rather than reaching for a habitual number:
+
+    python3 -m kdp specs --trim <t> --pages <n>
+
+Printing cost scales with page count, so a price that works for a 40-page book
+can lose money on a 200-page one — G13 fails a book whose selected price yields
+a negative royalty. $5.99 is a scenario like any other; nothing in the model
+privileges it.
+
+Every figure is a **projection** carrying a confidence, and the roll-up takes
+the weakest input. Today that is `unknown`, because the royalty rate and
+printing-cost constants have not been checked against KDP's own figures. Never
+present one as income, and say plainly that KDP shows the real printing cost
+and royalty at upload — that is the number that counts.
+
+## You do not certify your own work
+
+G12 (KDP compliance) and G13 (the final audit) belong to
+`kdp-compliance-auditor`, which is read-only. That separation is the point: the
+agent that writes the listing must not be the one that clears it.
+
 ## Output
 
-A passing `python -m kdp publishing-prep <manifest>`, and the checklist. Then
-stop — a human publishes.
+A passing `python3 -m kdp publishing-prep <manifest>`, and the checklist. Then
+stop — a human reviews, approves, and publishes.

@@ -105,20 +105,39 @@ def test_unknown_table_is_treated_as_unverified():
 # --- forced BLOCKED paths ---------------------------------------------------
 
 
-def test_originality_blocks_when_perceptual_hashing_is_missing(manifest, monkeypatch):
-    monkeypatch.setattr(originality, "perceptual_hashing_available", lambda: False)
+def test_originality_blocks_when_a_page_cannot_be_read(manifest):
     result = originality.run(manifest, require_perceptual=True)
     assert result.status is Status.BLOCKED
     assert result.status.allows_advance is False
-    assert "Pillow is not installed" in result.findings[0].message
+    assert "could not be read" in result.findings[0].message
 
 
-def test_asset_qa_blocks_when_pixel_inspection_is_missing(manifest, monkeypatch):
-    monkeypatch.setattr(asset_qa, "pixel_inspection_available", lambda: False)
+def test_an_unreadable_format_blocks_without_the_optional_decoder(tmp_path, monkeypatch):
+    """The genuine missing-capability case: a format the stdlib cannot decode."""
+    from kdp.inspection import image as image_module
+
+    monkeypatch.setattr(image_module, "_pillow_available", lambda: False)
+    target = tmp_path / "page.jpg"
+    target.write_bytes(b"\xff\xd8\xff\xe0not-really-a-jpeg")
+
+    with pytest.raises(image_module.ImageLoadError, match="Pillow is not installed"):
+        image_module.inspect_image(target)
+
+
+def test_asset_qa_blocks_when_a_page_cannot_be_inspected(manifest):
+    """The fixture's provenance points at files that do not exist."""
     result = asset_qa.run(manifest, require_pixel_inspection=True)
     assert result.status is Status.BLOCKED
     # A blocked gate must say what went unchecked, not just that it stopped.
-    assert "watermarks" in result.findings[0].message
+    message = result.findings[0].message
+    assert "could not be inspected" in message
+    assert "pure white background" in message
+
+
+def test_asset_qa_blocks_when_inspection_is_skipped(manifest):
+    result = asset_qa.run(manifest, require_pixel_inspection=False)
+    assert result.status is Status.BLOCKED
+    assert "skipped by request" in result.findings[0].message
 
 
 def test_interior_qa_blocks_when_the_pdf_reader_is_missing(manifest, monkeypatch, tmp_path):
@@ -439,3 +458,174 @@ def test_approving_a_new_version_supersedes_the_old_one(tmp_path):
     assert final.approved_for(page).asset_id == v2
     # Exactly one version of a page may ship.
     assert len([a for a in final.attempts(page) if a.ships]) == 1
+
+
+# --- approval invalidation, artifact by artifact ----------------------------
+
+
+def _approved(manifest):
+    from dataclasses import replace
+
+    from kdp.models import ApprovalRecord, ApprovalStatus
+
+    return replace(
+        manifest,
+        approval=ApprovalRecord(
+            status=ApprovalStatus.APPROVED,
+            reviewer="a.reviewer",
+            decided_at="2026-01-02T00:00:00+00:00",
+            book_fingerprint=manifest.production_fingerprint(),
+        ),
+    )
+
+
+def test_approval_is_current_for_an_untouched_book(built_manifest):
+    manifest, _ = built_manifest
+    assert _approved(manifest).approval_is_current() is True
+
+
+def test_changing_a_shipping_asset_invalidates_approval(built_manifest):
+    from dataclasses import replace
+
+    manifest, _ = built_manifest
+    approved = _approved(manifest)
+    edited = replace(
+        approved,
+        assets=(replace(approved.assets[0], content_hash="sha256:" + "0" * 64),)
+        + approved.assets[1:],
+    )
+    assert edited.approval_is_current() is False
+
+
+def test_changing_the_interior_pdf_invalidates_approval(built_manifest, tmp_path):
+    from kdp.models import Artifact, ArtifactKind
+
+    manifest, _ = built_manifest
+    pdf = tmp_path / "interior.pdf"
+    pdf.write_bytes(b"%PDF-1.4\noriginal\n")
+    staged = manifest.with_artifact(Artifact.from_file(ArtifactKind.INTERIOR_PDF, pdf))
+    approved = _approved(staged)
+
+    pdf.write_bytes(b"%PDF-1.4\nrebuilt\n")
+    rebuilt = approved.with_artifact(Artifact.from_file(ArtifactKind.INTERIOR_PDF, pdf))
+    assert rebuilt.approval_is_current() is False
+
+
+def test_changing_the_cover_pdf_invalidates_approval(built_manifest, tmp_path):
+    from kdp.models import Artifact, ArtifactKind
+
+    manifest, _ = built_manifest
+    pdf = tmp_path / "cover.pdf"
+    pdf.write_bytes(b"%PDF-1.4\noriginal\n")
+    approved = _approved(
+        manifest.with_artifact(Artifact.from_file(ArtifactKind.COVER_PDF, pdf))
+    )
+    pdf.write_bytes(b"%PDF-1.4\nrebuilt\n")
+    rebuilt = approved.with_artifact(Artifact.from_file(ArtifactKind.COVER_PDF, pdf))
+    assert rebuilt.approval_is_current() is False
+
+
+def test_changing_metadata_invalidates_approval(built_manifest):
+    from dataclasses import replace
+
+    manifest, _ = built_manifest
+    approved = _approved(manifest)
+    for field, value in (
+        ("title", "A Different Title"),
+        ("description", "A different description entirely, at length." * 4),
+        ("keywords", ("something", "else")),
+        ("categories", ("A different category",)),
+        ("author", "Someone Else"),
+    ):
+        edited = replace(
+            approved, metadata=replace(approved.metadata, **{field: value})
+        )
+        assert edited.approval_is_current() is False, field
+
+
+def test_changing_the_price_invalidates_approval(built_manifest):
+    from dataclasses import replace
+
+    from kdp.models import compare
+
+    manifest, _ = built_manifest
+    priced = replace(
+        manifest,
+        economics=replace(compare([5.99, 7.99], manifest.spec.page_count), selected="$5.99"),
+    )
+    approved = _approved(priced)
+    assert approved.approval_is_current() is True
+
+    repriced = replace(approved, economics=replace(approved.economics, selected="$7.99"))
+    assert repriced.approval_is_current() is False
+
+
+def test_changing_the_specification_invalidates_approval(built_manifest):
+    from dataclasses import replace
+
+    manifest, _ = built_manifest
+    approved = _approved(manifest)
+    retitled = replace(approved, spec=replace(approved.spec, title="Something Else"))
+    assert retitled.approval_is_current() is False
+
+
+def test_a_run_record_does_not_invalidate_approval(built_manifest):
+    """The fingerprint covers the book, not the bookkeeping."""
+    from kdp.models import RunRecord
+
+    manifest, _ = built_manifest
+    approved = _approved(manifest)
+    logged = approved.with_run(
+        RunRecord(run_id="r1", book_id=approved.book_id, stage="qa", status="pass")
+    )
+    assert logged.approval_is_current() is True
+
+
+# --- explicit regeneration --------------------------------------------------
+
+
+def test_regeneration_requires_naming_the_pages(tmp_path):
+    """No redo-everything switch: naming pages is what makes a spend deliberate."""
+    from kdp.generation import generate_book
+
+    first = _fresh_book(tmp_path)
+    page = first.spec.art_pages[0].page_id
+
+    forced = generate_book(
+        first, MockImageProvider(max_dimension=32), tmp_path / "assets",
+        now="2026-01-01T05:00:00+00:00", regenerate=(page,),
+    )
+    assert forced.generated == (page,)
+    # Everything not named is left alone.
+    assert len(forced.skipped) == len(first.spec.art_pages) - 1
+
+
+def test_regenerating_an_unknown_page_is_refused(tmp_path):
+    from kdp.generation import generate_book
+    from kdp.providers import ProviderUnavailable
+
+    first = _fresh_book(tmp_path)
+    with pytest.raises(ProviderUnavailable, match="does not have"):
+        generate_book(
+            first, MockImageProvider(max_dimension=32), tmp_path / "assets",
+            regenerate=("PAGE-999",),
+        )
+
+
+def test_an_approved_page_is_regenerated_only_when_named(tmp_path):
+    from kdp.generation import approve_asset, generate_book
+
+    first = _fresh_book(tmp_path)
+    page = first.spec.art_pages[0].page_id
+    approved = approve_asset(first, first.attempts(page)[-1].asset_id)
+
+    assert page in generate_book(
+        approved, MockImageProvider(max_dimension=32), tmp_path / "assets",
+        now="2026-01-01T06:00:00+00:00",
+    ).skipped
+
+    forced = generate_book(
+        approved, MockImageProvider(max_dimension=32), tmp_path / "assets",
+        now="2026-01-01T07:00:00+00:00", regenerate=(page,),
+    )
+    assert forced.generated == (page,)

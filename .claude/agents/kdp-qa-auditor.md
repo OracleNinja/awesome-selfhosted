@@ -45,7 +45,12 @@ fine:
 - **A stale cover.** The spine width is computed from the page count. If the
   interior is rebuilt with a different page count after the cover was made, the
   cover is now the wrong width and nothing about the file itself looks wrong.
-  G11 compares build timestamps and flags it.
+  G11 measures the canvas, works out what spine that implies, and compares it
+  with the spine the current page count requires.
+
+Both PDFs are opened and measured with `pypdf` — a different implementation
+from the writer that produced them, so a bug in the writer cannot certify
+itself. Without `pypdf` there is no independent reader and both gates block.
 
 ## Rejecting an asset
 

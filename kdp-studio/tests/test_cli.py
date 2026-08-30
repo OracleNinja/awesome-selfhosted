@@ -60,9 +60,10 @@ def test_generation_stops_on_unclassified_assets(tmp_path, manifest):
     assert main(["generation", path]) == EXIT_STOP
 
 
-def test_qa_exact_match_only_passes_a_clean_book(tmp_path, manifest):
+def test_qa_blocks_when_the_assets_are_not_on_disk(tmp_path, manifest):
+    # The manifest describes pages whose files were never written.
     path = str(manifest.write(tmp_path / "m.json"))
-    assert main(["qa", path, "--exact-match-only"]) == EXIT_OK
+    assert main(["qa", path]) == EXIT_STOP
 
 
 def test_qa_stops_on_a_catalogue_duplicate(tmp_path, manifest):
@@ -70,7 +71,7 @@ def test_qa_stops_on_a_catalogue_duplicate(tmp_path, manifest):
     catalogue = write(
         tmp_path / "cat.json", {manifest.assets[0].content_hash: "book-000"}
     )
-    assert main(["qa", path, "--catalogue", catalogue, "--exact-match-only"]) == EXIT_STOP
+    assert main(["qa", path, "--catalogue", catalogue]) == EXIT_STOP
 
 
 def test_production_blocks_without_pdfs(tmp_path, manifest):

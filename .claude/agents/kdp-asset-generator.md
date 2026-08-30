@@ -42,7 +42,59 @@ below what a marker can hold, no grey fills or soft anti-aliased edges, and
 nothing crossing into the gutter or outside the live area — take those bounds
 from `python -m kdp specs`.
 
+## Running the generator
+
+    python3 -m kdp generate <manifest> --provider mock
+
+`mock` is deterministic, offline and free — use it to prove the pipeline before
+spending anything. A metered provider additionally requires `--confirm-spend`,
+so a paid run is never one typo away.
+
+Three rules the runner enforces, and you should not work around:
+
+- **A failure is recorded, never substituted.** If a page cannot be generated,
+  the attempt is logged with its reason and the page stays missing. Never fill
+  the gap with a neighbouring page or a placeholder — QA has to be able to see
+  the hole.
+- **Approved and unjudged pages are never regenerated.** Re-running a partly
+  finished book costs only the pages that still need work. A page awaiting a QA
+  verdict is work already paid for; regenerating it would buy it twice and
+  discard the version QA is about to look at.
+- **Redoing one anyway takes a decision, not a flag.** `--regenerate PAGE-004
+  PAGE-012` names the pages. There is no redo-everything switch, because naming
+  them is what makes the spend deliberate.
+
+New attempts land as `pending`, not `approved`. You do not get to decide that
+your own output is good enough; the QA auditor does. That is the repair loop:
+QA rejects, you re-run, QA looks again.
+
+## What the pixel inspector will measure
+
+G9 opens every shipping page and measures it. Design for that rather than
+against it:
+
+| It checks | So the artwork needs |
+|---|---|
+| Border luminance | A pure white background, not merely a pale one |
+| Midtone fraction (max 6%) | No shading, no greyscale fill, no soft anti-aliased edges |
+| Ink fraction (0.5%–60%) | A real drawing, not a blank page or a solid block |
+| Channel spread | Greyscale only — no colour anywhere |
+| Outer-ring ink | Nothing touching the page edge; keep inside the live area |
+| Corner ink | No signature or watermark in a corner |
+| Pixel dimensions | 300 DPI or better over the live area from `kdp specs` |
+
+Closed regions matter too — a gap lets a fill leak — though that one is still a
+human check rather than an automated one.
+
+## Higgsfield
+
+If Higgsfield is attached as an MCP tool in your session, call it directly,
+write the image into `books/<book-id>/assets/`, and record provenance for it —
+the credential stays inside the session and never reaches a manifest. If it is
+configured for HTTP mode instead, the provider needs a key in the environment;
+either way, never write a key into a file, a prompt, or a provenance record.
+
 ## Output
 
-Write assets under `kdp-studio/books/<book-id>/assets/`, add provenance to the
-manifest, then run `python -m kdp generation <manifest>` until it passes.
+Assets under `kdp-studio/books/<book-id>/assets/`, provenance on the manifest,
+then `python3 -m kdp generation <manifest>` until it passes.

@@ -6,13 +6,24 @@ to meet, and against the prompt it was supposed to satisfy.
 The split matters. What can be judged from the *record* — a failed attempt with
 no approved replacement, a page whose approved version came from the wrong
 prompt, an asset with no dimensions, a page below print resolution — is judged
-here with no dependencies. What needs the *pixels* — stray shading, unclosed
-regions, accidental text, watermarks, anatomy — needs Pillow, and without it
-this gate reports BLOCKED. An image nobody looked at has not passed image QA.
+without opening a file. Everything else needs the pixels, and those are read
+and measured by :mod:`kdp.inspection.image`.
+
+Capability is decided per artefact, not per install. A PNG can be read with the
+standard library alone; a JPEG needs Pillow. So a page is only unchecked when
+*that page* could not be loaded — and an image nobody could look at has not
+passed image QA, so the gate blocks.
+
+One check stays honestly unavailable: detecting accidental text needs OCR,
+which is not installed. The gate reports that it did not look rather than
+reporting that it found nothing.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from ..inspection.image import ImageLoadError, inspect_image
 from ..models.manifest import BookManifest
 from ..models.provenance import AssetStatus
 from ..specs import MIN_IMAGE_DPI
@@ -20,25 +31,27 @@ from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G9.asset_qa"
 STAGE = "qa"
-VALIDATOR_VERSION = "1"
+VALIDATOR_VERSION = "2"
 
-#: What a pixel inspector would check, listed so a BLOCKED result says exactly
-#: what went unchecked rather than gesturing at "image quality".
+#: What the pixel pass measures, named so a report says what was covered.
 PIXEL_CHECKS = (
     "pure white background",
-    "black line quality and closure",
+    "black line presence and ink coverage",
     "unwanted shading or greyscale fill",
     "unwanted colour",
-    "compression artifacts",
-    "malformed anatomy",
-    "duplicated elements within a page",
-    "accidental text",
-    "watermarks, logos and signatures",
-    "content clipped at the edge",
+    "content clipped at the page edge",
+    "watermark, logo or signature marks (corner heuristic)",
+    "pixel dimensions and effective print resolution",
 )
 
 
 def pixel_inspection_available() -> bool:
+    """Whether the optional decoder is present.
+
+    Kept because callers and tests refer to it, but it is no longer what
+    decides whether the gate can run: PNGs are readable without it. Whether a
+    *particular* page could be inspected is answered by trying.
+    """
     try:
         import PIL  # noqa: F401
     except ImportError:
@@ -46,10 +59,17 @@ def pixel_inspection_available() -> bool:
     return True
 
 
-def run(manifest: BookManifest, *, require_pixel_inspection: bool = True) -> GateResult:
+def run(
+    manifest: BookManifest,
+    *,
+    require_pixel_inspection: bool = True,
+    assets_dir: str | Path | None = None,
+) -> GateResult:
     findings: list[Finding] = []
     spec = manifest.spec
     art_pages = {p.page_id: p for p in spec.art_pages}
+    uninspectable: list[str] = []
+    inspected = 0
 
     for page_id, page in sorted(art_pages.items()):
         attempts = manifest.attempts(page_id)
@@ -163,6 +183,54 @@ def run(manifest: BookManifest, *, require_pixel_inspection: bool = True) -> Gat
                 # Geometry problems are G2/G5's to report; not duplicated here.
                 pass
 
+        # --- the pixel pass ------------------------------------------------
+        if not require_pixel_inspection:
+            continue
+
+        source = _resolve(approved.path, assets_dir)
+        if source is None:
+            uninspectable.append(
+                f"{page_id}: the approved version records no readable path"
+            )
+            continue
+
+        try:
+            inspection = inspect_image(source)
+        except ImageLoadError as exc:
+            uninspectable.append(f"{page_id}: {exc}")
+            continue
+
+        inspected += 1
+        for issue in inspection.problems():
+            findings.append(
+                Finding(
+                    code=issue.code,
+                    severity=Severity.BLOCKER if issue.blocking else Severity.MAJOR,
+                    message=issue.message,
+                    subject=page_id,
+                    detail=issue.detail,
+                )
+            )
+
+        # The recorded dimensions must match the file. A record that disagrees
+        # with its own artwork is how a resolution check passes on a page that
+        # was later replaced with a smaller one.
+        if (
+            approved.width is not None
+            and (approved.width, approved.height) != (inspection.width, inspection.height)
+        ):
+            findings.append(
+                Finding(
+                    code="asset_qa.dimensions_disagree",
+                    severity=Severity.BLOCKER,
+                    message=(
+                        f"Provenance records {approved.width}x{approved.height} "
+                        f"but the file is {inspection.width}x{inspection.height}."
+                    ),
+                    subject=page_id,
+                )
+            )
+
     failed = [a for a in manifest.assets if a.status is AssetStatus.FAILED]
     for record in failed:
         findings.append(
@@ -175,14 +243,31 @@ def run(manifest: BookManifest, *, require_pixel_inspection: bool = True) -> Gat
         )
 
     blocked_reason = None
-    if require_pixel_inspection and not pixel_inspection_available():
+    if not require_pixel_inspection:
         blocked_reason = (
-            "Pixel inspection is unavailable: Pillow is not installed, so none "
-            "of the following were checked — "
+            "Pixel inspection was skipped by request, so none of the following "
+            "were checked — " + "; ".join(PIXEL_CHECKS) + ". Record-level checks "
+            "ran, but an image nobody looked at has not passed image QA."
+        )
+    elif uninspectable:
+        blocked_reason = (
+            f"{len(uninspectable)} page(s) could not be inspected, so none of "
+            "the following were checked for them — "
             + "; ".join(PIXEL_CHECKS)
-            + ". Install the imaging extras (pip install -r requirements.txt). "
-            "Record-level checks passed, but an image nobody looked at has not "
-            "passed image QA."
+            + ". "
+            + "; ".join(uninspectable[:5])
+        )
+
+    if require_pixel_inspection and inspected:
+        findings.append(
+            Finding(
+                code="asset_qa.text_detection_unavailable",
+                severity=Severity.INFO,
+                message=(
+                    "Accidental text was not checked: that needs OCR, which is "
+                    "not installed. Everything else in the pixel pass ran."
+                ),
+            )
         )
 
     return decide(
@@ -196,7 +281,27 @@ def run(manifest: BookManifest, *, require_pixel_inspection: bool = True) -> Gat
             "total_attempts": len(manifest.assets),
             "approved": len(manifest.approved_assets),
             "failed_attempts": len(failed),
-            "pixel_inspection": pixel_inspection_available(),
+            "pages_inspected": inspected,
+            "pages_uninspectable": len(uninspectable),
+            "pixel_checks": list(PIXEL_CHECKS),
+            "optional_decoder": pixel_inspection_available(),
         },
         blocked_reason=blocked_reason,
     )
+
+
+def _resolve(path: str | None, assets_dir: str | Path | None) -> Path | None:
+    """Find an asset on disk from its recorded path.
+
+    Manifests store a book-relative path (``assets/PAGE-004.a001.png``). The
+    caller supplies where that book lives; without it, only an already-absolute
+    or cwd-relative path can be found.
+    """
+    if not path:
+        return None
+    candidate = Path(path)
+    if assets_dir is not None:
+        rooted = Path(assets_dir) / candidate.name
+        if rooted.exists():
+            return rooted
+    return candidate if candidate.exists() else None

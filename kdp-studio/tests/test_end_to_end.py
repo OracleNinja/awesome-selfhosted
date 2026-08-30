@@ -99,8 +99,8 @@ def test_every_stage_gate_passes_in_order(book):
         "planning": [prompt_plan.run(manifest.spec, manifest.prompt_plan)],
         "generation": [provenance_complete.run(manifest)],
         "qa": [
-            originality.run(manifest, require_perceptual=False),
-            asset_qa.run(manifest, require_pixel_inspection=False),
+            originality.run(manifest, assets_dir=root / "assets"),
+            asset_qa.run(manifest, assets_dir=root / "assets"),
         ],
         "production": [
             print_preflight.run(
@@ -249,8 +249,8 @@ def test_a_generation_failure_is_recorded_and_never_substituted(tmp_path):
     written = {p.name for p in (tmp_path / "assets").glob("*.png")}
     assert not any(name.startswith(doomed) for name in written)
 
-    gate = asset_qa.run(result, require_pixel_inspection=False)
-    assert gate.status is Status.FAIL
+    gate = asset_qa.run(result, assets_dir=tmp_path / "assets")
+    assert gate.status.allows_advance is False
     assert "asset_qa.no_approved_version" in {f.code for f in gate.findings}
 
 
@@ -330,10 +330,13 @@ def test_disclosure_counts_only_what_ships(book):
 
 
 def test_review_package_states_what_was_not_checked(book):
+    """A blocked gate must reach the reviewer as a gap, not as silence."""
     manifest, _ = book
-    blocked = asset_qa.run(manifest, require_pixel_inspection=True)
-    if blocked.status is not Status.BLOCKED:
-        pytest.skip("Pillow is installed; the blocked path is unreachable here")
+    # Point the gate at a directory with nothing in it: the pages become
+    # uninspectable, which is exactly the situation a reviewer must be told
+    # about rather than left to infer.
+    blocked = asset_qa.run(manifest, assets_dir="/nonexistent")
+    assert blocked.status is Status.BLOCKED
 
     text = build_review(manifest, [blocked])
     assert "What was NOT checked" in text

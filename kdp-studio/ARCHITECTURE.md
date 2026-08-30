@@ -187,11 +187,11 @@ drift from the code.
 | G2 spec legality | Unprintable page count, mismatched counts, gaps in page order, duplicate ids, art on a recto in a single-sided book, unverified spec tables |
 | G8 prompt plan | A page with no prompt, a prompt too thin, two pages sharing a prompt, complexity out of step with the spec |
 | G3 provenance completeness | An art page with no record, an unclassified shipping asset, a generated asset with no prompt version, an unjudged attempt |
-| G4 originality | Repeated pages, pages reused from a published book; blocks without near-duplicate detection |
-| G9 asset QA | A page with no approved version, two approved versions, below 300 DPI, wrong prompt; blocks without pixel inspection |
-| G5 print preflight | No live area, unsafe spine text, no art pages, missing files; blocks without the PDFs or a PDF reader |
-| G10 interior QA | An interior PDF that changed after assembly, missing approved assets; blocks without a PDF reader |
-| G11 cover QA | A cover built before the current interior, unsafe spine text, a changed file; blocks without a PDF reader |
+| G4 originality | Repeated pages, rescaled or mirrored repeats, pages reused from a published book; blocks for any page it could not read |
+| G9 asset QA | A page with no approved version, two approved versions, below 300 DPI, wrong prompt, a tinted background, shading, colour, a clipped drawing, a corner mark; blocks for any page it could not read |
+| G5 print preflight | No live area, unsafe spine text, no art pages, missing or unopenable files |
+| G10 interior QA | Wrong page count, wrong page size, mixed page sizes, artwork missing from a page that should have it, low-resolution placement, art on a recto in a single-sided book, a PDF that changed after assembly |
+| G11 cover QA | Wrong canvas width or height, a spine that does not match the current page count, unsafe spine text, a cover with no text, a file that changed after production |
 | G6 metadata compliance | Incomplete or unconfirmed disclosure, keyword stuffing, thin description, malformed listing |
 | G12 KDP compliance | Unsupportable claims, trademark proximity, a listing overstating the book; blocks on unverified policy data |
 | G13 final audit | Any page not ready, a missing or altered artefact, an undeterminable disclosure, no price, a price that loses money; blocks on unverified spec tables |
@@ -241,6 +241,58 @@ There is no flag that satisfies G14, and nothing in this package can publish:
 `tests/test_end_to_end.py` asserts that no module outside `kdp/providers/`
 imports an HTTP client at all.
 
+## Inspection
+
+Two layers, both real, and both reporting rather than repairing — the read-only
+auditors above would mean nothing if the code beneath them could quietly fix
+what it found.
+
+**Pixels** (`kdp/inspection/image.py`). What a coloring page has to be is
+unusually easy to state numerically — black strokes on white, nothing in
+between, nothing coloured, nothing touching the edge — so most of these checks
+are decidable rather than heuristic. A page with 12% of its pixels in the
+midtones really does have shading in it.
+
+| Measure | Fails when |
+|---|---|
+| Border luminance | Below 240 — the background is not paper |
+| Midtone fraction | Above 6% — shading or greyscale fill |
+| Ink fraction | Below 0.5% (nothing drawn) or above 60% (nothing left to colour) |
+| Coloured fraction | Above 0.1% of pixels with channel spread > 24 |
+| Outer-ring ink | Above 0.2% — the drawing is clipped by the trim |
+| Corner ink | Above 4% — *warns*, does not block: the shape a watermark makes |
+| Dimensions | Effective DPI over the live area below 300 |
+
+**PDFs** (`kdp/inspection/pdf.py` measures, `checks.py` compares). Page count,
+page dimensions against trim-plus-bleed, uniformity, which pages carry
+artwork, embedded image resolution, single-sided layout, cover canvas, and the
+spine implied by the canvas width against the spine the page count requires —
+which is how a cover built before the interior grew gets caught.
+
+### Capability is per artefact, not per install
+
+"Can I inspect this?" is a better question than "is Pillow installed?". A PNG
+is readable with the standard library alone; a JPEG is not. So the loaders
+answer for the file in front of them, and a gate blocks only when *that
+artefact* really could not be read. In practice a mock-generated book clears
+pixel QA with nothing installed, and the gate still blocks the moment a page
+it cannot decode appears.
+
+PDFs are different: without `pypdf` there is no second implementation, and the
+alternative — hand-rolling a reader for the format this package also writes —
+would give an answer without giving an independent one. So G5, G10 and G11
+block, and say what went unchecked.
+
+### Two things it does not claim
+
+**Text detection** needs OCR, which is not installed. The inspection reports
+that it did not look, rather than that it found nothing; those are different
+claims and only one is true.
+
+**Similarity is not a copyright judgement.** The perceptual hash flags pages
+within 10 bits of 64 of each other. That is a QA signal routed to a human, and
+every message that carries it says so.
+
 ## Provenance and attempts
 
 `AssetProvenance` records one *version* of one asset. A page that took three
@@ -257,6 +309,11 @@ The generator marks new attempts `pending`. Only QA moves a version to
 `approved` or `rejected`, and the generator regenerates a page only when its
 last attempt was rejected or failed — an approved page is finished, and a
 pending one is work already paid for that QA has not yet looked at.
+
+Overriding that takes a decision, not a flag: `--regenerate` names the pages to
+redo. There is deliberately no redo-everything switch, because naming the pages
+is what makes a spend deliberate. A metered provider additionally needs
+`--confirm-spend`, on a first run and on a re-run alike.
 
 ## Economics
 
@@ -323,24 +380,24 @@ kdp-studio/
 
 ## What remains
 
-**Verify the specification tables.** `kdp/specs/revision.py` carries a
-`SourceRecord` per table, all `UNVERIFIED`, because kdp.amazon.com was
-unreachable from the environment this was built in. G2, G12 and G13 refuse to
-certify a book while that stands. Read the primary KDP Help pages, confirm each
-table, record the URL and date. Verifications expire after 180 days.
+**Verify the specification tables — the one blocker that cannot be cleared
+from inside this package.** Every `amazon.com` host is refused by network
+policy in the development environment (403 on CONNECT), so no value has been
+confirmed against a primary source. G2, G12 and G13 refuse to certify a book
+while that stands, and `python3 -m kdp verify-specs` prints exactly what to
+read and what to confirm on each page.
+
+Where a URL is recorded it was seen in a search result and is a starting point;
+where only a page title is given, no URL is recorded, because a confidently
+wrong link sends someone to the wrong page and they verify against it.
 
 One value is known to be contested: secondary sources disagree on the page
 count above which KDP prints spine text (79 vs 100). 100 is encoded as the
-conservative choice.
+conservative choice and must be confirmed rather than assumed.
 
-**Pixel inspection (G4, G9).** With Pillow installed the gates run, but the
-pixel checks themselves — stray shading, unclosed regions, watermarks,
-near-duplicates — are still to be implemented. `embroidery-genie-ai`'s raster
-module is the place to borrow from.
-
-**Deep PDF inspection (G5, G10, G11).** With pypdf installed the gates run;
-the checks that read page geometry, fonts and embedded image DPI out of the
-built PDFs are still to be written.
+**Closed-region detection.** The ink and midtone measures catch most line-art
+defects, but a stroke with a *gap* in it — where a fill would leak — needs a
+flood-fill from the page border. Worth adding; not yet there.
 
 **The Higgsfield HTTP client.** See above — a boundary, pending an API
 contract.

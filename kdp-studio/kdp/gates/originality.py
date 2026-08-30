@@ -11,26 +11,46 @@ KDP treats duplicative content as a removal trigger, and the account-level risk
 is higher than the title-level one.
 
 Exact-match detection is exact: identical bytes have identical hashes, and that
-runs anywhere with no dependencies. Near-duplicate detection — a drawing
-mirrored, recoloured, or nudged a few pixels — needs perceptual hashing, which
-needs Pillow. When that is unavailable this gate reports ``BLOCKED`` rather
-than passing, because "I only checked for exact copies" is not the same claim
-as "there are no duplicates".
+runs anywhere with no dependencies.
+
+Near-duplicate detection — the same drawing rescaled, recoloured, or nudged —
+uses a difference hash over the pixels. Two pages within a few bits of each
+other are near-identical. Whether a page can be hashed depends on whether it
+can be *read*, which is a per-file question: a PNG needs nothing installed, a
+JPEG needs Pillow. A page that could not be read is reported as unchecked and
+blocks the gate, because "I only checked for exact copies" is not the same
+claim as "there are no duplicates".
+
+A similarity score is a QA signal. It is not, and is never reported as, a
+copyright determination.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 
+from ..inspection.image import ImageLoadError, hamming, perceptual_hash
 from ..models.manifest import BookManifest
 from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G4.originality"
 STAGE = "qa"
+VALIDATOR_VERSION = "2"
+
+#: Bit distance below which two 64-bit difference hashes are treated as the
+#: same drawing. 10 of 64 bits is the conventional working threshold: tight
+#: enough that genuinely different subjects clear it, loose enough to catch a
+#: rescale or a mirrored repeat.
+NEAR_DUPLICATE_DISTANCE = 10
 
 
 def perceptual_hashing_available() -> bool:
-    """True when the optional imaging stack is installed."""
+    """Whether the optional decoder is installed.
+
+    Not what decides whether the gate can run — PNGs hash without it. Whether a
+    given page could be hashed is answered by trying.
+    """
     try:
         import PIL  # noqa: F401
     except ImportError:
@@ -38,19 +58,34 @@ def perceptual_hashing_available() -> bool:
     return True
 
 
+def _resolve(path: str | None, assets_dir: str | Path | None) -> Path | None:
+    if not path:
+        return None
+    candidate = Path(path)
+    if assets_dir is not None:
+        rooted = Path(assets_dir) / candidate.name
+        if rooted.exists():
+            return rooted
+    return candidate if candidate.exists() else None
+
+
 def run(
     manifest: BookManifest,
     *,
     catalogue_hashes: dict[str, str] | None = None,
     require_perceptual: bool = True,
+    assets_dir: str | Path | None = None,
+    catalogue_phashes: dict[str, str] | None = None,
 ) -> GateResult:
     """Check for duplication.
 
     ``catalogue_hashes`` maps a previously published ``content_hash`` to the
-    ``book_id`` it belongs to. Supply it from the back catalogue's manifests.
+    ``book_id`` it belongs to. ``catalogue_phashes`` does the same for
+    perceptual hashes, catching a page republished after a re-render.
     """
     findings: list[Finding] = []
     catalogue_hashes = catalogue_hashes or {}
+    catalogue_phashes = catalogue_phashes or {}
 
     by_hash: dict[str, list[str]] = defaultdict(list)
     for record in manifest.assets:
@@ -89,14 +124,73 @@ def run(
                 )
             )
 
+    # --- near-duplicate detection --------------------------------------
+    unreadable: list[str] = []
+    phashes: dict[str, int] = {}
+
+    if require_perceptual:
+        for record in manifest.approved_assets:
+            source = _resolve(record.path, assets_dir)
+            if source is None:
+                unreadable.append(f"{record.page}: no readable file")
+                continue
+            try:
+                phashes[record.page] = perceptual_hash(source)
+            except ImageLoadError as exc:
+                unreadable.append(f"{record.page}: {exc}")
+
+        pages = sorted(phashes)
+        for i, left in enumerate(pages):
+            for right in pages[i + 1 :]:
+                distance = hamming(phashes[left], phashes[right])
+                if distance <= NEAR_DUPLICATE_DISTANCE:
+                    findings.append(
+                        Finding(
+                            code="originality.near_duplicate",
+                            severity=Severity.BLOCKER,
+                            message=(
+                                f"{left} and {right} are near-identical "
+                                f"(perceptual distance {distance} of 64). Two "
+                                "versions of one drawing read as padding."
+                            ),
+                            subject=f"{left}, {right}",
+                            detail={"distance": distance},
+                        )
+                    )
+
+        for page, value in sorted(phashes.items()):
+            for prior_hash, prior_book in catalogue_phashes.items():
+                if prior_book == manifest.book_id:
+                    continue
+                distance = hamming(value, int(prior_hash))
+                if distance <= NEAR_DUPLICATE_DISTANCE:
+                    findings.append(
+                        Finding(
+                            code="originality.catalogue_near_duplicate",
+                            severity=Severity.BLOCKER,
+                            message=(
+                                f"{page} is near-identical to a page already "
+                                f"published in {prior_book!r} (distance "
+                                f"{distance} of 64). This is a QA signal for "
+                                "review, not a copyright determination."
+                            ),
+                            subject=page,
+                            detail={"distance": distance, "prior_book_id": prior_book},
+                        )
+                    )
+
     blocked_reason = None
-    if require_perceptual and not perceptual_hashing_available():
+    if not require_perceptual:
         blocked_reason = (
-            "Near-duplicate detection is unavailable: Pillow is not installed, "
-            "so only exact byte-matches were checked. Install the imaging "
-            "extras (pip install -r requirements.txt) before certifying "
-            "originality, or re-run with require_perceptual=False to record an "
-            "exact-match-only result deliberately."
+            "Near-duplicate detection was skipped by request, so only exact "
+            "byte-matches were checked. A rescaled or mirrored repeat would not "
+            "have been found."
+        )
+    elif unreadable:
+        blocked_reason = (
+            f"{len(unreadable)} page(s) could not be read, so near-duplicate "
+            "detection did not cover them and only exact byte-matches were "
+            "checked for those: " + "; ".join(unreadable[:5])
         )
 
     return decide(
@@ -104,10 +198,14 @@ def run(
         STAGE,
         findings,
         evidence={
+            "validator_version": VALIDATOR_VERSION,
             "book_id": manifest.book_id,
             "assets_checked": len(manifest.assets),
             "catalogue_size": len(catalogue_hashes),
-            "perceptual_hashing": perceptual_hashing_available(),
+            "pages_hashed": len(phashes),
+            "pages_unreadable": len(unreadable),
+            "near_duplicate_distance": NEAR_DUPLICATE_DISTANCE,
+            "optional_decoder": perceptual_hashing_available(),
         },
         blocked_reason=blocked_reason,
     )

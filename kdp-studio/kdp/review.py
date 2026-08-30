@@ -15,7 +15,7 @@ run, and a reviewer who does not know that will read silence as approval.
 from __future__ import annotations
 
 from .gates import GATES, final_audit
-from .gates.base import GateResult, Status
+from .gates.base import GateResult, Severity, Status
 from .models.artifacts import ArtifactKind
 from .models.manifest import BookManifest
 from .models.strategy import Confidence
@@ -237,13 +237,15 @@ def build_review(
     # 14-17. Gate results, verbatim.
     lines.append(_heading("11. Gate results"))
     if results:
-        lines.append("| Gate | Status | Blocking findings |")
-        lines.append("|---|---|---|")
+        lines.append("| Gate | Status | Blocking | Warnings |")
+        lines.append("|---|---|---|---|")
         for result in results:
-            blockers = len(result.blockers)
+            warnings = sum(
+                1 for f in result.findings if f.severity is Severity.MAJOR
+            )
             lines.append(
                 f"| {result.gate_id} | **{result.status.value.upper()}** | "
-                f"{blockers or '—'} |"
+                f"{len(result.blockers) or '—'} | {warnings or '—'} |"
             )
         lines.append("")
         for result in results:
@@ -260,10 +262,46 @@ def build_review(
     else:
         lines.append("_No gate results supplied._")
 
-    # 18. What was not checked. The section a reviewer most needs and is most
-    #     likely to be missing from a generated report.
-    lines.append(_heading("12. What was NOT checked"))
+    # Inspection coverage: what was actually measured, so "passed QA" has a
+    # meaning a reviewer can check rather than take on faith.
+    lines.append(_heading("12. Inspection coverage"))
+    coverage = _coverage(results)
+    if coverage:
+        for line in coverage:
+            lines.append(line)
+    else:
+        lines.append("_No inspection evidence recorded._")
+
+    # Warnings: findings that did not stop the book but that a person should
+    # see before signing. These are the easiest thing for a generated report to
+    # bury, and the most expensive to miss.
+    lines.append(_heading("13. Outstanding warnings"))
+    warnings = [
+        (result.gate_id, finding)
+        for result in results
+        for finding in result.findings
+        if finding.severity is Severity.MAJOR
+    ]
+    if warnings:
+        lines.append(
+            "These did **not** stop the book. Read them before approving — "
+            "nothing downstream will raise them again."
+        )
+        lines.append("")
+        for gate_id, finding in warnings:
+            lines.append(
+                f"- **{gate_id}** — {finding.message}"
+                + (f" _({finding.subject})_" if finding.subject else "")
+            )
+    else:
+        lines.append("_None._")
+
+    # What was not checked. The section a reviewer most needs and is most
+    # likely to be missing from a generated report.
+    lines.append(_heading("14. What was NOT checked"))
     blocked = [r for r in results if r.status is Status.BLOCKED]
+    lines.append("**Gates that could not run**")
+    lines.append("")
     if blocked:
         for result in blocked:
             spec_entry = next((g for g in GATES if g.gate_id == result.gate_id), None)
@@ -273,10 +311,43 @@ def build_review(
             for finding in result.findings:
                 lines.append(f"  - {finding.message}")
     else:
-        lines.append("_Every gate was evaluated._")
+        lines.append("_None — every gate was evaluated._")
 
-    # 19. Recommendation, derived rather than composed.
-    lines.append(_heading("13. Recommendation"))
+    lines.append("")
+    lines.append("**Checks not attempted by the gates that did run**")
+    lines.append("")
+
+    unattempted = sorted(
+        {
+            note
+            for result in results
+            for note in result.evidence.get("not_checked", ())
+        }
+        | {
+            finding.message.removeprefix("Not checked: ")
+            for result in results
+            for finding in result.findings
+            if finding.code.endswith("not_checked")
+        }
+    )
+    if any(
+        f.code == "asset_qa.text_detection_unavailable"
+        for r in results
+        for f in r.findings
+    ):
+        unattempted.append(
+            "accidental text on artwork — needs OCR, which is not installed"
+        )
+    unattempted.append(
+        "whether any drawing resembles someone else's work closely enough to "
+        "matter — a similarity score is not a copyright judgement, and no part "
+        "of this pipeline makes one"
+    )
+    for note in sorted(unattempted):
+        lines.append(f"- {note}")
+
+    # Recommendation, derived rather than composed.
+    lines.append(_heading("15. Recommendation"))
     audit = next((r for r in results if r.gate_id == final_audit.GATE_ID), None)
     if audit is None:
         lines.append(
@@ -290,8 +361,7 @@ def build_review(
         if verdict == "FINAL_PASS":
             lines.append(
                 "Every automated check that could run has passed. A human still "
-                "has to decide: read the interior and the cover, confirm the "
-                "listing describes the book, then record a decision."
+                "has to decide."
             )
         elif verdict == "FINAL_FAIL":
             lines.append("Blocking findings remain. This book is not submittable.")
@@ -301,6 +371,46 @@ def build_review(
                 "before asking anyone to approve this book."
             )
 
+    # What approval actually requires, spelled out. A reviewer should never
+    # have to infer what they are being asked to certify.
+    lines.append(_heading("16. What approving this book means"))
+    lines.append(
+        "Approval is a statement about **this exact book**. Before recording "
+        "one, confirm by looking at the artefacts yourself:"
+    )
+    lines.append("")
+    lines.append(
+        "- [ ] The interior PDF reads correctly end to end — open it, do not "
+        "trust the page count alone."
+    )
+    lines.append("- [ ] The cover looks right, and the spine text sits on the spine.")
+    lines.append(
+        "- [ ] Every drawing is original, and none reproduces a recognisable "
+        "character, trade dress or another artist's distinctive style. **No "
+        "automated check can decide this.**"
+    )
+    lines.append(
+        "- [ ] The listing describes the book that was actually built, and makes "
+        "no claim it cannot support."
+    )
+    lines.append(
+        f"- [ ] The AI-content answer above ({disclosure.statement()}) is what "
+        "you will enter on the KDP form."
+    )
+    lines.append("- [ ] Any warnings in section 13 are acceptable to you.")
+    lines.append("")
+    lines.append(
+        "Record the decision with:\n\n"
+        f"```\npython3 -m kdp approve <manifest> approve --reviewer <your name>\n```"
+    )
+    lines.append("")
+    lines.append(
+        f"That binds the approval to fingerprint `{fingerprint[:23]}…`. "
+        "**Changing the assets, either PDF, the listing or the price after "
+        "approving voids it**, and packaging will refuse until a fresh decision "
+        "is recorded. There is no flag that skips this step."
+    )
+
     lines.append("")
     lines.append("---")
     lines.append(
@@ -308,3 +418,40 @@ def build_review(
         "nothing in this pipeline can. Submission to KDP is a manual step._"
     )
     return "\n".join(lines) + "\n"
+
+
+def _coverage(results: list[GateResult]) -> list[str]:
+    """What the inspection layers actually measured, per gate."""
+    lines: list[str] = []
+    for result in results:
+        evidence = result.evidence
+        if "pages_inspected" in evidence:
+            lines.append(
+                f"- **{result.gate_id}** inspected the pixels of "
+                f"{evidence['pages_inspected']} page(s); "
+                f"{evidence.get('pages_uninspectable', 0)} could not be read. "
+                "Checked: " + ", ".join(evidence.get("pixel_checks", ())) + "."
+            )
+        if "pages_hashed" in evidence:
+            lines.append(
+                f"- **{result.gate_id}** perceptually hashed "
+                f"{evidence['pages_hashed']} page(s) against each other"
+                + (
+                    f" and against {evidence['catalogue_size']} catalogue entries"
+                    if evidence.get("catalogue_size")
+                    else ""
+                )
+                + f", flagging anything within {evidence.get('near_duplicate_distance')} "
+                "bits of 64. A similarity score is a QA signal, not a copyright "
+                "determination."
+            )
+        inspection = evidence.get("inspection")
+        if isinstance(inspection, dict):
+            lines.append(
+                f"- **{result.gate_id}** opened the PDF: "
+                f"{inspection.get('page_count')} page(s), "
+                f"{len(inspection.get('pages_with_images', []))} carrying artwork, "
+                f"{len(inspection.get('distinct_page_sizes', []))} distinct page "
+                "size(s)."
+            )
+    return lines

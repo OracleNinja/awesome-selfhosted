@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..errors import SpecError
+from ..inspection.pdf import PDFLoadError, inspect_pdf, pdf_reader_available
 from ..models.manifest import BookManifest
 from ..specs import (
     MIN_IMAGE_DPI,
@@ -32,12 +33,8 @@ STAGE = "production"
 
 
 def pdf_toolchain_available() -> bool:
-    """True when a PDF reader is installed for deep preflight."""
-    try:
-        import pypdf  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    """True when an independent PDF reader is installed."""
+    return pdf_reader_available()
 
 
 def run(
@@ -128,12 +125,16 @@ def run(
             "dimensions, embedded fonts, image DPI and colour space cannot be "
             "inferred from the manifest."
         )
-    elif not pdf_toolchain_available():
-        blocked_reason = (
-            "PDF toolchain unavailable: pypdf is not installed, so page "
-            "geometry, fonts and image resolution inside the PDFs were not "
-            "verified. Install the production extras "
-            "(pip install -r requirements.txt) before certifying preflight."
-        )
+    elif not missing_files:
+        # Confirm both files actually parse. The detailed comparison against
+        # the specification is G10 and G11's job; duplicating it here would
+        # mean two places to keep in step.
+        for label, target in (("interior", interior_pdf), ("cover", cover_pdf)):
+            try:
+                result = inspect_pdf(target, extract_images=False)
+                evidence[f"{label}_pages"] = result.page_count
+            except PDFLoadError as exc:
+                blocked_reason = f"The {label} PDF could not be opened: {exc}"
+                break
 
     return decide(GATE_ID, STAGE, findings, evidence=evidence, blocked_reason=blocked_reason)

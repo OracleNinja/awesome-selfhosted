@@ -11,6 +11,10 @@ The loop is small and its rules are strict:
   An approved page is finished. A *pending* page has been generated and is
   waiting on QA's verdict — regenerating it would pay a metered provider twice
   for the same page and throw away the version QA is about to look at.
+* **Overriding that needs a decision, not a flag.** ``regenerate`` takes the
+  page ids to redo. There is deliberately no "redo everything" switch: naming
+  the pages is what makes the spend deliberate, and it is the difference
+  between a considered re-run and a fat-fingered second invoice.
 
 Retries are bounded per page rather than globally, so one hopeless page cannot
 exhaust the budget for the rest of the book.
@@ -84,8 +88,14 @@ def generate_book(
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     now: str | None = None,
+    regenerate: tuple[str, ...] = (),
 ) -> GenerationOutcome:
-    """Generate every art page that does not already have an approved asset."""
+    """Generate every art page that still needs work.
+
+    ``regenerate`` names pages to redo even though they are approved or awaiting
+    judgement. An unknown page id raises rather than being ignored: silently
+    doing nothing when someone asked for a re-run is worse than refusing.
+    """
     if manifest.prompt_plan is None:
         raise ProviderUnavailable(
             "the manifest carries no prompt plan; generation without a per-page "
@@ -96,13 +106,22 @@ def generate_book(
     assets_dir.mkdir(parents=True, exist_ok=True)
     timestamp = now or _now()
 
+    known = {p.page_id for p in manifest.spec.art_pages}
+    unknown = sorted(set(regenerate) - known)
+    if unknown:
+        raise ProviderUnavailable(
+            "cannot regenerate pages this book does not have: "
+            + ", ".join(unknown)
+        )
+    forced = set(regenerate)
+
     records = list(manifest.assets)
     generated: list[str] = []
     failed: list[str] = []
     skipped: list[str] = []
 
     for page in sorted(manifest.spec.art_pages, key=lambda p: p.index):
-        if not _needs_work(manifest, page.page_id):
+        if page.page_id not in forced and not _needs_work(manifest, page.page_id):
             skipped.append(page.page_id)
             continue
 
