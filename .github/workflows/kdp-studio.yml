@@ -1,0 +1,40 @@
+# Scoped to kdp-studio/ by path filter so it never runs for the other projects
+# in this repository.
+name: kdp-studio
+
+on:
+  push:
+    paths:
+      - 'kdp-studio/**'
+      - '.github/workflows/kdp-studio.yml'
+  pull_request:
+    paths:
+      - 'kdp-studio/**'
+      - '.github/workflows/kdp-studio.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kdp-studio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The core is stdlib-only by design. Installing nothing but pytest keeps
+      # that honest: if a core module ever grows a third-party import, this job
+      # fails rather than passing on a dependency someone happened to have.
+      - name: Install pytest only
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Check the CLI runs with no dependencies installed
+        run: |
+          python -m kdp stages
+          python -m kdp specs --trim 8.5x11 --pages 60 > /dev/null

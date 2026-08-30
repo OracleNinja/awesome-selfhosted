@@ -1,0 +1,21 @@
+# KDP Studio dependencies.
+#
+# The core — models, print geometry, gates, pipeline, CLI — needs NOTHING from
+# this file. It is stdlib-only by design, so a gate can always be evaluated and
+# a verdict is never silently skipped because an install failed.
+#
+# The packages below unlock the stages that genuinely cannot be done in pure
+# Python. Until they are installed the gates that need them report BLOCKED,
+# which stops a book rather than passing it. That is the intended behaviour.
+
+# --- Testing (core; no other dependency required to run the suite) -----------
+pytest==9.1.1
+
+# --- Imaging: line-art QA and near-duplicate detection (G4) ------------------
+pillow==12.3.0
+numpy==2.4.6
+imagehash==4.3.2
+
+# --- PDF: interior/cover construction and deep preflight (G5) ---------------
+pypdf==6.1.1
+reportlab==5.0.0
