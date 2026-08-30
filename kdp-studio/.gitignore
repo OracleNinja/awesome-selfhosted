@@ -1,7 +1,8 @@
-# Working artefacts. Manifests and gate reports are the auditable record and
-# belong in version control; generated artwork and built PDFs do not.
+# Working artefacts. Manifests, gate reports and review packages are the
+# auditable record and belong in version control; generated artwork, built
+# PDFs and publication packages do not — they are reproducible from the
+# manifest, and the build is deterministic.
 books/*/assets/
 books/*/build/
-*.pdf
 __pycache__/
 .pytest_cache/

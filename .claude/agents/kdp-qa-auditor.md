@@ -1,6 +1,6 @@
 ---
 name: kdp-qa-auditor
-description: Audits a generated KDP book for originality, intra-book duplication, catalogue duplication, and line-art quality. Use for the QA stage of a book in kdp-studio/. Reports findings; never fixes them.
+description: Audits a KDP book for originality, duplication, line-art quality, and the built interior and cover PDFs. Use for the qa and production_qa stages in kdp-studio/. Reports findings; never fixes them.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
@@ -31,6 +31,31 @@ is unavailable. That is the gate working: it means only exact byte-matches were
 checked, which is a weaker claim than "no duplicates". Install the imaging
 extras. Use `--exact-match-only` only when the user has asked for it knowing
 what it skips, and say so in your report.
+
+## Production QA (G10, G11)
+
+`python3 -m kdp production-qa <manifest>` inspects the built PDFs.
+
+Two checks here are worth understanding, because they catch things that look
+fine:
+
+- **The artefact hash.** An interior can be rebuilt between assembly and QA. A
+  QA pass on a file that no longer exists is worse than no QA, so the gate
+  compares the recorded hash against the file on disk.
+- **A stale cover.** The spine width is computed from the page count. If the
+  interior is rebuilt with a different page count after the cover was made, the
+  cover is now the wrong width and nothing about the file itself looks wrong.
+  G11 compares build timestamps and flags it.
+
+## Rejecting an asset
+
+You do not fix assets, but you do record verdicts:
+
+    python3 -m kdp asset <manifest> reject <asset-id> --reason "stray shading"
+
+The rejected version stays in the history. `kdp-asset-generator` then
+regenerates only the pages that still need work — approved pages are skipped,
+so a metered provider is not paid twice.
 
 ## Output
 

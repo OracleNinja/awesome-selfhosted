@@ -22,14 +22,25 @@ from .gates.runner import StageReport
 from .models.manifest import BookManifest
 
 #: The stage order. Index in this tuple is the stage's ordinal.
+#:
+#: The sixteen conceptual steps in the build brief map onto these eleven
+#: working stages plus the terminal one. Several conceptual steps share a
+#: stage because they share an artefact and a gate — splitting them would add
+#: transitions without adding a decision. The mapping is documented in
+#: ARCHITECTURE.md and asserted in the tests, so it cannot drift silently.
 STAGES: Final[tuple[str, ...]] = (
-    "research",
-    "concept",
-    "generation",
-    "qa",
-    "production",
-    "publishing_prep",
-    "ready_for_submission",
+    "research",             # market research
+    "strategy",             # opportunity and differentiation
+    "concept",              # book specification + page architecture
+    "planning",             # prompt and asset plan
+    "generation",           # asset generation, with attempts
+    "qa",                   # asset QA, duplication, repair loop
+    "production",           # interior assembly + cover production
+    "production_qa",        # interior QA + cover QA
+    "publishing_prep",      # metadata/listing + KDP compliance
+    "final_audit",          # final publishing audit
+    "human_approval",       # explicit human sign-off
+    "ready_for_submission", # publication package built; a human submits
 )
 
 #: The terminal stage. Reaching it means every gate passed; it does not mean

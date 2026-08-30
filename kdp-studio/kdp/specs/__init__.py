@@ -19,11 +19,18 @@ from .interior import (
 )
 from .paper import DEFAULT_PAPER, PAPERS, Paper, get_paper
 from .revision import (
+    SOURCES,
     SPEC_REVISION,
     VERIFICATION,
     VERIFICATION_NOTE,
+    VERIFICATION_TTL_DAYS,
     VERIFIED_ON,
+    SourceRecord,
     is_verified,
+    source,
+    stale_tables,
+    unverified_tables,
+    verification_problem,
 )
 from .trim import DEFAULT_TRIM, TRIM_SIZES, TrimSize, get_trim
 
@@ -35,14 +42,17 @@ __all__ = [
     "MIN_IMAGE_DPI",
     "MIN_PAGES_FOR_SPINE_TEXT",
     "PAPERS",
+    "SOURCES",
     "SPEC_REVISION",
     "TRIM_SIZES",
     "VERIFICATION",
     "VERIFICATION_NOTE",
+    "VERIFICATION_TTL_DAYS",
     "VERIFIED_ON",
     "CoverGeometry",
     "InteriorGeometry",
     "Paper",
+    "SourceRecord",
     "TrimSize",
     "cover_geometry",
     "get_paper",
@@ -50,4 +60,8 @@ __all__ = [
     "gutter_in",
     "interior_geometry",
     "is_verified",
+    "source",
+    "stale_tables",
+    "unverified_tables",
+    "verification_problem",
 ]

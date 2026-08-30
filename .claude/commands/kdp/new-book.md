@@ -11,9 +11,11 @@ Scaffold a new book at `kdp-studio/books/$1/`.
    the title `$2`, and sensible coloring-book defaults (trim `8.5x11`, paper
    `bw_white`, bleed true, `single_sided_art` true). Leave `pages` empty and
    `page_count` at 0 — the concept stage fills them in.
-3. Confirm it round-trips: `python3 -m kdp --json concept kdp-studio/books/$1/manifest.json`.
-   It will not pass yet; that is expected for an empty spec. Report what it
-   says is missing.
+3. Confirm it loads: `python3 -m kdp --json concept kdp-studio/books/$1/manifest.json`.
+   It will not pass yet; an empty spec is expected at this point. Report what
+   it says is missing.
 
-Then stop, and tell the user the research stage comes next. Do not invent
-market research, a theme, or page subjects.
+Then stop and tell the user the research stage comes next. Do not invent market
+research, a strategy, a theme, or page subjects — those belong to
+`kdp-market-researcher` and `kdp-book-strategist`, and inventing them here
+would skip the two gates that check them.

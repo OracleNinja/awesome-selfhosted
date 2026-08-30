@@ -34,6 +34,21 @@ dimensions, embedded fonts, image DPI and colour space cannot be inferred from
 a manifest. Install the production extras rather than treating a blocked
 preflight as a pass. Interior artwork should be 300 DPI or better.
 
+## Building
+
+    python3 -m kdp build <manifest> [--cover-art path/to/front.png]
+
+This assembles both PDFs, hashes them, and records them on the manifest. The
+build is deterministic: the same book produces byte-identical PDFs, which is
+what makes the artefact hashes — and the approval fingerprint that depends on
+them — mean anything. If a rebuild changes the hash, the *book* changed.
+
+Build the interior first, then the cover: the spine width comes from the page
+count, and a cover built against a stale count is the wrong width. G11 checks
+the order and will flag it.
+
 ## Output
 
-Built PDFs under `kdp-studio/books/<book-id>/build/` and a passing G5 report.
+Built PDFs under `kdp-studio/books/<book-id>/build/`, recorded on the manifest,
+and a passing G5. The independent inspection is G10/G11, run by the QA auditor
+— you do not certify your own output.

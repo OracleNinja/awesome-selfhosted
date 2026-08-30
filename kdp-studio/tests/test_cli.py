@@ -29,7 +29,7 @@ def test_specs_prints_geometry(capsys):
 
 def test_specs_warns_that_the_tables_are_unverified(capsys):
     main(["specs"])
-    assert "UNVERIFIED" in capsys.readouterr().err
+    assert "never verified" in capsys.readouterr().err
 
 
 def test_research_passes_a_clean_brief(tmp_path, brief, capsys):
@@ -78,9 +78,15 @@ def test_production_blocks_without_pdfs(tmp_path, manifest):
     assert main(["production", path]) == EXIT_STOP
 
 
+def test_publishing_prep_blocks_on_unverified_policy(tmp_path, manifest):
+    # G12 refuses to certify compliance against policy data nobody checked.
+    path = str(manifest.write(tmp_path / "m.json"))
+    assert main(["publishing-prep", path]) == EXIT_STOP
+
+
 def test_publishing_prep_passes_complete_metadata(tmp_path, manifest):
     path = str(manifest.write(tmp_path / "m.json"))
-    assert main(["publishing-prep", path]) == EXIT_OK
+    assert main(["publishing-prep", path, "--allow-unverified-policy"]) == EXIT_OK
 
 
 def test_disclosure_reports_the_answer(tmp_path, manifest, capsys):
@@ -112,7 +118,7 @@ def test_advance_moves_a_manifest_on_a_passing_report(tmp_path, manifest):
     assert main(["advance", manifest_path, report]) == EXIT_OK
     from kdp.models import BookManifest
 
-    assert BookManifest.read(manifest_path).stage == "concept"
+    assert BookManifest.read(manifest_path).stage == "strategy"
 
 
 def test_advance_refuses_a_report_from_another_stage(tmp_path, manifest):
@@ -148,7 +154,7 @@ def test_stages_lists_the_pipeline(capsys):
 
 def test_json_flag_emits_machine_readable_output(tmp_path, manifest, capsys):
     path = str(manifest.write(tmp_path / "m.json"))
-    main(["--json", "publishing-prep", path])
+    main(["--json", "publishing-prep", path, "--allow-unverified-policy"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["stage"] == "publishing_prep"
     assert payload["passed"] is True

@@ -275,7 +275,10 @@ def test_preflight_reports_a_missing_declared_file(tmp_path, manifest):
         cover_pdf=tmp_path / "absent-cover.pdf",
     )
     assert "preflight.file_missing" in codes(result)
-    assert result.status is Status.BLOCKED
+    # FAIL when the PDF toolchain is installed, BLOCKED when it is not. Either
+    # way the book stops, which is the property worth asserting — the test
+    # should not depend on what happens to be installed.
+    assert result.status.allows_advance is False
 
 
 def test_preflight_flags_a_book_with_no_art():

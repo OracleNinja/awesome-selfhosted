@@ -13,7 +13,14 @@ on:
       - '.github/workflows/kdp-studio.yml'
 
 jobs:
-  test:
+  # The core is stdlib-only by design, and this job is what keeps that true.
+  # Installing nothing but pytest means a stray third-party import in the core
+  # fails the build rather than passing on a dependency someone happened to
+  # have. It also exercises every BLOCKED path for real: with Pillow and pypdf
+  # absent, the gates that need them must stop books rather than wave them
+  # through.
+  core:
+    name: core (no optional dependencies)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -25,16 +32,45 @@ jobs:
         with:
           python-version: '3.11'
 
-      # The core is stdlib-only by design. Installing nothing but pytest keeps
-      # that honest: if a core module ever grows a third-party import, this job
-      # fails rather than passing on a dependency someone happened to have.
       - name: Install pytest only
         run: python -m pip install --upgrade pip pytest
+
+      - name: Assert the core imports with no site-packages
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path = [p for p in sys.path if 'site-packages' not in p]
+          sys.path.insert(0, '.')
+          import kdp.cli, kdp.gates, kdp.models, kdp.pipeline, kdp.specs, kdp.assembly
+          print('core imports cleanly with no site-packages')
+          PY
 
       - name: Run tests
         run: python -m pytest
 
-      - name: Check the CLI runs with no dependencies installed
+      - name: Exercise the CLI
         run: |
           python -m kdp stages
+          python -m kdp gates
           python -m kdp specs --trim 8.5x11 --pages 60 > /dev/null
+
+  # The same suite with the optional extras present, so the paths that only
+  # run when Pillow and pypdf are installed are covered too.
+  extras:
+    name: with optional extras
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kdp-studio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install extras
+        run: python -m pip install --upgrade pip -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest

@@ -9,20 +9,28 @@ artwork that may not be accounted for.
 from __future__ import annotations
 
 from ..models.manifest import BookManifest
-from ..models.provenance import AIRole
+from ..models.provenance import AIRole, AssetStatus
 from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G3.provenance_complete"
 STAGE = "generation"
+VALIDATOR_VERSION = "2"
 
 
 def run(manifest: BookManifest) -> GateResult:
+    """Check that every art page is accounted for by a classified asset.
+
+    Works in terms of *pages*, not version ids. An asset id identifies one
+    attempt (``PAGE-004.a002``); the page it belongs to is what the spec
+    describes, and confusing the two is how a fully generated book comes back
+    reading as entirely missing.
+    """
     findings: list[Finding] = []
 
     described = {p.page_id for p in manifest.spec.pages if p.role == "art"}
-    recorded = {a.asset_id for a in manifest.assets}
+    with_attempts = {a.page for a in manifest.assets}
 
-    for missing in sorted(described - recorded):
+    for missing in sorted(described - with_attempts):
         findings.append(
             Finding(
                 code="provenance.missing_record",
@@ -32,11 +40,11 @@ def run(manifest: BookManifest) -> GateResult:
             )
         )
 
-    for orphan in sorted(recorded - described):
-        record = manifest.asset(orphan)
+    for orphan in sorted(with_attempts - described):
+        records = [a for a in manifest.assets if a.page == orphan]
         # Assets that are not art pages (cover, metadata copy) are legitimate;
         # only flag ones that claim to be pages the spec never mentioned.
-        if record is not None and record.kind.value == "image":
+        if any(r.kind.value == "image" for r in records):
             findings.append(
                 Finding(
                     code="provenance.orphan_asset",
@@ -49,7 +57,9 @@ def run(manifest: BookManifest) -> GateResult:
                 )
             )
 
-    for record in manifest.assets:
+    # Only versions that ship need classifying: a discarded attempt is not in
+    # the book, so its AI role cannot affect the disclosure answer.
+    for record in manifest.approved_assets:
         if record.ai_role is AIRole.UNKNOWN:
             findings.append(
                 Finding(
@@ -75,15 +85,36 @@ def run(manifest: BookManifest) -> GateResult:
                 )
             )
 
+    # An attempt left PENDING has been produced but never judged. It must not
+    # reach QA looking like a decision was made about it.
+    pending = sorted(
+        a.asset_id for a in manifest.assets if a.status is AssetStatus.PENDING
+    )
+    for asset_id in pending:
+        findings.append(
+            Finding(
+                code="provenance.unjudged_attempt",
+                severity=Severity.MAJOR,
+                message=(
+                    "Attempt is still pending: it was generated but never "
+                    "approved or rejected."
+                ),
+                subject=asset_id,
+            )
+        )
+
     disclosure = manifest.disclosure()
     return decide(
         GATE_ID,
         STAGE,
         findings,
         evidence={
+            "validator_version": VALIDATOR_VERSION,
             "book_id": manifest.book_id,
             "art_pages": len(described),
-            "assets": len(manifest.assets),
+            "attempts": len(manifest.assets),
+            "shipping": len(manifest.approved_assets),
+            "pending": len(pending),
             "disclosure": disclosure.to_dict(),
         },
     )

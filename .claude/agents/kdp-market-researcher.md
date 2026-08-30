@@ -28,10 +28,22 @@ If you find yourself wanting to record "what this book looks like", record the
 *market fact* instead: "this segment favours dense botanical patterns at a
 higher price point" rather than any description of one book's pages.
 
+## Say how you know each thing
+
+Every claim you carry forward is labelled `observed`, `inferred`, `estimated`
+or `unknown`. Keep them honest: a price you read on a listing is observed; a
+demand level you reasoned from review themes is inferred; a sales figure is
+almost always estimated, and often better left unknown.
+
+Never present an estimate as an observation. Never report estimated sales as
+sales. An unlabelled number becomes a fact three documents later, and by then
+nobody remembers it was a guess.
+
 ## Output
 
 Write a research brief JSON to `kdp-studio/books/<book-id>/research.json`, then
-run `python -m kdp research <path>`. Fix findings and re-run until it passes.
+run `python3 -m kdp research <path>`. Fix findings and re-run until it passes.
 Report the opportunity you identified and the signals supporting it.
 
-Do not design the book. That is the concept stage.
+Do not design the book — that is the concept stage — and do not decide the
+angle, which belongs to `kdp-book-strategist`.

@@ -16,16 +16,29 @@ import json
 import sys
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from .errors import KDPError
 from .gates import (
+    GATES,
+    asset_qa,
+    cover_qa,
+    final_audit,
+    human_approval,
+    interior_qa,
+    kdp_compliance,
     metadata_compliance,
     originality,
     print_preflight,
+    prompt_plan,
     provenance_complete,
     research_hygiene,
     spec_legality,
+    strategy_differentiation,
 )
 from .gates.runner import StageReport, run_stage
+from .models.approval import ApprovalRecord, ApprovalStatus
+from .models.artifacts import Artifact, ArtifactKind
 from .models.manifest import BookManifest
 from .models.research import ResearchBrief
 from .pipeline import STAGES, advance
@@ -94,12 +107,22 @@ def cmd_generation(args: argparse.Namespace) -> int:
 def cmd_qa(args: argparse.Namespace) -> int:
     manifest = BookManifest.read(args.manifest)
     catalogue = _load_json(args.catalogue) if args.catalogue else {}
-    result = originality.run(
-        manifest,
-        catalogue_hashes=catalogue,
-        require_perceptual=not args.exact_match_only,
+    return _emit(
+        run_stage(
+            "qa",
+            [
+                originality.run(
+                    manifest,
+                    catalogue_hashes=catalogue,
+                    require_perceptual=not args.exact_match_only,
+                ),
+                asset_qa.run(
+                    manifest, require_pixel_inspection=not args.skip_pixel_inspection
+                ),
+            ],
+        ),
+        args.json,
     )
-    return _emit(run_stage("qa", [result]), args.json)
 
 
 def cmd_production(args: argparse.Namespace) -> int:
@@ -113,7 +136,16 @@ def cmd_production(args: argparse.Namespace) -> int:
 def cmd_publishing_prep(args: argparse.Namespace) -> int:
     manifest = BookManifest.read(args.manifest)
     return _emit(
-        run_stage("publishing_prep", [metadata_compliance.run(manifest)]), args.json
+        run_stage(
+            "publishing_prep",
+            [
+                metadata_compliance.run(manifest),
+                kdp_compliance.run(
+                    manifest, require_verified_policy=not args.allow_unverified_policy
+                ),
+            ],
+        ),
+        args.json,
     )
 
 
@@ -161,6 +193,231 @@ def cmd_advance(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_strategy(args: argparse.Namespace) -> int:
+    manifest = BookManifest.read(args.manifest)
+    result = strategy_differentiation.run(manifest.strategy)
+    return _emit(run_stage("strategy", [result]), args.json)
+
+
+def cmd_planning(args: argparse.Namespace) -> int:
+    manifest = BookManifest.read(args.manifest)
+    result = prompt_plan.run(manifest.spec, manifest.prompt_plan)
+    return _emit(run_stage("planning", [result]), args.json)
+
+
+def cmd_production_qa(args: argparse.Namespace) -> int:
+    manifest = BookManifest.read(args.manifest)
+    return _emit(
+        run_stage("production_qa", [interior_qa.run(manifest), cover_qa.run(manifest)]),
+        args.json,
+    )
+
+
+def cmd_final_audit(args: argparse.Namespace) -> int:
+    manifest = BookManifest.read(args.manifest)
+    result = final_audit.run(
+        manifest, require_verified_specs=not args.allow_unverified_specs
+    )
+    if args.json:
+        sys.stdout.write(run_stage("final_audit", [result]).to_json())
+    else:
+        sys.stdout.write(f"{final_audit.verdict(result)}\n")
+        sys.stdout.write(run_stage("final_audit", [result]).summary() + "\n")
+    return EXIT_OK if result.status.allows_advance else EXIT_STOP
+
+
+def cmd_approval(args: argparse.Namespace) -> int:
+    manifest = BookManifest.read(args.manifest)
+    return _emit(run_stage("human_approval", [human_approval.run(manifest)]), args.json)
+
+
+def cmd_generate(args: argparse.Namespace) -> int:
+    """Run the generator against a provider. Metered providers cost money."""
+    from .generation import generate_book
+    from .providers import METERED, get_provider
+
+    manifest = BookManifest.read(args.manifest)
+    provider = get_provider(args.provider)
+
+    if args.provider in METERED and not args.confirm_spend:
+        sys.stderr.write(
+            f"{args.provider!r} is a metered provider and this would spend "
+            f"money on {len(manifest.spec.art_pages)} page(s). Re-run with "
+            "--confirm-spend if that is intended.\n"
+        )
+        return EXIT_STOP
+
+    if not provider.available():
+        reason = getattr(provider, "unavailable_reason", lambda: "not available")()
+        sys.stderr.write(f"provider {args.provider!r} is unavailable: {reason}\n")
+        return EXIT_STOP
+
+    book_dir = Path(args.manifest).parent
+    outcome = generate_book(
+        manifest, provider, book_dir / "assets", max_attempts=args.max_attempts
+    )
+    outcome.manifest.write(args.manifest)
+
+    if args.json:
+        sys.stdout.write(json.dumps(outcome.to_dict(), sort_keys=True, indent=2) + "\n")
+    else:
+        sys.stdout.write(
+            f"generated {len(outcome.generated)}, skipped {len(outcome.skipped)}, "
+            f"failed {len(outcome.failed)}\n"
+        )
+        for page in outcome.failed:
+            sys.stdout.write(f"  FAILED {page}\n")
+    return EXIT_OK if outcome.ok else EXIT_STOP
+
+
+def cmd_review_assets(args: argparse.Namespace) -> int:
+    """Approve or reject one generated asset version."""
+    from .generation import approve_asset, reject_asset
+
+    manifest = BookManifest.read(args.manifest)
+    if args.decision == "approve":
+        updated = approve_asset(manifest, args.asset_id)
+    else:
+        if not args.reason:
+            sys.stderr.write("rejecting an asset requires --reason\n")
+            return EXIT_USAGE
+        updated = reject_asset(manifest, args.asset_id, args.reason)
+    updated.write(args.manifest)
+    sys.stdout.write(f"{args.asset_id}: {args.decision}d\n")
+    return EXIT_OK
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    """Assemble the interior and cover PDFs and record them on the manifest."""
+    from .assembly import build_cover, build_interior
+
+    manifest = BookManifest.read(args.manifest)
+    book_dir = Path(args.manifest).parent
+    build_dir = book_dir / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    interior_path = build_dir / "interior.pdf"
+    interior_path.write_bytes(build_interior(manifest, book_dir / "assets"))
+    manifest = manifest.with_artifact(
+        Artifact.from_file(ArtifactKind.INTERIOR_PDF, interior_path, created_at=stamp)
+    )
+
+    cover_path = build_dir / "cover.pdf"
+    cover_path.write_bytes(build_cover(manifest, cover_art=args.cover_art))
+    manifest = manifest.with_artifact(
+        Artifact.from_file(ArtifactKind.COVER_PDF, cover_path, created_at=stamp)
+    )
+
+    manifest.write(args.manifest)
+    sys.stdout.write(f"built {interior_path} and {cover_path}\n")
+    return EXIT_OK
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """Render the human review package."""
+    from .review import build_review
+
+    manifest = BookManifest.read(args.manifest)
+    results = []
+    if args.results:
+        payload = _load_json(args.results)
+        from .gates.base import Finding, GateResult, Severity, Status
+
+        for item in payload if isinstance(payload, list) else payload.get("results", []):
+            results.append(
+                GateResult(
+                    gate_id=item["gate_id"],
+                    stage=item["stage"],
+                    status=Status(item["status"]),
+                    findings=tuple(
+                        Finding(
+                            code=f["code"],
+                            severity=Severity(f["severity"]),
+                            message=f["message"],
+                            subject=f.get("subject"),
+                            detail=f.get("detail", {}),
+                        )
+                        for f in item.get("findings", [])
+                    ),
+                    evidence=item.get("evidence", {}),
+                    spec_revision=item.get("spec_revision", ""),
+                )
+            )
+
+    text = build_review(manifest, results)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        sys.stdout.write(f"wrote {args.out}\n")
+    else:
+        sys.stdout.write(text)
+    return EXIT_OK
+
+
+def cmd_approve(args: argparse.Namespace) -> int:
+    """Record a human decision. The only way past G14."""
+    manifest = BookManifest.read(args.manifest)
+    status = ApprovalStatus.APPROVED if args.decision == "approve" else ApprovalStatus.REJECTED
+    record = ApprovalRecord(
+        status=status,
+        reviewer=args.reviewer,
+        decided_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        book_fingerprint=manifest.production_fingerprint(),
+        approved_artifacts=tuple(
+            a.content_hash for a in sorted(manifest.artifacts, key=lambda x: x.kind.value)
+        ),
+        notes=args.notes or "",
+    )
+    from dataclasses import replace
+
+    replace(manifest, approval=record).write(args.manifest)
+    sys.stdout.write(
+        f"{args.decision}d by {args.reviewer} "
+        f"(fingerprint {record.book_fingerprint[:23]}…)\n"
+    )
+    return EXIT_OK
+
+
+def cmd_package(args: argparse.Namespace) -> int:
+    """Build the publication package. Refuses without a current approval."""
+    from .package import build_package
+
+    manifest = BookManifest.read(args.manifest)
+    destination = args.out or str(Path(args.manifest).parent / "build" / "publication.zip")
+    result = build_package(manifest, destination, require_approval=not args.no_approval)
+    sys.stdout.write(f"wrote {result.path} ({len(result.entries)} entries)\n")
+    sys.stdout.write(f"  {result.content_hash}\n")
+    return EXIT_OK
+
+
+def cmd_gates(args: argparse.Namespace) -> int:
+    """List every gate, what it checks, and what it needs to run."""
+    if args.json:
+        sys.stdout.write(
+            json.dumps(
+                [
+                    {
+                        "gate_id": g.gate_id,
+                        "stage": g.stage,
+                        "purpose": g.purpose,
+                        "requires": list(g.requires),
+                        "validator_version": g.validator_version,
+                    }
+                    for g in GATES
+                ],
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
+        )
+    else:
+        for gate in GATES:
+            sys.stdout.write(f"{gate.gate_id:32} [{gate.stage}]\n")
+            sys.stdout.write(f"  {gate.purpose}\n")
+            sys.stdout.write(f"  needs: {', '.join(gate.requires)}\n")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kdp",
@@ -201,6 +458,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="record an exact-match-only result instead of blocking on Pillow",
     )
+    p.add_argument(
+        "--skip-pixel-inspection",
+        action="store_true",
+        help="record a record-level-only asset QA result instead of blocking",
+    )
     p.set_defaults(func=cmd_qa)
 
     p = sub.add_parser("production", help="run G5 print preflight")
@@ -209,8 +471,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cover", help="path to the cover PDF")
     p.set_defaults(func=cmd_production)
 
-    p = sub.add_parser("publishing-prep", help="run G6 metadata compliance")
+    p = sub.add_parser(
+        "publishing-prep", help="run G6 metadata compliance and G12 KDP compliance"
+    )
     p.add_argument("manifest")
+    p.add_argument("--allow-unverified-policy", action="store_true")
     p.set_defaults(func=cmd_publishing_prep)
 
     p = sub.add_parser("disclosure", help="report the KDP AI-content answer")
@@ -221,6 +486,77 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("manifest")
     p.add_argument("report", help="path to a stored stage report JSON file")
     p.set_defaults(func=cmd_advance)
+
+    p = sub.add_parser("strategy", help="run G7 strategy differentiation")
+    p.add_argument("manifest")
+    p.set_defaults(func=cmd_strategy)
+
+    p = sub.add_parser("planning", help="run G8 prompt plan")
+    p.add_argument("manifest")
+    p.set_defaults(func=cmd_planning)
+
+    p = sub.add_parser("production-qa", help="run G10 interior QA and G11 cover QA")
+    p.add_argument("manifest")
+    p.set_defaults(func=cmd_production_qa)
+
+    p = sub.add_parser("final-audit", help="run G13 the final publishing audit")
+    p.add_argument("manifest")
+    p.add_argument("--allow-unverified-specs", action="store_true")
+    p.set_defaults(func=cmd_final_audit)
+
+    p = sub.add_parser("approval", help="run G14 human approval")
+    p.add_argument("manifest")
+    p.set_defaults(func=cmd_approval)
+
+    p = sub.add_parser("generate", help="generate art pages through a provider")
+    p.add_argument("manifest")
+    p.add_argument("--provider", default="mock")
+    p.add_argument("--max-attempts", type=int, default=3)
+    p.add_argument(
+        "--confirm-spend",
+        action="store_true",
+        help="required before using a metered provider",
+    )
+    p.set_defaults(func=cmd_generate)
+
+    p = sub.add_parser("asset", help="approve or reject one generated asset version")
+    p.add_argument("manifest")
+    p.add_argument("decision", choices=("approve", "reject"))
+    p.add_argument("asset_id")
+    p.add_argument("--reason")
+    p.set_defaults(func=cmd_review_assets)
+
+    p = sub.add_parser("build", help="assemble the interior and cover PDFs")
+    p.add_argument("manifest")
+    p.add_argument("--cover-art", help="optional PNG for the front panel")
+    p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("review", help="render the human review package")
+    p.add_argument("manifest")
+    p.add_argument("--results", help="stored gate results JSON to include")
+    p.add_argument("--out", help="write to this path instead of stdout")
+    p.set_defaults(func=cmd_review)
+
+    p = sub.add_parser("approve", help="record a human approval decision")
+    p.add_argument("manifest")
+    p.add_argument("decision", choices=("approve", "reject"))
+    p.add_argument("--reviewer", required=True)
+    p.add_argument("--notes")
+    p.set_defaults(func=cmd_approve)
+
+    p = sub.add_parser("package", help="build the publication package")
+    p.add_argument("manifest")
+    p.add_argument("--out")
+    p.add_argument(
+        "--no-approval",
+        action="store_true",
+        help="build without a current approval (development only; never for a "
+        "package anyone might submit)",
+    )
+    p.set_defaults(func=cmd_package)
+
+    p = sub.add_parser("gates", help="list every gate and what it needs")
+    p.set_defaults(func=cmd_gates)
 
     p = sub.add_parser("stages", help="list the pipeline stages in order")
     p.set_defaults(func=lambda a: (sys.stdout.write("\n".join(STAGES) + "\n"), EXIT_OK)[1])
