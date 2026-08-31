@@ -23,12 +23,15 @@ from .image import (
     perceptual_hash,
 )
 from .pdf import PDFInspection, PDFLoadError, inspect_pdf, pdf_reader_available
+from .regions import RegionStats, analyse as analyse_regions
 
 __all__ = [
     "ImageInspection",
     "ImageLoadError",
     "PDFInspection",
     "PDFLoadError",
+    "RegionStats",
+    "analyse_regions",
     "inspect_image",
     "inspect_pdf",
     "load_image",

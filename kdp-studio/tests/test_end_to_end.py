@@ -387,3 +387,114 @@ def test_nothing_in_the_package_publishes():
     assert not offenders, "network access outside the provider layer: " + "; ".join(
         offenders
     )
+
+
+# --- regressions found by driving the real pipeline -------------------------
+
+
+def test_a_page_whose_every_attempt_failed_stops_at_generation(tmp_path):
+    """G3 used to pass a book with pages that had no artwork at all.
+
+    Every attempt recorded, none usable: the provenance was complete and the
+    page was empty. G9 caught it a stage later, but G3's own PASS was a false
+    claim, and a stage gate that passes work it should reject is worth more
+    than one that catches it late.
+    """
+    manifest = build_manifest()
+    doomed = tuple(p.page_id for p in manifest.spec.art_pages[:3])
+    outcome = generate_book(
+        manifest, MockImageProvider(fail_pages=doomed), tmp_path / "assets",
+        max_attempts=2, now="2026-01-01T00:00:00+00:00",
+    )
+
+    result = provenance_complete.run(outcome.manifest)
+    assert result.status is Status.FAIL
+    assert "provenance.no_usable_attempt" in {f.code for f in result.findings}
+
+    # Regenerating just those pages clears it.
+    repaired = generate_book(
+        outcome.manifest, MockImageProvider(), tmp_path / "assets",
+        now="2026-01-02T00:00:00+00:00",
+    )
+    assert repaired.generated == doomed
+    assert provenance_complete.run(repaired.manifest).status is Status.PASS
+
+
+def test_failed_attempts_are_not_counted_as_duplicate_pages(tmp_path):
+    """G4 used to compare every attempt, including failed ones.
+
+    A failed attempt carries no content hash, so several of them grouped
+    together and six dead attempts read as six duplicated pages — a false FAIL
+    on a book that was fine.
+    """
+    manifest = build_manifest()
+    doomed = tuple(p.page_id for p in manifest.spec.art_pages[:3])
+    failed = generate_book(
+        manifest, MockImageProvider(fail_pages=doomed), tmp_path / "assets",
+        max_attempts=2, now="2026-01-01T00:00:00+00:00",
+    ).manifest
+    repaired = generate_book(
+        failed, MockImageProvider(), tmp_path / "assets",
+        now="2026-01-02T00:00:00+00:00",
+    ).manifest
+    for page in repaired.spec.art_pages:
+        repaired = approve_asset(repaired, repaired.attempts(page.page_id)[-1].asset_id)
+
+    assert len([a for a in repaired.assets if a.status.value == "failed"]) == 6
+    result = originality.run(repaired, assets_dir=tmp_path / "assets")
+    assert result.status is Status.PASS, result.to_json()
+    assert result.evidence["attempts_recorded"] > result.evidence["assets_checked"]
+
+
+def test_the_review_package_warns_that_the_spec_tables_are_unverified(book):
+    """A reviewer must not read FINAL_PASS as 'the print maths was checked'."""
+    manifest, root = book
+    audit = final_audit.run(manifest, **UNVERIFIED_OK)
+    text = build_review(manifest, [audit])
+
+    assert "FINAL_PASS" in text
+    assert "specification tables are not verified" in text
+    assert "Do not treat a PASS below as confirmation" in text
+    # And it appears in the approval checklist, where the human acts on it.
+    assert "against KDP's own documentation yourself" in text
+
+
+def test_the_review_package_covers_every_decision_input(book):
+    """Section by section, what a reviewer needs in order to sign."""
+    manifest, root = book
+    from dataclasses import replace
+
+    priced = replace(manifest, economics=replace(manifest.economics, selected="$7.99"))
+    results = [
+        originality.run(priced, assets_dir=root / "assets"),
+        asset_qa.run(priced, assets_dir=root / "assets"),
+        interior_qa.run(priced),
+        cover_qa.run(priced),
+        final_audit.run(priced, **UNVERIFIED_OK),
+    ]
+    text = build_review(priced, results)
+
+    for heading in (
+        "1. Concept",
+        "2. Market research",
+        "4. Differentiation",
+        "5. Pages",
+        "6. Artefacts",
+        "7. Listing metadata",
+        "8. Price and economics",
+        "9. AI content disclosure",
+        "10. Provenance",
+        "11. Gate results",
+        "12. Inspection coverage",
+        "13. Outstanding warnings",
+        "14. What was NOT checked",
+        "15. Recommendation",
+        "16. What approving this book means",
+    ):
+        assert heading in text, heading
+
+    # The load-bearing content, not just the headings.
+    assert "projections" in text                 # economics are not income
+    assert "not a copyright determination" in text
+    assert "does not publish anything" in text
+    assert manifest.production_fingerprint()[:23] in text

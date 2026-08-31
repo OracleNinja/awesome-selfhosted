@@ -31,7 +31,7 @@ from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G9.asset_qa"
 STAGE = "qa"
-VALIDATOR_VERSION = "2"
+VALIDATOR_VERSION = "3"
 
 #: What the pixel pass measures, named so a report says what was covered.
 PIXEL_CHECKS = (
@@ -40,6 +40,7 @@ PIXEL_CHECKS = (
     "unwanted shading or greyscale fill",
     "unwanted colour",
     "content clipped at the page edge",
+    "closed regions — whether a fill would stay inside the outlines",
     "watermark, logo or signature marks (corner heuristic)",
     "pixel dimensions and effective print resolution",
 )
@@ -65,9 +66,22 @@ def run(
     require_pixel_inspection: bool = True,
     assets_dir: str | Path | None = None,
 ) -> GateResult:
-    findings: list[Finding] = []
     spec = manifest.spec
     art_pages = {p.page_id: p for p in spec.art_pages}
+    if not art_pages:
+        return decide(
+            GATE_ID,
+            STAGE,
+            [],
+            evidence={"validator_version": VALIDATOR_VERSION, "book_id": manifest.book_id},
+            blocked_reason=(
+                "The book describes no art pages, so no artwork was inspected. "
+                "A coloring book with no drawings has not passed asset QA — it "
+                "has bypassed it."
+            ),
+        )
+
+    findings: list[Finding] = []
     uninspectable: list[str] = []
     inspected = 0
 
@@ -302,6 +316,6 @@ def _resolve(path: str | None, assets_dir: str | Path | None) -> Path | None:
     candidate = Path(path)
     if assets_dir is not None:
         rooted = Path(assets_dir) / candidate.name
-        if rooted.exists():
+        if rooted.is_file():
             return rooted
-    return candidate if candidate.exists() else None
+    return candidate if candidate.is_file() else None

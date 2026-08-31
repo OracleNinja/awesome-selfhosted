@@ -346,3 +346,113 @@ def test_asset_qa_catches_provenance_disagreeing_with_the_file(built_manifest):
     )
     result = asset_qa.run(manifest.with_assets(lying), assets_dir=assets_dir)
     assert "asset_qa.dimensions_disagree" in codes(result)
+
+
+# --- closed-region analysis -------------------------------------------------
+
+
+def test_clean_line_art_encloses_colourable_area():
+    inspection = inspect_image(_png(1200, 1560, b"a fern"))
+    assert inspection.regions is not None
+    assert inspection.regions.enclosed_fraction > 0.05
+    assert inspection.regions.region_count > 0
+
+
+def test_a_closed_drawing_has_a_leak_ratio_just_below_one():
+    """The null result, and the reason the threshold sits at 1.05.
+
+    Bridging gaps also thickens strokes, which shaves a little area off every
+    region. On a drawing with no gaps that loss is all there is, so the ratio
+    lands slightly under 1.0 rather than exactly on it.
+    """
+    for seed in (b"a fern", b"a thistle", b"an oak leaf"):
+        regions = inspect_image(_png(1200, 1560, seed)).regions
+        assert 0.9 < regions.leak_ratio < 1.0, seed
+
+
+def test_open_outlines_are_detected():
+    inspection = inspect_image(_png(2480, 3280, b"a fern", defect="open_region"))
+    codes_found = {i.code for i in inspection.problems()}
+    # Either finding is a correct verdict: a page whose outlines all break
+    # loses essentially every enclosed region, which reads as nothing to
+    # colour; a page that keeps some reads as open outlines.
+    assert codes_found & {"image.open_outlines", "image.nothing_to_colour"}
+
+
+def test_gaps_cost_real_colourable_area():
+    closed = inspect_image(_png(2480, 3280, b"a fern")).regions
+    leaking = inspect_image(
+        _png(2480, 3280, b"a fern", defect="open_region")
+    ).regions
+    assert leaking.enclosed_fraction < closed.enclosed_fraction
+    # Bridging the breaks recovers roughly what the closed drawing had.
+    assert leaking.closed_enclosed_fraction > leaking.enclosed_fraction * 2
+
+
+def test_a_page_of_open_strokes_reports_nothing_to_colour():
+    inspection = inspect_image(_png(2480, 3280, b"a fern", defect="open_region"))
+    if inspection.regions.enclosed_fraction >= 0.005:
+        pytest.skip("this seed keeps some regions; covered by open_outlines")
+    assert "image.nothing_to_colour" in {i.code for i in inspection.problems()}
+
+
+def test_region_analysis_does_not_fire_on_a_clean_page():
+    """No false positive: the check that matters most for a heuristic."""
+    from fixtures import SUBJECTS
+
+    for subject in SUBJECTS[:8]:
+        codes_found = {
+            i.code for i in inspect_image(_png(1200, 1560, subject.encode())).problems()
+        }
+        assert "image.open_outlines" not in codes_found, subject
+        assert "image.nothing_to_colour" not in codes_found, subject
+
+
+def test_a_solid_page_has_no_regions_and_says_so():
+    inspection = inspect_image(_png(400, 400, b"x", defect="solid"))
+    assert inspection.regions is None
+    assert any("no paper pixels" in note for note in inspection.not_checked)
+
+
+def test_a_blank_page_encloses_nothing_but_is_not_a_leak():
+    # No ink means no outlines to be open. The ink check owns this page.
+    inspection = inspect_image(_png(400, 400, b"x", defect="blank"))
+    assert inspection.regions.enclosed_fraction == 0.0
+    codes_found = {i.code for i in inspection.problems()}
+    assert "image.no_drawing" in codes_found
+    assert "image.open_outlines" not in codes_found
+
+
+def test_region_analysis_is_reported_as_evidence():
+    inspection = inspect_image(_png(600, 780, b"a fern"))
+    payload = inspection.to_dict()["regions"]
+    assert payload["region_count"] > 0
+    assert payload["leak_ratio"] is not None
+
+
+def test_asset_qa_fails_a_page_whose_outlines_leak(built_manifest):
+    from dataclasses import replace
+
+    from kdp.models import content_hash
+
+    manifest, assets_dir = built_manifest
+    page = manifest.spec.art_pages[0]
+    record = manifest.approved_for(page.page_id)
+    leaking = _png(record.width, record.height, page.page_id.encode(), defect="open_region")
+    (assets_dir / f"{page.page_id}.png").write_bytes(leaking)
+    updated = tuple(
+        replace(a, content_hash=content_hash(leaking)) if a.page == page.page_id else a
+        for a in manifest.assets
+    )
+
+    result = asset_qa.run(manifest.with_assets(updated), assets_dir=assets_dir)
+    assert result.status is Status.FAIL
+    assert codes(result) & {"image.open_outlines", "image.nothing_to_colour"}
+
+
+def test_closed_region_analysis_is_not_a_copyright_judgement():
+    """The finding text must not overclaim: it is a printability defect."""
+    inspection = inspect_image(_png(2480, 3280, b"a fern", defect="open_region"))
+    for issue in inspection.problems():
+        assert "copyright" not in issue.message.lower()
+        assert "infring" not in issue.message.lower()

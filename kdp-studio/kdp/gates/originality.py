@@ -64,9 +64,9 @@ def _resolve(path: str | None, assets_dir: str | Path | None) -> Path | None:
     candidate = Path(path)
     if assets_dir is not None:
         rooted = Path(assets_dir) / candidate.name
-        if rooted.exists():
+        if rooted.is_file():
             return rooted
-    return candidate if candidate.exists() else None
+    return candidate if candidate.is_file() else None
 
 
 def run(
@@ -83,12 +83,29 @@ def run(
     ``book_id`` it belongs to. ``catalogue_phashes`` does the same for
     perceptual hashes, catching a page republished after a re-render.
     """
+    if not manifest.approved_assets:
+        return decide(
+            GATE_ID,
+            STAGE,
+            [],
+            evidence={"validator_version": VALIDATOR_VERSION, "book_id": manifest.book_id},
+            blocked_reason=(
+                "No approved assets, so there was nothing to compare. "
+                "Originality cannot be certified over an empty book."
+            ),
+        )
+
     findings: list[Finding] = []
     catalogue_hashes = catalogue_hashes or {}
     catalogue_phashes = catalogue_phashes or {}
 
+    # Only what ships is compared. A rejected attempt is not in the book, and
+    # a *failed* one carries no content hash at all — grouping those together
+    # made six dead attempts look like six duplicated pages.
     by_hash: dict[str, list[str]] = defaultdict(list)
-    for record in manifest.assets:
+    for record in manifest.approved_assets:
+        if not record.content_hash:
+            continue
         by_hash[record.content_hash].append(record.asset_id)
 
     for digest, asset_ids in sorted(by_hash.items()):
@@ -107,8 +124,8 @@ def run(
                 )
             )
 
-    for record in manifest.assets:
-        prior = catalogue_hashes.get(record.content_hash)
+    for record in manifest.approved_assets:
+        prior = catalogue_hashes.get(record.content_hash) if record.content_hash else None
         if prior and prior != manifest.book_id:
             findings.append(
                 Finding(
@@ -200,7 +217,8 @@ def run(
         evidence={
             "validator_version": VALIDATOR_VERSION,
             "book_id": manifest.book_id,
-            "assets_checked": len(manifest.assets),
+            "assets_checked": len(manifest.approved_assets),
+            "attempts_recorded": len(manifest.assets),
             "catalogue_size": len(catalogue_hashes),
             "pages_hashed": len(phashes),
             "pages_unreadable": len(unreadable),

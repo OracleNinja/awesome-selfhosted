@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from .gates import GATES, final_audit
 from .gates.base import GateResult, Severity, Status
+from .specs.revision import SOURCES, verification_problem
 from .models.artifacts import ArtifactKind
 from .models.manifest import BookManifest
 from .models.strategy import Confidence
@@ -48,6 +49,24 @@ def build_review(
             + ("" if manifest.approval_is_current() else " (not current for this book)"),
         )
     )
+
+    # The reviewer must not read a PASS as "the print maths was verified".
+    # A run can only reach them at all by overriding this, so it is stated
+    # before anything else rather than buried in a later section.
+    spec_problem = verification_problem()
+    if spec_problem:
+        unverified = sorted(t for t, r in SOURCES.items() if r.state == "UNVERIFIED")
+        lines.append("")
+        lines.append(
+            "> **The KDP specification tables are not verified.** "
+            f"Unverified: {', '.join(unverified)}. Every gate result below that "
+            "depends on print geometry, printing cost or policy was produced by "
+            "overriding that check — trim, bleed, margins, spine width and "
+            "royalty were computed from numbers nobody has confirmed against "
+            "Amazon's own documentation. Run `python3 -m kdp verify-specs` for "
+            "what to check. **Do not treat a PASS below as confirmation that "
+            "this book will print or price as described.**"
+        )
 
     # 1-4. Concept, research, positioning, differentiation.
     lines.append(_heading("1. Concept"))
@@ -343,6 +362,11 @@ def build_review(
         "matter — a similarity score is not a copyright judgement, and no part "
         "of this pipeline makes one"
     )
+    if spec_problem:
+        unattempted.append(
+            "the KDP print and royalty specifications themselves — "
+            f"{spec_problem.rstrip('.')}"
+        )
     for note in sorted(unattempted):
         lines.append(f"- {note}")
 
@@ -398,6 +422,12 @@ def build_review(
         "you will enter on the KDP form."
     )
     lines.append("- [ ] Any warnings in section 13 are acceptable to you.")
+    if spec_problem:
+        lines.append(
+            "- [ ] **You have checked the trim, bleed, margin, spine and royalty "
+            "figures against KDP's own documentation yourself**, because this "
+            "pipeline could not."
+        )
     lines.append("")
     lines.append(
         "Record the decision with:\n\n"

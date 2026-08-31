@@ -106,7 +106,7 @@ def run(
     missing_files = [
         label
         for label, path in (("interior", interior_pdf), ("cover", cover_pdf))
-        if path is not None and not Path(path).exists()
+        if path is not None and not Path(path).is_file()
     ]
     for label in missing_files:
         findings.append(

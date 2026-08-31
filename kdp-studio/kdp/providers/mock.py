@@ -64,17 +64,37 @@ def _encode_png(rows: list[bytearray], width: int, height: int) -> bytes:
 
 
 def _stroke_circle(
-    rows: list[bytearray], cx: int, cy: int, radius: int, stroke: int, width: int, height: int
+    rows: list[bytearray],
+    cx: int,
+    cy: int,
+    radius: int,
+    stroke: int,
+    width: int,
+    height: int,
+    gap: int = 0,
 ) -> None:
-    """Draw one closed circular outline by filling spans, not pixels.
+    """Draw one circular outline by filling spans, not pixels.
 
     Span-filling keeps a print-resolution page cheap: the cost is proportional
     to the circumference, not the page area.
+
+    ``gap`` leaves a break of that many rows in the right-hand side of the
+    outline. That is the defect a real generator produces — a hairline the eye
+    slides over on screen, through which a paint-bucket fill escapes across the
+    whole page.
     """
     inner = max(0, radius - stroke)
     for dy in range(-radius, radius + 1):
         y = cy + dy
         if not 0 <= y < height:
+            continue
+        if gap and 0 <= dy < gap:
+            # Skip the right-hand arc on these rows, leaving the outline open.
+            outer_dx = int((radius * radius - dy * dy) ** 0.5)
+            inner_dx = int((inner * inner - dy * dy) ** 0.5) if abs(dy) < inner else 0
+            x0, x1 = max(0, cx - outer_dx), min(width, cx - inner_dx)
+            if x1 > x0:
+                rows[y][x0:x1] = bytes([INK]) * (x1 - x0)
             continue
         outer_dx = int((radius * radius - dy * dy) ** 0.5) if abs(dy) <= radius else 0
         row = rows[y]
@@ -112,7 +132,9 @@ def _stroke_rect(
         rows[y][max(x0, x1 - stroke) : x1] = side
 
 
-def _line_art(width: int, height: int, seed: bytes) -> list[bytearray]:
+def _line_art(
+    width: int, height: int, seed: bytes, open_outlines: bool = False
+) -> list[bytearray]:
     """A page of closed black outlines on white, deterministic in ``seed``.
 
     Shape count, kind, position and size all derive from the digest. Nothing is
@@ -150,8 +172,12 @@ def _line_art(width: int, height: int, seed: bytes) -> list[bytearray]:
         if size <= stroke * 2:
             continue
 
-        if digest[base + 3] % 2:
-            _stroke_circle(rows, cx, cy, size, stroke, width, height)
+        if digest[base + 3] % 2 or open_outlines:
+            # Under open_outlines every shape is a circle, so every one of them
+            # carries a break; a mixed page would leave some closed and make
+            # the measurement ambiguous.
+            gap = max(2, min(width, height) // 500) if open_outlines else 0
+            _stroke_circle(rows, cx, cy, size, stroke, width, height, gap=gap)
         else:
             ratio = 60 + (digest[base + 4] % 80)
             half_w, half_h = size, (size * ratio) // 100
@@ -173,7 +199,15 @@ def _line_art(width: int, height: int, seed: bytes) -> list[bytearray]:
 #: Defects the mock can inject on demand, so the paths that *reject* a page get
 #: the same test coverage as the path that accepts one. Each maps to a real
 #: failure that line art suffers from in practice.
-DEFECTS = ("shading", "colour", "clipped", "blank", "solid", "watermark")
+DEFECTS = (
+    "shading",
+    "colour",
+    "clipped",
+    "blank",
+    "solid",
+    "watermark",
+    "open_region",
+)
 
 
 def _apply_defect(
@@ -232,9 +266,12 @@ def _png(
     width: int, height: int, seed: bytes, defect: str | None = None
 ) -> bytes:
     """Line art as a PNG, optionally damaged in one specific way."""
-    rows = _line_art(width, height, seed)
+    # open_region is drawn rather than applied afterwards: a break has to be in
+    # the stroke itself, and no amount of post-processing a finished page
+    # produces the same thing.
+    rows = _line_art(width, height, seed, open_outlines=defect == "open_region")
     channels = 1
-    if defect is not None:
+    if defect is not None and defect != "open_region":
         rows, channels = _apply_defect(rows, defect, width, height)
 
     if channels == 1:

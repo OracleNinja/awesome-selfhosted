@@ -25,9 +25,20 @@ def run(manifest: BookManifest) -> GateResult:
     describes, and confusing the two is how a fully generated book comes back
     reading as entirely missing.
     """
-    findings: list[Finding] = []
-
     described = {p.page_id for p in manifest.spec.pages if p.role == "art"}
+    if not described:
+        return decide(
+            GATE_ID,
+            STAGE,
+            [],
+            evidence={"validator_version": VALIDATOR_VERSION, "book_id": manifest.book_id},
+            blocked_reason=(
+                "The specification describes no art pages, so there is no "
+                "provenance to certify. An empty check is not a passed check."
+            ),
+        )
+
+    findings: list[Finding] = []
     with_attempts = {a.page for a in manifest.assets}
 
     for missing in sorted(described - with_attempts):
@@ -37,6 +48,33 @@ def run(manifest: BookManifest) -> GateResult:
                 severity=Severity.BLOCKER,
                 message="Art page has no provenance record.",
                 subject=missing,
+            )
+        )
+
+    # A page whose every attempt failed or was rejected has a complete record
+    # and no artwork. Generation is not finished for it, and no amount of QA
+    # will produce a page — so it stops here rather than looking complete and
+    # failing a stage later.
+    for page_id in sorted(described & with_attempts):
+        attempts = manifest.attempts(page_id)
+        if any(a.ships or a.status is AssetStatus.PENDING for a in attempts):
+            continue
+        last = attempts[-1]
+        findings.append(
+            Finding(
+                code="provenance.no_usable_attempt",
+                severity=Severity.BLOCKER,
+                message=(
+                    f"All {len(attempts)} attempt(s) at this page ended "
+                    f"{last.status.value}"
+                    + (f" ({last.failure_reason})" if last.failure_reason else "")
+                    + ". The page has no artwork; regenerate it before QA."
+                ),
+                subject=page_id,
+                detail={
+                    "attempts": len(attempts),
+                    "last_status": last.status.value,
+                },
             )
         )
 

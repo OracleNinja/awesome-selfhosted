@@ -25,6 +25,7 @@ from pathlib import Path
 
 from ..errors import KDPError
 from ..imaging import RawImage, decode_png
+from .regions import RegionStats, analyse
 
 
 class ImageLoadError(KDPError):
@@ -59,6 +60,19 @@ MAX_EDGE_INK_FRACTION = 0.002
 #: meaningful number of pixels means colour got in.
 MAX_CHANNEL_SPREAD = 24
 MAX_COLOURED_FRACTION = 0.001
+
+#: A page with strokes but essentially nothing enclosed by them cannot be
+#: coloured: every fill escapes across the sheet.
+MIN_ENCLOSED_FRACTION = 0.005
+
+#: Bridging small gaps recovers colourable area. On a page whose outlines are
+#: already closed the ratio sits just *below* 1.0, because the bridging pass
+#: also thickens strokes and shaves a little area off each region — measured at
+#: 0.97-0.99 across the fixture set. Anything at or above 1.05 means bridging
+#: genuinely recovered area, i.e. there were gaps.
+LEAK_RATIO_THRESHOLD = 1.05
+#: ...and the recovered area has to be material, not a rounding artefact.
+MIN_RECOVERED_FRACTION = 0.005
 
 #: Corner boxes searched for a mark, as a fraction of each side.
 CORNER_BAND = 0.12
@@ -104,6 +118,8 @@ class ImageInspection:
     edge_ink_fraction: float
     #: Per-corner ink fraction, clockwise from top-left.
     corner_ink: tuple[float, float, float, float]
+    #: Enclosed-region analysis. None when the page has no paper at all.
+    regions: RegionStats | None = None
     #: Checks that could not be performed, with the reason.
     not_checked: tuple[str, ...] = field(default_factory=tuple)
 
@@ -195,6 +211,44 @@ class ImageInspection:
                 )
             )
 
+        if self.regions is not None and self.ink_fraction >= MIN_INK_FRACTION:
+            if self.regions.enclosed_fraction < MIN_ENCLOSED_FRACTION:
+                issues.append(
+                    ImageIssue(
+                        "image.nothing_to_colour",
+                        f"The page has strokes but only "
+                        f"{self.regions.enclosed_fraction:.2%} of it is enclosed "
+                        "by them. Nothing on this page can be coloured — a fill "
+                        "would escape across the whole sheet.",
+                        detail=self.regions.to_dict(),
+                    )
+                )
+            elif (
+                self.regions.leak_ratio >= LEAK_RATIO_THRESHOLD
+                and (
+                    self.regions.closed_enclosed_fraction
+                    - self.regions.enclosed_fraction
+                )
+                >= MIN_RECOVERED_FRACTION
+            ):
+                recovered = (
+                    self.regions.closed_enclosed_fraction
+                    - self.regions.enclosed_fraction
+                )
+                issues.append(
+                    ImageIssue(
+                        "image.open_outlines",
+                        f"Outlines have gaps in them. Bridging breaks a few "
+                        f"pixels wide recovers {recovered:.1%} more colourable "
+                        f"area ({self.regions.enclosed_fraction:.1%} enclosed "
+                        f"now, {self.regions.closed_enclosed_fraction:.1%} once "
+                        "bridged), so fills currently leak out through those "
+                        "gaps. Look at the page: on a closed drawing this ratio "
+                        "sits just below 1.0.",
+                        detail=self.regions.to_dict(),
+                    )
+                )
+
         for index in self.suspicious_corners:
             corner = ("top-left", "top-right", "bottom-right", "bottom-left")[index]
             issues.append(
@@ -223,6 +277,7 @@ class ImageInspection:
             "border_mean": round(self.border_mean, 2),
             "edge_ink_fraction": round(self.edge_ink_fraction, 5),
             "corner_ink": [round(c, 5) for c in self.corner_ink],
+            "regions": self.regions.to_dict() if self.regions else None,
             "not_checked": list(self.not_checked),
         }
 
@@ -243,7 +298,20 @@ def load_image(source: str | Path | bytes) -> RawImage:
     for everything else. Only when both fail is the artefact genuinely
     uninspectable, and that is when a gate is entitled to block.
     """
-    data = Path(source).read_bytes() if isinstance(source, (str, Path)) else source
+    if isinstance(source, (str, Path)):
+        target = Path(source)
+        # exists() is true for a directory, and reading one raises. Every
+        # "does the file exist" check in this package has to mean "is there a
+        # readable file here", or a mistyped path crashes a gate instead of
+        # failing it.
+        if not target.is_file():
+            raise ImageLoadError(f"{source} is not a readable file")
+        try:
+            data = target.read_bytes()
+        except OSError as exc:
+            raise ImageLoadError(f"cannot read {source}: {exc}") from None
+    else:
+        data = source
 
     stdlib_error: Exception | None = None
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -376,10 +444,17 @@ def inspect_image(source: str | Path | bytes) -> ImageInspection:
         _region_ink(rows, 0, image.height - ch, cw, image.height),
     )
 
-    not_checked = (
+    regions = analyse(rows, image.width, image.height, BLACK_THRESHOLD)
+
+    not_checked = [
         "accidental text — requires OCR, which is not installed; no text "
         "detection was attempted",
-    )
+    ]
+    if regions is None:
+        not_checked.append(
+            "enclosed regions — the page has no paper pixels at all, so there "
+            "is nothing to enclose"
+        )
 
     return ImageInspection(
         width=image.width,
@@ -392,7 +467,8 @@ def inspect_image(source: str | Path | bytes) -> ImageInspection:
         border_mean=border_mean,
         edge_ink_fraction=edge_ink / edge_total if edge_total else 0.0,
         corner_ink=corners,
-        not_checked=not_checked,
+        regions=regions,
+        not_checked=tuple(not_checked),
     )
 
 

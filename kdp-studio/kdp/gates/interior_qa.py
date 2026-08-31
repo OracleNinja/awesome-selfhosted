@@ -67,7 +67,7 @@ def run(manifest: BookManifest) -> GateResult:
     evidence["artifact"] = artifact.to_dict()
     path = Path(artifact.path)
 
-    if not path.exists():
+    if not path.is_file():
         return decide(
             GATE_ID,
             STAGE,
@@ -79,7 +79,16 @@ def run(manifest: BookManifest) -> GateResult:
             ),
         )
 
-    actual = hash_file(path)
+    try:
+        actual = hash_file(path)
+    except OSError as exc:
+        return decide(
+            GATE_ID,
+            STAGE,
+            [],
+            evidence=evidence,
+            blocked_reason=f"The interior PDF could not be read: {exc}",
+        )
     if actual != artifact.content_hash:
         findings.append(
             Finding(

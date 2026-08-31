@@ -108,13 +108,24 @@ def inspect_pdf(path: str | Path, *, extract_images: bool = True) -> PDFInspecti
     target = Path(path)
     if not target.exists():
         raise PDFLoadError(f"no file at {path}")
+    if not target.is_file():
+        raise PDFLoadError(f"{path} is not a file")
 
     try:
         reader = pypdf.PdfReader(str(target))
         encrypted = reader.is_encrypted
         raw_pages = list(reader.pages)
-    except (PdfReadError, OSError, ValueError) as exc:
+    except PdfReadError as exc:
         raise PDFLoadError(f"PDF will not open: {exc}") from None
+    except OSError as exc:
+        raise PDFLoadError(f"PDF cannot be read: {exc}") from None
+    except Exception as exc:  # noqa: BLE001
+        # pypdf raises a wide and undocumented range on malformed input —
+        # KeyError, RecursionError, struct errors. A gate must stop the book,
+        # not the run, so everything is funnelled into one typed failure.
+        raise PDFLoadError(
+            f"PDF is malformed ({type(exc).__name__}: {exc})"
+        ) from None
 
     not_checked: list[str] = []
     pages: list[PageInspection] = []

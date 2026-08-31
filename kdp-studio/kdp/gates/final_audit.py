@@ -35,6 +35,8 @@ def run(manifest: BookManifest, *, require_verified_specs: bool = True) -> GateR
     }
 
     if require_verified_specs:
+        # The final audit is the one place that requires *every* table: it is
+        # certifying the whole book, geometry and policy and economics alike.
         problem = verification_problem()
         if problem:
             return decide(
@@ -72,16 +74,34 @@ def run(manifest: BookManifest, *, require_verified_specs: bool = True) -> GateR
             )
             continue
         path = Path(artifact.path)
-        if not path.exists():
+        if not path.is_file():
             findings.append(
                 Finding(
                     code="final.artifact_file_missing",
                     severity=Severity.BLOCKER,
-                    message=f"{kind.value} is recorded at {artifact.path} but absent.",
+                    message=(
+                        f"{kind.value} is recorded at {artifact.path} but there "
+                        "is no readable file there."
+                    ),
                     subject=kind.value,
                 )
             )
-        elif hash_file(path) != artifact.content_hash:
+            continue
+
+        try:
+            digest = hash_file(path)
+        except OSError as exc:
+            findings.append(
+                Finding(
+                    code="final.artifact_unreadable",
+                    severity=Severity.BLOCKER,
+                    message=f"{kind.value} could not be read: {exc}",
+                    subject=kind.value,
+                )
+            )
+            continue
+
+        if digest != artifact.content_hash:
             findings.append(
                 Finding(
                     code="final.artifact_changed",

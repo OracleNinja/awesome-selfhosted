@@ -13,14 +13,13 @@ from __future__ import annotations
 
 from ..errors import SpecError
 from ..models.spec import BookSpec
-from ..specs import (
-    VERIFICATION_NOTE,
-    cover_geometry,
-    get_paper,
-    get_trim,
-    interior_geometry,
-    is_verified,
-)
+from ..specs import cover_geometry, get_paper, get_trim, interior_geometry
+from ..specs.revision import verification_problem
+
+#: The tables this gate's arithmetic actually rests on. Scoped deliberately:
+#: an unverified royalty table says nothing about whether a book is printable,
+#: and blocking on it here would make the message misleading.
+REQUIRED_TABLES = ("trim", "paper", "interior", "cover")
 from .base import Finding, GateResult, Severity, decide
 
 GATE_ID = "G2.spec_legality"
@@ -31,14 +30,17 @@ def run(spec: BookSpec, *, require_verified_specs: bool = True) -> GateResult:
     findings: list[Finding] = []
     evidence: dict = {"book_id": spec.book_id}
 
-    if require_verified_specs and not is_verified():
-        findings.append(
-            Finding(
-                code="spec.tables_unverified",
-                severity=Severity.BLOCKER,
-                message=VERIFICATION_NOTE,
+    if require_verified_specs:
+        problem = verification_problem(*REQUIRED_TABLES)
+        if problem:
+            findings.append(
+                Finding(
+                    code="spec.tables_unverified",
+                    severity=Severity.BLOCKER,
+                    message=problem,
+                    detail={"tables": list(REQUIRED_TABLES)},
+                )
             )
-        )
 
     try:
         trim = get_trim(spec.trim)
@@ -94,6 +96,20 @@ def run(spec: BookSpec, *, require_verified_specs: bool = True) -> GateResult:
                     "min": paper.min_pages,
                     "max": paper.max_pages,
                 },
+            )
+        )
+
+    if spec.pages and not spec.art_pages:
+        findings.append(
+            Finding(
+                code="spec.no_art_pages",
+                severity=Severity.BLOCKER,
+                message=(
+                    f"{len(spec.pages)} pages are described and none of them is "
+                    "art. A low-content book with no drawings has nothing to "
+                    "offer a buyer."
+                ),
+                subject="pages",
             )
         )
 

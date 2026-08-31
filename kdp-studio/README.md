@@ -16,7 +16,7 @@ and fills in the KDP form.
 
 ```bash
 cd kdp-studio
-python3 -m pytest                 # 228 tests; needs only pytest
+python3 -m pytest                 # 307 tests; needs only pytest
 python3 -m kdp stages             # the pipeline
 python3 -m kdp gates              # every gate, its purpose, and what it needs
 python3 -m kdp specs --trim 8.5x11 --pages 60
@@ -65,9 +65,10 @@ that are approved or awaiting a QA verdict.
 ## What inspection actually checks
 
 **Pixels** — background purity, ink coverage, shading and greyscale, colour,
-clipping at the trim edge, effective print resolution, and a corner-mark
-heuristic for watermarks and signatures (a *warning*, never a verdict).
-Near-duplicates are found with a difference hash.
+clipping at the trim edge, effective print resolution, closed regions (whether
+a fill would stay inside the outlines), and a corner-mark heuristic for
+watermarks and signatures (a *warning*, never a verdict). Near-duplicates are
+found with a difference hash.
 
 **PDFs** — page count, page dimensions against trim-plus-bleed, uniform page
 size, artwork on exactly the pages the spec describes, embedded image

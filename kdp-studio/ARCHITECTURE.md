@@ -262,6 +262,33 @@ midtones really does have shading in it.
 | Outer-ring ink | Above 0.2% — the drawing is clipped by the trim |
 | Corner ink | Above 4% — *warns*, does not block: the shape a watermark makes |
 | Dimensions | Effective DPI over the live area below 300 |
+| Enclosed area | Below 0.5% with strokes present — nothing can be coloured |
+| Leak ratio | 1.05 or above — outlines have gaps and fills escape |
+
+### Closed regions
+
+A coloring page is a set of *enclosed* areas. If an outline has a gap, a fill
+escapes across the sheet and the page is unusable, though it looks fine on
+screen. `kdp/inspection/regions.py` labels the connected components of the
+non-ink pixels: anything reachable from the page border is outside the drawing,
+everything else is colourable area.
+
+It runs on runs, not pixels. Line art is mostly long uninterrupted spans of
+paper — under three per row for a full-page drawing — so labelling runs makes
+exact analysis at print resolution cost about 180 ms. Nothing is downsampled
+for speed, and no accuracy is traded away.
+
+Gaps are found by comparing that measurement against a second pass in which
+strokes are thickened enough to bridge breaks a few pixels wide. On a drawing
+whose outlines are already closed the ratio lands just *below* 1.0, because
+thickening also shaves area off every region — measured at 0.97–0.99 across the
+fixture set. At or above 1.05, bridging genuinely recovered colourable area, so
+there were gaps. Across 24 fixture pages that threshold caught 23 of 24
+deliberately broken pages with no false positives on clean ones.
+
+Deciding that one *particular* outline is broken would need the drawing
+segmented into shapes. This reports totals and a leak ratio, which is a
+printability signal for a human — never a copyright judgement.
 
 **PDFs** (`kdp/inspection/pdf.py` measures, `checks.py` compares). Page count,
 page dimensions against trim-plus-bleed, uniformity, which pages carry
@@ -394,10 +421,6 @@ wrong link sends someone to the wrong page and they verify against it.
 One value is known to be contested: secondary sources disagree on the page
 count above which KDP prints spine text (79 vs 100). 100 is encoded as the
 conservative choice and must be confirmed rather than assumed.
-
-**Closed-region detection.** The ink and midtone measures catch most line-art
-defects, but a stroke with a *gap* in it — where a fill would leak — needs a
-flood-fill from the page border. Worth adding; not yet there.
 
 **The Higgsfield HTTP client.** See above — a boundary, pending an API
 contract.

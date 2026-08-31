@@ -26,7 +26,18 @@ STAGE = "research"
 _QUOTE_OPENERS = ('"', "'", "“", "‘", "«")
 
 
-def run(brief: ResearchBrief) -> GateResult:
+def run(brief: ResearchBrief | None) -> GateResult:
+    if brief is None:
+        return decide(
+            GATE_ID,
+            STAGE,
+            [],
+            blocked_reason=(
+                "No research brief attached. Research hygiene cannot be "
+                "certified over a corpus that does not exist."
+            ),
+        )
+
     findings: list[Finding] = []
 
     if not brief.signals:
