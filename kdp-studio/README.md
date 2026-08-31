@@ -41,9 +41,9 @@ python3 -m kdp concept         books/<id>/manifest.json   # G2
 python3 -m kdp planning        books/<id>/manifest.json   # G8
 python3 -m kdp providers                                  # what can run, and why not
 python3 -m kdp smoke-test      books/<id>/manifest.json PAGE-004 \
-                               --provider google-imagen --confirm-spend
+                               --provider google-gemini --confirm-spend
 python3 -m kdp generate        books/<id>/manifest.json --provider mock
-#   ...or a real one:            --provider google-imagen --confirm-spend
+#   ...or a real one:            --provider google-gemini --confirm-spend
 python3 -m kdp asset           books/<id>/manifest.json approve <asset-id>
 #   ...or, to redo named pages:  --regenerate PAGE-004 PAGE-012
 python3 -m kdp generation      books/<id>/manifest.json   # G3
@@ -87,7 +87,7 @@ for a human, and says so.
 ## Before a metered run
 
 ```bash
-python3 -m kdp smoke-test <manifest> <page-id> --provider google-imagen --confirm-spend
+python3 -m kdp smoke-test <manifest> <page-id> --provider google-gemini --confirm-spend
 ```
 
 Buys **one** image and puts it through the same request construction, the same

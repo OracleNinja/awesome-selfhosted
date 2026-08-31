@@ -43,6 +43,22 @@ DEFAULT_MODEL = "imagen-4.0-generate-001"
 #: rights questions a coloring book does not need.
 PERSON_GENERATION = "DONT_ALLOW"
 
+#: **This provider is not a production option.** Two independent reasons, both
+#: proven offline in ``tests/test_google_imagen.py`` rather than asserted here:
+#:
+#: * ``google-genai`` 2.20.0 deprecated ``models.generate_images`` and disabled
+#:   it outside Gemini Enterprise Agent Platform mode, so an API key reaches a
+#:   ``ValueError`` and never the network.
+#: * ``GenerateImagesConfig.image_size`` offers only ``1K`` and ``2K``. An
+#:   8.5x11 interior needs 3150 px on the long edge at 300 DPI; 2K is 2048.
+#:   No configuration of this path clears G9 for a full-page interior.
+#:
+#: A constant rather than a runtime probe: probing would mean calling the API to
+#: find out, which is the thing being avoided. If a later SDK lifts the
+#: restriction, the test asserting it fails and this is the line to revisit.
+#: Until then ``google-gemini`` is the provider that can reach print resolution.
+USABLE_FOR_PRODUCTION = False
+
 
 def sdk_available() -> bool:
     try:
@@ -72,6 +88,7 @@ class GoogleImagenProvider:
         return {
             "sdk_installed": sdk_available(),
             "credential_present": self.configured(),
+            "usable_for_production": USABLE_FOR_PRODUCTION,
         }
 
     def available(self) -> bool:
@@ -79,6 +96,15 @@ class GoogleImagenProvider:
 
     def unavailable_reason(self) -> str:
         checks = self.readiness()
+        if not checks["usable_for_production"]:
+            return (
+                "This provider cannot be used. The pinned google-genai SDK "
+                "disables models.generate_images outside Gemini Enterprise "
+                "Agent Platform mode, and its largest image_size (2K, 2048 px) "
+                "cannot reach 300 DPI over a full-page 8.5x11 interior, which "
+                "needs 3150. Use --provider google-gemini, which generates "
+                "through models.generate_content at 4K."
+            )
         if not checks["sdk_installed"]:
             return (
                 "The google-genai SDK is not installed. Install the generation "

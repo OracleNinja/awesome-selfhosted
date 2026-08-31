@@ -268,6 +268,26 @@ def _planned_book(tmp_path):
     return manifest, str(manifest.write(book / "manifest.json"))
 
 
+def test_smoke_test_refuses_the_gemini_provider_without_confirm_spend(tmp_path):
+    """The new provider is metered too. Nothing about 4K makes it free."""
+    manifest, path = _planned_book(tmp_path)
+    page = manifest.spec.art_pages[0].page_id
+    assert main(["smoke-test", path, page, "--provider", "google-gemini"]) == EXIT_STOP
+
+
+def test_generate_refuses_the_gemini_provider_without_confirm_spend(tmp_path, capsys):
+    manifest, path = _planned_book(tmp_path)
+    assert main(["generate", path, "--provider", "google-gemini"]) == EXIT_STOP
+    assert "metered" in capsys.readouterr().err
+
+
+def test_providers_says_why_imagen_cannot_be_used(capsys):
+    assert main(["providers"]) == 0
+    out = capsys.readouterr().out
+    assert "google-gemini" in out
+    assert "google-imagen" in out
+
+
 def test_smoke_test_refuses_a_metered_provider_without_confirm_spend(tmp_path):
     manifest, path = _planned_book(tmp_path)
     page = manifest.spec.art_pages[0].page_id
@@ -277,15 +297,14 @@ def test_smoke_test_refuses_a_metered_provider_without_confirm_spend(tmp_path):
 def test_smoke_test_refuses_a_metered_provider_without_a_credential(
     tmp_path, monkeypatch, capsys
 ):
-    from kdp.providers.google_imagen import CREDENTIAL_ENV_VARS
+    from kdp.providers.google_gemini import CREDENTIAL_ENV_VAR
 
-    for name in CREDENTIAL_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv(CREDENTIAL_ENV_VAR, raising=False)
     manifest, path = _planned_book(tmp_path)
     page = manifest.spec.art_pages[0].page_id
 
     assert main([
-        "smoke-test", path, page, "--provider", "google-imagen", "--confirm-spend",
+        "smoke-test", path, page, "--provider", "google-gemini", "--confirm-spend",
     ]) == EXIT_STOP
 
     # The property is that a metered provider which cannot run stops the command
@@ -293,7 +312,7 @@ def test_smoke_test_refuses_a_metered_provider_without_a_credential(
     # generation extra installed the missing key is the blocker, and in the
     # stdlib-only CI job the missing SDK is reached first. Asserting only the
     # key wording made that job fail for being configured exactly as intended.
-    from kdp.providers.google_imagen import sdk_available
+    from kdp.providers.google_gemini import sdk_available
 
     stderr = capsys.readouterr().err
     assert "unavailable" in stderr

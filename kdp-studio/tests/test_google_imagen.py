@@ -66,12 +66,20 @@ def test_it_is_metered_so_generate_demands_confirm_spend():
 
 
 @requires_sdk
-def test_unavailable_without_a_key(monkeypatch):
+def test_unavailable_and_the_reason_is_not_the_missing_key(monkeypatch):
+    """A missing key is the smaller problem, so it is not the headline.
+
+    Telling someone to go and find an API key for a provider that cannot run
+    with one would send them off to do useless work, and possibly to pay for a
+    key. The unconditional reason is reported first.
+    """
     for name in CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     provider = get_provider("google-imagen")
+
     assert provider.available() is False
-    assert "No API key" in provider.unavailable_reason()
+    assert "cannot be used" in provider.unavailable_reason()
+    assert "google-gemini" in provider.unavailable_reason()
 
 
 def test_readiness_names_each_precondition_separately(monkeypatch):
@@ -82,16 +90,32 @@ def test_readiness_names_each_precondition_separately(monkeypatch):
     assert checks["credential_present"] is False
 
 
-def test_a_key_in_the_environment_makes_it_available(monkeypatch):
+def test_a_key_is_not_enough_because_this_provider_is_refused(monkeypatch):
+    """A key used to be the only thing standing between this and a spend.
+
+    It is not usable now, for two reasons the SDK settles rather than opinion:
+    the call it makes is disabled outside Enterprise mode, and its largest
+    output size cannot reach 300 DPI over a full-page interior. Both are
+    asserted further down. What matters here is that the provider says so
+    instead of accepting a key and failing later, at cost.
+    """
     monkeypatch.setenv("KDP_GOOGLE_API_KEY", "test-key-not-real")
-    assert get_provider("google-imagen").available() is sdk_available()
+    provider = get_provider("google-imagen")
+
+    assert provider.readiness()["credential_present"] is True
+    assert provider.available() is False
+
+    reason = provider.unavailable_reason()
+    assert "generate_images" in reason
+    assert "google-gemini" in reason
 
 
 @requires_sdk
-def test_generating_without_a_key_raises_rather_than_calling(monkeypatch):
+def test_generating_raises_rather_than_calling(monkeypatch):
+    """It refuses before the client is built, so no key is even looked for."""
     for name in CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
-    with pytest.raises(ProviderUnavailable, match="No API key"):
+    with pytest.raises(ProviderUnavailable, match="cannot be used"):
         get_provider("google-imagen").generate(_request())
 
 

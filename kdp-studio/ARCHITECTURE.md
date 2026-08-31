@@ -406,7 +406,8 @@ Three, behind one interface, chosen with `--provider`:
 | Provider | Metered | State |
 |---|---|---|
 | `mock` | no | Deterministic, offline. What CI runs. |
-| `google-imagen` | **yes** | Written against the official `google-genai` SDK. Needs a key, and **blocked on the pinned SDK** — see below. |
+| `google-gemini` | **yes** | `models.generate_content` at `image_size="4K"`. The only path that reaches 300 DPI. Needs `KDP_GOOGLE_API_KEY`. |
+| `google-imagen` | **yes** | **Refuses to run.** Its call is disabled on the pinned SDK and its largest size cannot reach print resolution — see below. |
 | `higgsfield` | **yes** | Boundary only — no contract was available. |
 
 ### Output size: what the API accepts, and what it cannot reach
@@ -466,7 +467,7 @@ SDK's documented semantics plus arithmetic, not a measured response. What the
 next paid smoke test measures is the pixel count; what it should not have to
 discover is the vocabulary.
 
-### The provider cannot currently make the call at all
+### Why `google-imagen` refuses to run
 
 `google-genai` 2.20.0 — the pinned version — deprecated `generate_images` and
 disabled it for the Gemini Developer API. With an API key,
@@ -476,14 +477,63 @@ disabled it for the Gemini Developer API. With an API key,
 > Gemini Developer API mode.
 
 `GoogleImagenProvider` calls exactly that method, and passes `vertexai=False`
-deliberately so ambient cloud credentials cannot be spent. The two are now
-mutually exclusive. `tests/test_google_imagen.py` asserts the restriction
-offline so a version bump has to confront it rather than rediscover it.
+deliberately so ambient cloud credentials cannot be spent. The two are mutually
+exclusive. And even where the call does run, `GenerateImagesConfig.image_size`
+offers only `1K` and `2K` — 2048 px against the 3150 the trim needs.
 
-Reaching 300 DPI therefore needs the provider moved to `generate_content` with a
-Gemini image model and `ImageConfig(image_size="4K")`. That is a change of model
-and a change of price, so it is not made here: `build_request` asks for the size
-the page needs, and choosing what to spend it on stays a human decision.
+So the provider is marked `USABLE_FOR_PRODUCTION = False` and reports that as
+its reason before it reports a missing key: sending someone to find an API key
+for a provider that cannot use one is worse than saying nothing. It stays in the
+registry so `kdp providers` can explain itself. `tests/test_google_imagen.py`
+proves both restrictions offline, so a version bump has to confront them.
+
+### `google-gemini`: the provider that can reach 300 DPI
+
+`models.generate_content` with a Gemini image model and
+`ImageConfig(image_size="4K")`. Same `ImageProvider` interface, same shared
+`build_request`, same attempt ledger and provenance — the pipeline above the
+provider boundary does not know which one ran.
+
+```python
+client.models.generate_content(
+    model="gemini-3-pro-image-preview",          # KDP_GEMINI_IMAGE_MODEL
+    contents="<positive prompt>\n\nDo not include: <prohibitions>",
+    config=types.GenerateContentConfig(
+        response_modalities=["IMAGE"],
+        image_config=types.ImageConfig(aspect_ratio="3:4", image_size="4K"),
+    ),
+)
+```
+
+**Two things Imagen offered that this path does not**, neither worked around
+silently:
+
+*No negative-prompt field.* `GenerateContentConfig` has none, so the
+prohibitions are composed into the message under their own heading, after the
+subject. The separation the prompt plan makes survives; it is no longer a
+separate field.
+
+*No `person_generation`.* `_ImageConfig_to_mldev` **raises** on it — along with
+`output_mime_type`, `output_compression_quality` and `prominent_people` —
+rather than ignoring it, so sending it would fail the whole request. The "no
+people" rule moves into the prohibitions instead, where it is at least stated.
+The same restriction means the output MIME type cannot be requested: whatever
+`inline_data.mime_type` comes back is recorded and drives the file extension,
+and a part that is not an image is refused rather than written to disk.
+
+**Failure is explicit at four points**, each its own recorded attempt rather
+than an exception: the prompt blocked before generation
+(`prompt_feedback.block_reason`), a candidate that refused to draw (a
+`FinishReason` in `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`,
+`IMAGE_RECITATION`, `NO_IMAGE` and the rest), a response carrying no image
+part, and an image part carrying no bytes.
+
+**Credentials.** One variable, `KDP_GOOGLE_API_KEY`, read at call time.
+Deliberately not `GOOGLE_API_KEY` or `GEMINI_API_KEY` — the two the SDK itself
+falls back to — so a key that arrived in the environment for something else
+cannot become this pipeline's spend. `vertexai=False` is passed *and then
+verified* on the constructed client, together with the key it actually holds,
+because the failure being guarded against does not raise: it bills someone.
 
 ### Validating one page before buying forty
 

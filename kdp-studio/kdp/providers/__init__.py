@@ -14,20 +14,26 @@ from .base import (
     ProviderUnavailable,
     env_credential,
 )
+from .google_gemini import GoogleGeminiImageProvider
 from .google_imagen import GoogleImagenProvider
 from .higgsfield import HiggsfieldProvider
 from .mock import MockImageProvider
 
 #: Name -> factory. ``mock`` is always available and is what CI uses.
+#:
+#: ``google-imagen`` is kept listed rather than deleted so that ``kdp providers``
+#: can say *why* it cannot run. On the pinned SDK it is not a production option:
+#: see its module docstring, and use ``google-gemini`` instead.
 PROVIDERS = {
     "mock": MockImageProvider,
+    "google-gemini": GoogleGeminiImageProvider,
     "google-imagen": GoogleImagenProvider,
     "higgsfield": HiggsfieldProvider,
 }
 
 #: Providers that cost money. Never the default, and `kdp generate` refuses one
 #: without --confirm-spend.
-METERED = ("google-imagen", "higgsfield")
+METERED = ("google-gemini", "google-imagen", "higgsfield")
 
 
 def get_provider(name: str) -> ImageProvider:
@@ -45,6 +51,7 @@ __all__ = [
     "PROVIDERS",
     "GenerationRequest",
     "GenerationResult",
+    "GoogleGeminiImageProvider",
     "GoogleImagenProvider",
     "HiggsfieldProvider",
     "ImageProvider",

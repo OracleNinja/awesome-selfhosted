@@ -271,3 +271,122 @@ class StubClient:
 
 def stub_client_returning(data: bytes) -> StubClient:
     return StubClient(StubResponse([StubGenerated(image=StubImage(data))]))
+
+
+# --- google.genai generate_content, for the Gemini image provider -----------
+#
+# Shaped to the installed SDK's own types, attribute for attribute:
+# GenerateContentResponse.candidates[].content.parts[].inline_data is a Blob
+# with .data and .mime_type; Candidate carries .finish_reason and
+# .finish_message; the response carries .prompt_feedback.block_reason,
+# .model_version, .response_id and .usage_metadata. A test asserting on names
+# the SDK does not use would pass while production failed, so
+# tests/test_google_gemini.py checks these against the real types.
+
+
+@dataclass
+class StubBlob:
+    """google.genai.types.Blob."""
+
+    data: bytes | None = None
+    mime_type: str | None = "image/png"
+
+
+@dataclass
+class StubPart:
+    """google.genai.types.Part. Exactly one field is meant to be set."""
+
+    inline_data: StubBlob | None = None
+    text: str | None = None
+
+
+@dataclass
+class StubContent:
+    """google.genai.types.Content."""
+
+    parts: list | None = None
+    role: str = "model"
+
+
+@dataclass
+class StubCandidate:
+    """google.genai.types.Candidate."""
+
+    content: StubContent | None = None
+    finish_reason: str | None = "STOP"
+    finish_message: str | None = None
+
+
+@dataclass
+class StubPromptFeedback:
+    """google.genai.types.GenerateContentResponsePromptFeedback."""
+
+    block_reason: str | None = None
+    block_reason_message: str | None = None
+
+
+@dataclass
+class StubUsage:
+    """google.genai.types.GenerateContentResponseUsageMetadata."""
+
+    prompt_token_count: int | None = None
+    candidates_token_count: int | None = None
+    total_token_count: int | None = None
+
+
+@dataclass
+class StubContentResponse:
+    """google.genai.types.GenerateContentResponse."""
+
+    candidates: list | None = None
+    prompt_feedback: StubPromptFeedback | None = None
+    model_version: str | None = None
+    response_id: str | None = None
+    usage_metadata: StubUsage | None = None
+
+
+class StubContentModels:
+    def __init__(self, response=None, error=None):
+        self.response, self.error = response, error
+        self.calls: list[dict] = []
+
+    def generate_content(self, *, model, contents, config):
+        self.calls.append({"model": model, "contents": contents, "config": config})
+        if self.error:
+            raise self.error
+        return self.response
+
+
+class StubContentClient:
+    """Stands in for google.genai.Client on the generate_content path."""
+
+    def __init__(self, response=None, error=None):
+        self.models = StubContentModels(response, error)
+
+
+def image_response(
+    data: bytes,
+    mime_type: str = "image/png",
+    *,
+    finish_reason: str = "STOP",
+    text: str | None = None,
+) -> StubContentResponse:
+    """A response carrying one inline image, as the real API returns one."""
+    parts = [StubPart(inline_data=StubBlob(data=data, mime_type=mime_type))]
+    if text is not None:
+        # The model is entitled to return prose alongside the picture, and the
+        # provider has to walk past it rather than treat it as the image.
+        parts.insert(0, StubPart(text=text))
+    return StubContentResponse(
+        candidates=[StubCandidate(content=StubContent(parts=parts),
+                                  finish_reason=finish_reason)],
+        model_version="stub-model-version",
+        response_id="stub-response-id",
+        usage_metadata=StubUsage(
+            prompt_token_count=11, candidates_token_count=22, total_token_count=33
+        ),
+    )
+
+
+def gemini_client_returning(data: bytes, **kwargs) -> StubContentClient:
+    return StubContentClient(image_response(data, **kwargs))
