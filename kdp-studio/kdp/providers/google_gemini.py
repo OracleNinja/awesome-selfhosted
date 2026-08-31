@@ -216,6 +216,14 @@ class GoogleGeminiImageProvider:
         config: dict = {
             "response_modalities": list(RESPONSE_MODALITIES),
             "image_config": types.ImageConfig(**image),
+            # This request has no tools and must not make function calls. The
+            # SDK leaves automatic function calling on by default and logs a
+            # warning about it on every call; saying so explicitly takes the
+            # short path through the client and keeps a forty-page run from
+            # printing forty lines that have nothing to do with drawing.
+            "automatic_function_calling": types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
         }
         if options.get("seed") is not None:
             config["seed"] = options["seed"]

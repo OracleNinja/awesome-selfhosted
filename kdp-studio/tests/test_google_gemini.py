@@ -202,6 +202,9 @@ def test_the_request_asks_for_an_image_at_four_k():
     assert call["config"].response_modalities == list(RESPONSE_MODALITIES)
     assert call["config"].image_config.image_size == "4K"
     assert call["config"].image_config.aspect_ratio == "3:4"
+    # No tools, so no function calling. Left on, the SDK logs a warning about
+    # it on every call, which is forty lines of noise in a forty-page run.
+    assert call["config"].automatic_function_calling.disable is True
 
 
 @requires_sdk
@@ -596,6 +599,10 @@ def test_the_serialised_request_is_the_one_the_api_will_receive():
     assert generation["responseModalities"] == ["IMAGE"]
     assert generation["imageConfig"] == {"aspectRatio": "3:4", "imageSize": "4K"}
     assert "personGeneration" not in generation["imageConfig"]
+    # Disabling function calling is a client-side instruction; it must not turn
+    # into a field the API is asked to understand.
+    assert "automaticFunctionCalling" not in generation
+    assert sorted(body) == ["_url", "contents", "generationConfig"]
 
     text = body["contents"][0]["parts"][0]["text"]
     assert text.startswith("Subject: a fern")

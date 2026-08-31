@@ -461,10 +461,11 @@ path closes that gap — the requirement is not the thing that is wrong. Only
 it with about 30% to spare. That conclusion does not depend on the buckets being
 exactly 1024/2048/4096: even read as 3840, `4K` still covers 3150.
 
-The exact pixel counts are unconfirmed here. Every Google image API host is
-blocked by this environment's network policy, so the numbers above are the
-SDK's documented semantics plus arithmetic, not a measured response. What the
-next paid smoke test measures is the pixel count; what it should not have to
+The exact pixel counts are unconfirmed. `generativelanguage.googleapis.com` is
+reachable from here — a keyless request gets a real 403 from Google, not a proxy
+block — but no valid key has been used, so the numbers above are the SDK's
+documented semantics plus arithmetic rather than a measured response. What the
+first paid smoke test measures is the pixel count; what it should not have to
 discover is the vocabulary.
 
 ### Why `google-imagen` refuses to run
