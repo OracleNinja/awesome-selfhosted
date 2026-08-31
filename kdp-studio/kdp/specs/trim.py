@@ -4,6 +4,13 @@
 that are available across its marketplaces. Non-standard sizes are legal but
 narrow a book's distribution, so the spec gate reports them rather than
 silently accepting them.
+
+``cost_class`` says whether KDP prices a size as regular or large trim, which
+changes the printing cost per copy. **Every entry is currently ``None``**: this
+table has not been reconciled against KDP's own trim-size list, so no size can
+be mapped to a cost class. Economics therefore refuses to price any book until
+a class is supplied explicitly — see ``kdp/models/economics.py``. The absence is
+deliberate; a guess here would produce a confident, wrong margin.
 """
 
 from __future__ import annotations
@@ -23,6 +30,9 @@ class TrimSize:
     height_in: float
     standard: bool
     note: str = ""
+    #: "regular" or "large" once verified against KDP's trim-size table.
+    #: None means unreconciled, which is every entry at present.
+    cost_class: str | None = None
 
     @property
     def label(self) -> str:
@@ -52,6 +62,20 @@ TRIM_SIZES: Final[dict[str, TrimSize]] = {
 
 #: The default trim for a coloring book.
 DEFAULT_TRIM: Final[str] = "8.5x11"
+
+
+#: True once every entry carries a verified cost class.
+def trim_table_reconciled() -> bool:
+    """Whether every trim size has been mapped to a printing-cost class.
+
+    False today. Until it is true, economics cannot resolve a printing cost
+    from a book's trim alone.
+    """
+    return all(t.cost_class is not None for t in TRIM_SIZES.values())
+
+
+def unreconciled_trims() -> tuple[str, ...]:
+    return tuple(sorted(k for k, t in TRIM_SIZES.items() if t.cost_class is None))
 
 
 def get_trim(key: str) -> TrimSize:

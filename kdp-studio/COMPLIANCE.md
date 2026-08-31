@@ -62,10 +62,22 @@ owed the information too.
 **Human's job:** answering the question on the KDP form, then setting
 `ai_disclosure_confirmed`. No agent may tick that box.
 
-## Duplicative content and low-content quality
+## Content classification
 
-Low-content books are allowed when they offer real customer value and are not
-duplicative. Common removal triggers: duplicate interiors, minimal
+**A coloring book is not automatically a low-content book.** KDP's Low-Content
+Books documentation lists coloring books under *Not Generally Low-Content*, so
+the low-content rules do not apply to a title merely because it is a coloring
+book. Classify a specific title on what it actually contains, never on its
+category.
+
+This matters in both directions: applying low-content restrictions to a book
+that is not one imposes constraints Amazon does not, and assuming a coloring
+book escapes scrutiny ignores the duplicative-content rules below, which apply
+to every title.
+
+## Duplicative content and quality
+
+Content is allowed when it offers real customer value and is not duplicative. Common removal triggers: duplicate interiors, minimal
 differentiation between titles, mass-generated uploads, and misleading or
 keyword-stuffed metadata. Large-scale uploads of near-identical books raise
 scrutiny even where no single title is over a line.

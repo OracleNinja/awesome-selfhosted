@@ -456,7 +456,7 @@ def cmd_gates(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kdp",
-        description="Gated pipeline for original low-content KDP books.",
+        description="Gated pipeline for original illustrated KDP books.",
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     sub = parser.add_subparsers(dest="command", required=True)

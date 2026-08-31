@@ -344,13 +344,41 @@ is what makes a spend deliberate. A metered provider additionally needs
 
 ## Economics
 
-Every figure is a projection carrying a `Confidence`, and the roll-up takes the
-*weakest* assumption: a projection is only as sound as its shakiest input.
+Both halves of the calculation are **tabular, not formulaic**, because KDP's
+are.
 
-The royalty rate and printing-cost constants are `UNKNOWN` until the `royalty`
-specification table is verified, so today every projection reports as unknown-
-confidence. `python3 -m kdp` compares scenarios side by side; no price is
-privileged, and whether $5.99 works depends entirely on the page count.
+**The royalty rate depends on the list price.** On amazon.com a paperback below
+$9.99 earns 50%, not 60%. An earlier revision assumed 60% universally, which
+overstated the return on every book under that line — including $5.99, the
+price this pipeline was most likely to be pointed at. On a 60-page book that
+error reported $1.87 a copy where the true figure is $0.70.
+
+**The printing cost changes shape with page count.** Short books are charged a
+flat fee with no per-page component; longer ones switch to fixed-plus-rate.
+Applying the long-book formula to a 24-page book understates the cost by a
+dollar, which is most of the margin.
+
+| amazon.com, black ink, regular trim | |
+|---|---|
+| List price ≤ $9.98 | 50% royalty |
+| List price ≥ $9.99 | 60% royalty |
+| 24–110 pages | flat $2.30, no per-page charge |
+| 111–828 pages | $1.00 + $0.012/page |
+
+Royalty is `(rate × tax-exclusive list price) − printing cost`.
+
+**Only verified combinations exist.** The tables are keyed by marketplace, ink
+and trim class, and hold exactly one entry. Asking for any other combination
+raises rather than interpolating — a plausible-looking number for an unverified
+combination is worse than no number, because it gets believed. The bands also
+do not tile: KDP's rule covers "$9.98 or below" and "$9.99 or above", so a price
+in the sliver between them raises rather than being rounded into a neighbour.
+
+**Projections still report at `UNKNOWN` confidence**, and will until the trim
+table is reconciled. The rate and cost bands are verified; which *trim sizes*
+KDP prices as regular rather than large is not, so no book can be mapped to a
+cost band from its trim alone. Callers state the class explicitly, which keeps
+the assumption visible instead of inferred.
 
 ## Higgsfield
 
@@ -418,9 +446,16 @@ Where a URL is recorded it was seen in a search result and is a starting point;
 where only a page title is given, no URL is recorded, because a confidently
 wrong link sends someone to the wrong page and they verify against it.
 
-One value is known to be contested: secondary sources disagree on the page
-count above which KDP prints spine text (79 vs 100). 100 is encoded as the
-conservative choice and must be confirmed rather than assumed.
+Two corrections have already come out of a partial verification. KDP prints no
+spine text at 79 pages or fewer, so 80 is the first eligible page count; the
+previous value of 100 was a guess that silently withheld spine text from books
+of 80 to 99 pages. And standard colour shares black ink's 0.002252 caliper, not
+premium colour's 0.002347, which had been over-estimating every standard-colour
+spine.
+
+The trim table is a separate outstanding item: it has not been reconciled
+against KDP's current list, so the 15 entries may be incomplete, and no size
+carries the regular/large cost class that economics needs.
 
 **The Higgsfield HTTP client.** See above — a boundary, pending an API
 contract.

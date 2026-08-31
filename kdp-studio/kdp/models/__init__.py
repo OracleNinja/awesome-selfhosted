@@ -10,14 +10,22 @@ from __future__ import annotations
 from .approval import ApprovalRecord, ApprovalStatus, fingerprint
 from .artifacts import MATERIAL_ARTIFACTS, Artifact, ArtifactKind
 from .economics import (
-    ASSUMED_FIXED_COST_USD,
-    ASSUMED_PER_PAGE_COST_USD,
-    ASSUMED_ROYALTY_RATE,
+    PRINTING_COSTS,
+    ROYALTY_BANDS,
     Assumption,
     Economics,
+    EconomicsUnavailable,
+    Ink,
+    PrintingBand,
+    PrintingCostTable,
     PricingScenario,
+    RoyaltyBand,
+    TrimClass,
+    build_scenario,
     compare,
     default_assumptions,
+    printing_cost,
+    royalty_rate,
 )
 from .manifest import MANIFEST_VERSION, BookManifest
 from .prompts import MIN_PROMPT_CHARS, AssetPrompt, PromptPlan
@@ -46,10 +54,9 @@ from .spec import BookMetadata, BookSpec, PageSpec
 from .strategy import BookStrategy, Claim, Confidence
 
 __all__ = [
-    "ASSUMED_FIXED_COST_USD",
-    "ASSUMED_PER_PAGE_COST_USD",
-    "ASSUMED_ROYALTY_RATE",
     "FORBIDDEN_REFERENCE_MARKERS",
+    "PRINTING_COSTS",
+    "ROYALTY_BANDS",
     "MANIFEST_VERSION",
     "MATERIAL_ARTIFACTS",
     "MAX_OBSERVATIONS",
@@ -73,19 +80,28 @@ __all__ = [
     "Confidence",
     "DisclosureAnswer",
     "Economics",
+    "EconomicsUnavailable",
+    "Ink",
     "MarketSignal",
     "PageSpec",
     "PricingScenario",
+    "PrintingBand",
+    "PrintingCostTable",
     "PromptPlan",
     "ResearchBrief",
+    "RoyaltyBand",
     "RunRecord",
+    "TrimClass",
     "Transformation",
     "approved_versions",
     "attempts_for",
+    "build_scenario",
     "compare",
     "content_hash",
     "default_assumptions",
     "fingerprint",
     "hash_file",
+    "printing_cost",
     "roll_up_disclosure",
+    "royalty_rate",
 ]

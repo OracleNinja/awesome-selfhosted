@@ -24,10 +24,16 @@ from kdp.models import (
     BookStrategy,
     Claim,
     Confidence,
+    EconomicsUnavailable,
+    Ink,
     PricingScenario,
     PromptPlan,
+    TrimClass,
+    build_scenario,
     compare,
     default_assumptions,
+    printing_cost,
+    royalty_rate,
 )
 from kdp.models.economics import Assumption
 from kdp.providers import ProviderUnavailable, get_provider
@@ -194,59 +200,65 @@ def test_cover_qa_catches_an_interior_rebuilt_after_the_cover(manifest, tmp_path
 # --- economics --------------------------------------------------------------
 
 
-def test_net_royalty_is_gross_minus_print_cost():
-    scenario = PricingScenario("t", 9.99, 100, royalty_rate=0.6,
-                               fixed_cost_usd=1.0, per_page_cost_usd=0.012)
-    assert scenario.print_cost_usd == pytest.approx(2.2)
+def test_net_royalty_is_gross_royalty_minus_printing():
+    scenario = build_scenario(9.99, 100, trim_class=TrimClass.REGULAR)
+    assert scenario.royalty_rate == 0.60
+    assert scenario.print_cost_usd == pytest.approx(2.30)
     assert scenario.gross_royalty_usd == pytest.approx(5.994)
-    assert scenario.net_royalty_usd == pytest.approx(3.794)
+    assert scenario.net_royalty_usd == pytest.approx(3.694)
     assert scenario.viable is True
 
 
 def test_a_price_that_loses_money_is_not_viable():
-    # A long book at a low price: the print cost eats the royalty.
-    scenario = PricingScenario("cheap", 4.99, 400)
+    # A long book at a low price: below $9.99 the rate is 50%, and 400 pages
+    # of printing eats it.
+    scenario = build_scenario(4.99, 400, trim_class=TrimClass.REGULAR)
+    assert scenario.royalty_rate == 0.50
     assert scenario.net_royalty_usd < 0
     assert scenario.viable is False
 
 
-def test_print_cost_scales_with_page_count():
-    short = PricingScenario("a", 9.99, 50)
-    long = PricingScenario("b", 9.99, 300)
+def test_print_cost_scales_with_page_count_above_the_flat_band():
+    short = build_scenario(9.99, 150, trim_class=TrimClass.REGULAR)
+    long = build_scenario(9.99, 400, trim_class=TrimClass.REGULAR)
     assert long.print_cost_usd > short.print_cost_usd
     assert long.net_royalty_usd < short.net_royalty_usd
 
 
 def test_compare_builds_one_scenario_per_price_in_order():
-    econ = compare([9.99, 5.99, 7.99], 60)
+    econ = compare([9.99, 5.99, 7.99], 60, trim_class=TrimClass.REGULAR)
     assert [s.label for s in econ.scenarios] == ["$5.99", "$7.99", "$9.99"]
 
 
 def test_no_price_is_privileged():
-    # $5.99 is a scenario like any other; nothing in the model favours it.
-    econ = compare([5.99, 12.99], 60)
+    econ = compare([5.99, 12.99], 60, trim_class=TrimClass.REGULAR)
     assert econ.selected is None
 
 
 def test_confidence_is_the_weakest_assumption():
-    econ = compare([7.99], 60, assumptions=(
+    econ = compare([7.99], 60, trim_class=TrimClass.REGULAR, assumptions=(
         Assumption("a", 1.0, Confidence.OBSERVED),
         Assumption("b", 2.0, Confidence.ESTIMATED),
     ))
     assert econ.confidence is Confidence.ESTIMATED
 
 
-def test_default_assumptions_are_unknown_until_the_royalty_table_is_checked():
-    econ = compare([7.99], 60)
+def test_projections_stay_unknown_while_the_trim_class_is_unreconciled():
+    """The rate and the cost bands are verified; the trim mapping is not."""
+    econ = compare([7.99], 60, trim_class=TrimClass.REGULAR)
     assert econ.confidence is Confidence.UNKNOWN
-    assert all(a.confidence is Confidence.UNKNOWN for a in default_assumptions())
+    trim = next(a for a in econ.assumptions if a.key == "trim_class")
+    assert trim.confidence is Confidence.UNKNOWN
+    verified = [a for a in econ.assumptions if a.confidence is Confidence.OBSERVED]
+    assert {a.key for a in verified} == {"royalty_bands", "printing_cost_bands"}
 
 
 def test_a_scenario_needs_a_positive_price_and_page_count():
-    with pytest.raises(ModelError):
-        PricingScenario("bad", 0.0, 60)
-    with pytest.raises(ModelError):
-        PricingScenario("bad", 7.99, 0)
+    """Malformed shape reports as malformed, not as an unrecognised band."""
+    with pytest.raises(ModelError, match="list price must be positive"):
+        build_scenario(0.0, 60, trim_class=TrimClass.REGULAR)
+    with pytest.raises(ModelError, match="page count must be positive"):
+        build_scenario(7.99, 0, trim_class=TrimClass.REGULAR)
 
 
 # --- providers --------------------------------------------------------------
@@ -551,7 +563,10 @@ def test_changing_the_price_invalidates_approval(built_manifest):
     manifest, _ = built_manifest
     priced = replace(
         manifest,
-        economics=replace(compare([5.99, 7.99], manifest.spec.page_count), selected="$5.99"),
+        economics=replace(
+            compare([5.99, 7.99], manifest.spec.page_count, trim_class=TrimClass.REGULAR),
+            selected="$5.99",
+        ),
     )
     approved = _approved(priced)
     assert approved.approval_is_current() is True

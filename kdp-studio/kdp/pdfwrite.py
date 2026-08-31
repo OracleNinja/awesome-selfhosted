@@ -1,6 +1,6 @@
 """A small, deterministic PDF writer.
 
-Writes exactly what a low-content book needs: fixed-size pages carrying one
+Writes exactly what an illustrated book needs: fixed-size pages carrying one
 placed image, plus simple text. No fonts are embedded — only the base-14
 Helvetica, which every PDF reader has — so the output stays small and the
 writer stays short enough to audit.

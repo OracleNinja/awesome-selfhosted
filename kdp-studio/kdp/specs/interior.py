@@ -1,6 +1,6 @@
 """Interior page geometry: bleed, margins and the gutter.
 
-Two rules here are worth stating plainly, because they are where low-content
+Two rules here are worth stating plainly, because they are where illustrated
 books usually fail preflight:
 
 **Bleed is asymmetric.** A bleed page grows by 0.125" on the outer edge only,
@@ -38,8 +38,13 @@ GUTTER_BANDS: Final[tuple[tuple[int, int, float], ...]] = (
     (701, 828, 0.875),
 )
 
-#: KDP prints spine text only at or above this page count.
-MIN_PAGES_FOR_SPINE_TEXT: Final[int] = 100
+#: KDP does not print spine text on books of 79 pages or fewer, so 80 is the
+#: first page count at which a spine can carry text. Verified against KDP Help;
+#: an earlier revision of this file used 100, a conservative guess taken from
+#: disagreeing secondary sources, which silently withheld spine text from books
+#: between 80 and 99 pages.
+SPINE_TEXT_CUTOFF_PAGES: Final[int] = 79
+MIN_PAGES_FOR_SPINE_TEXT: Final[int] = SPINE_TEXT_CUTOFF_PAGES + 1
 
 #: Interiors are submitted as PDF; raster artwork should be at least this DPI.
 MIN_IMAGE_DPI: Final[int] = 300

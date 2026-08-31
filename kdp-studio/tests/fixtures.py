@@ -19,6 +19,7 @@ from kdp.models import (
     PageSpec,
     PromptPlan,
     ResearchBrief,
+    TrimClass,
     compare,
 )
 
@@ -285,6 +286,13 @@ def build_manifest() -> BookManifest:
         strategy=build_strategy(),
         prompt_plan=build_prompt_plan(spec),
         metadata=build_metadata(),
-        economics=compare([5.99, 7.99, 9.99], spec.page_count),
+        # The trim class is stated rather than inferred: KDP prices regular
+        # and large trims differently and kdp/specs/trim.py does not yet
+        # know which 8.5x11 is. The fixture says REGULAR so the pipeline
+        # can be exercised end to end; the resulting Economics reports at
+        # UNKNOWN confidence precisely because of this assumption.
+        economics=compare(
+            [5.99, 7.99, 9.99], spec.page_count, trim_class=TrimClass.REGULAR
+        ),
         stage="research",
     )

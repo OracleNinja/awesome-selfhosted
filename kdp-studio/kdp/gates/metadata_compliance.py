@@ -7,7 +7,7 @@ incomplete if any asset is unclassified. This gate will not let a book reach
 the submission checklist with an unanswerable disclosure question.
 
 **The listing must not look like spam.** Keyword stuffing and misleading
-metadata are named removal triggers for low-content books, and they are also
+metadata are named removal triggers, and they are also
 the easiest thing to do by accident when metadata is machine-assembled.
 """
 

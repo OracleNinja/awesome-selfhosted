@@ -1,4 +1,4 @@
-"""KDP Studio — a gated, auditable pipeline for original low-content books.
+"""KDP Studio — a gated, auditable pipeline for original illustrated books.
 
 The package is deliberately dependency-free at its core. Everything that
 decides whether a book may advance a stage is plain-stdlib Python so that a

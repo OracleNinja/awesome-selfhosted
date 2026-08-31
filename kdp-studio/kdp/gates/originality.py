@@ -4,7 +4,7 @@ Two failure modes, and they are not the same:
 
 **Within a book** — the same drawing appearing twice under different page
 numbers. Padding a book with repeats is the clearest form of the "minimal
-differentiation" that gets low-content titles pulled.
+differentiation" that gets titles pulled as duplicative.
 
 **Across the catalogue** — a new book reusing pages from one already published.
 KDP treats duplicative content as a removal trigger, and the account-level risk
@@ -116,8 +116,8 @@ def run(
                     severity=Severity.BLOCKER,
                     message=(
                         f"{len(asset_ids)} pages share identical content. "
-                        "Repeated pages read as padding and are a removal "
-                        "trigger for low-content titles."
+                        "Repeated pages read as padding, and duplicative "
+                        "content is a removal trigger."
                     ),
                     subject=", ".join(sorted(asset_ids)),
                     detail={"content_hash": digest, "assets": sorted(asset_ids)},

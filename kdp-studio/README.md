@@ -16,7 +16,7 @@ and fills in the KDP form.
 
 ```bash
 cd kdp-studio
-python3 -m pytest                 # 307 tests; needs only pytest
+python3 -m pytest                 # 340 tests; needs only pytest
 python3 -m kdp stages             # the pipeline
 python3 -m kdp gates              # every gate, its purpose, and what it needs
 python3 -m kdp specs --trim 8.5x11 --pages 60

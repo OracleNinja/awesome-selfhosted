@@ -13,6 +13,7 @@ from .interior import (
     GUTTER_BANDS,
     MIN_IMAGE_DPI,
     MIN_PAGES_FOR_SPINE_TEXT,
+    SPINE_TEXT_CUTOFF_PAGES,
     InteriorGeometry,
     gutter_in,
     interior_geometry,
@@ -32,7 +33,14 @@ from .revision import (
     unverified_tables,
     verification_problem,
 )
-from .trim import DEFAULT_TRIM, TRIM_SIZES, TrimSize, get_trim
+from .trim import (
+    DEFAULT_TRIM,
+    TRIM_SIZES,
+    TrimSize,
+    get_trim,
+    trim_table_reconciled,
+    unreconciled_trims,
+)
 
 __all__ = [
     "BLEED_IN",
@@ -41,6 +49,7 @@ __all__ = [
     "GUTTER_BANDS",
     "MIN_IMAGE_DPI",
     "MIN_PAGES_FOR_SPINE_TEXT",
+    "SPINE_TEXT_CUTOFF_PAGES",
     "PAPERS",
     "SOURCES",
     "SPEC_REVISION",
@@ -60,6 +69,8 @@ __all__ = [
     "gutter_in",
     "interior_geometry",
     "is_verified",
+    "trim_table_reconciled",
+    "unreconciled_trims",
     "source",
     "stale_tables",
     "unverified_tables",

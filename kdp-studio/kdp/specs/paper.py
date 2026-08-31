@@ -43,7 +43,11 @@ PAPERS: Final[dict[str, Paper]] = {
         Paper("bw_white", "Black ink on white paper", 0.002252, 24, 828, False),
         Paper("bw_cream", "Black ink on cream paper", 0.0025, 24, 828, False),
         Paper("premium_colour", "Premium colour on white paper", 0.002347, 24, 600, True),
-        Paper("standard_colour", "Standard colour on white paper", 0.002347, 72, 800, True),
+        # Standard colour prints on the same stock as black ink, so it shares
+        # the 0.002252 caliper. An earlier revision carried 0.002347 here — the
+        # premium-colour figure — which over-estimated the spine of every
+        # standard-colour book.
+        Paper("standard_colour", "Standard colour on white paper", 0.002252, 72, 800, True),
     )
 }
 

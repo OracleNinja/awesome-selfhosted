@@ -23,7 +23,7 @@ from typing import Final, Literal
 
 #: Bumped whenever any number in this sub-package changes. Recorded into every
 #: manifest and every gate result, so an old result can always be explained.
-SPEC_REVISION: Final[str] = "2026.08-r2"
+SPEC_REVISION: Final[str] = "2026.08-r3"
 
 VerificationState = Literal["VERIFIED", "UNVERIFIED"]
 
@@ -108,10 +108,26 @@ def _ttl():
     return timedelta(days=VERIFICATION_TTL_DAYS)
 
 
+#: The values in this package were supplied by an operator who checked them
+#: against KDP Help. The *record* still cannot be marked VERIFIED, because
+#: verification means a citation someone else can re-check: a URL and a date.
+#: Neither was supplied, and neither can be obtained here — every amazon.com
+#: host is refused by network policy in this environment.
+#:
+#: This is the distinction the whole mechanism exists to hold. A value someone
+#: believes is not the same as a value someone can point at, and only the
+#: second survives the question "where did this come from?" six months later.
+_VALUES_SUPPLIED_NOTE = (
+    "Values updated from an operator's verification against KDP Help. The "
+    "record is still UNVERIFIED because no source URL, verification date or "
+    "spec version was supplied — those are what make a verification auditable. "
+    "Add source_url and verified_on to flip this table."
+)
+
 _UNVERIFIED_NOTE = (
-    "Transcribed from public secondary summaries. Every amazon.com host is "
-    "blocked by network policy in the environment this package is developed "
-    "in, so no value here has been confirmed against a primary source."
+    "Not verified. Every amazon.com host is blocked by network policy in the "
+    "environment this package is developed in, so no value here has been "
+    "confirmed against a primary source."
 )
 
 #: One record per table. Fill in ``source_url``, ``verified_on`` and, where the
@@ -124,10 +140,18 @@ SOURCES: Final[dict[str, SourceRecord]] = {
             "trim",
             expected_url="https://kdp.amazon.com/en_US/help/topic/G201857950",
             confirm=(
-                "the list of trim sizes offered, and which are standard",
+                "the complete list of trim sizes offered, and which are "
+                "standard — the 15 entries here are NOT known to be complete",
                 "which sizes are available for expanded distribution",
+                "which sizes KDP prices as regular trim and which as large; "
+                "economics cannot price a book without this",
             ),
-            notes=_UNVERIFIED_NOTE + " Values live in kdp/specs/trim.py.",
+            notes=_UNVERIFIED_NOTE
+            + " Values live in kdp/specs/trim.py. This table has NOT been "
+            "reconciled against KDP's current trim-size list — the list was not "
+            "supplied — so the 15 entries may be incomplete or out of date. It "
+            "also carries no cost class per size (regular vs large trim), which "
+            "is what economics needs to price a book from its trim alone.",
         ),
         SourceRecord(
             "paper",
@@ -136,7 +160,10 @@ SOURCES: Final[dict[str, SourceRecord]] = {
                 "paper stocks offered and their per-page caliper",
                 "minimum and maximum page count for each stock",
             ),
-            notes=_UNVERIFIED_NOTE + " Values live in kdp/specs/paper.py.",
+            notes=_VALUES_SUPPLIED_NOTE
+            + " Spine coefficients corrected: standard colour moved from "
+            "0.002347 to 0.002252, matching black ink. Values live in "
+            "kdp/specs/paper.py. Page-count limits were NOT re-verified.",
         ),
         SourceRecord(
             "interior",
@@ -147,7 +174,9 @@ SOURCES: Final[dict[str, SourceRecord]] = {
                 "minimum outside/top/bottom margins with and without bleed",
                 "the inside (gutter) margin bands by page count",
             ),
-            notes=_UNVERIFIED_NOTE + " Values live in kdp/specs/interior.py.",
+            notes=_VALUES_SUPPLIED_NOTE
+            + " Bleed, margins and gutter bands were confirmed unchanged. "
+            "Values live in kdp/specs/interior.py.",
         ),
         SourceRecord(
             "cover",
@@ -157,12 +186,12 @@ SOURCES: Final[dict[str, SourceRecord]] = {
                 "the spine width calculation",
                 "the page count at or above which spine text is printed",
             ),
-            notes=_UNVERIFIED_NOTE
-            + " Values live in kdp/specs/cover.py. One value is known to be "
-            "contested between secondary sources: the page-count threshold for "
-            "spine text is variously reported as 79 and as 100. 100 is encoded "
-            "as the conservative choice and MUST be confirmed rather than "
-            "assumed.",
+            notes=_VALUES_SUPPLIED_NOTE
+            + " The contested spine-text threshold is resolved: KDP prints no "
+            "spine text at 79 pages or fewer, so 80 is the first eligible page "
+            "count. The previous value of 100 was a conservative guess that "
+            "silently withheld spine text from books of 80 to 99 pages. Values "
+            "live in kdp/specs/interior.py and kdp/specs/cover.py.",
         ),
         SourceRecord(
             "royalty",
@@ -171,9 +200,15 @@ SOURCES: Final[dict[str, SourceRecord]] = {
                 "the paperback royalty rate for this marketplace",
                 "the printing-cost formula: fixed charge plus per-page charge",
             ),
-            notes=_UNVERIFIED_NOTE
-            + " Values live in kdp/models/economics.py as ASSUMED_* constants. "
-            "Until confirmed, every projection reports at UNKNOWN confidence.",
+            notes=_VALUES_SUPPLIED_NOTE
+            + " The model is now banded rather than formulaic: royalty is 50% "
+            "below $9.99 and 60% at or above on amazon.com, and black-ink "
+            "regular-trim printing is a flat $2.30 to 110 pages then $1.00 + "
+            "$0.012/page. Only that one marketplace/ink/trim combination is "
+            "held; every other raises rather than extrapolating. Projections "
+            "still report at UNKNOWN confidence because the trim table carries "
+            "no cost class, so no book can be mapped to a cost band from its "
+            "trim alone.",
         ),
         SourceRecord(
             "policy",
@@ -181,7 +216,9 @@ SOURCES: Final[dict[str, SourceRecord]] = {
             confirm=(
                 "the AI-generated content disclosure wording, and the "
                 "generated/assisted distinction",
-                "the low-content and duplicative-content policy",
+                "the low-content policy, and that coloring books are listed "
+                "under 'Not Generally Low-Content'",
+                "the duplicative-content policy, which applies to every title",
                 "the limit on new titles per 24 hours",
             ),
             notes=_UNVERIFIED_NOTE
@@ -190,6 +227,14 @@ SOURCES: Final[dict[str, SourceRecord]] = {
         ),
     )
 }
+
+
+def _wrap(text: str, first: str, rest: str, width: int = 78) -> list[str]:
+    import textwrap
+
+    return textwrap.wrap(
+        text, width=width, initial_indent=first, subsequent_indent=rest
+    )
 
 
 def checklist() -> str:
@@ -228,8 +273,13 @@ def checklist() -> str:
             lines.append(f"  confirm: {item}")
         if record.state == "VERIFIED":
             lines.append(f"  checked: {record.verified_on} ({record.marketplace})")
+            if record.spec_version:
+                lines.append(f"  version: {record.spec_version}")
             if record.is_stale():
                 lines.append("  STALE — re-check; the values may have moved.")
+        if record.notes:
+            for line in _wrap(record.notes, "  note:    ", "           "):
+                lines.append(line)
         lines.append("")
 
     lines += [

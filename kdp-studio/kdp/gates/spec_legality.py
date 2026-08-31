@@ -106,7 +106,7 @@ def run(spec: BookSpec, *, require_verified_specs: bool = True) -> GateResult:
                 severity=Severity.BLOCKER,
                 message=(
                     f"{len(spec.pages)} pages are described and none of them is "
-                    "art. A low-content book with no drawings has nothing to "
+                    "art. A coloring book with no drawings has nothing to "
                     "offer a buyer."
                 ),
                 subject="pages",

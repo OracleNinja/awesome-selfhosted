@@ -67,6 +67,31 @@ def test_spine_width_is_page_count_times_caliper():
     assert paper.spine_width_in(0) == pytest.approx(0.0)
 
 
+@pytest.mark.parametrize(
+    ("stock", "caliper"),
+    [
+        ("bw_white", 0.002252),
+        ("bw_cream", 0.0025),
+        # Standard colour prints on the same stock as black ink. An earlier
+        # revision carried the premium figure here and over-estimated every
+        # standard-colour spine.
+        ("standard_colour", 0.002252),
+        ("premium_colour", 0.002347),
+    ],
+)
+def test_spine_coefficients_are_the_verified_ones(stock, caliper):
+    assert get_paper(stock).caliper_in == pytest.approx(caliper)
+    assert get_paper(stock).spine_width_in(200) == pytest.approx(200 * caliper)
+
+
+def test_standard_and_premium_colour_spines_differ():
+    """They are distinct stocks; treating them as one was the original bug."""
+    standard = get_paper("standard_colour").spine_width_in(300)
+    premium = get_paper("premium_colour").spine_width_in(300)
+    assert standard != premium
+    assert standard == pytest.approx(get_paper("bw_white").spine_width_in(300))
+
+
 def test_cover_canvas_spans_both_panels_the_spine_and_the_bleed():
     trim, paper = get_trim("8.5x11"), get_paper("bw_white")
     cover = cover_geometry(trim, paper, 100)
@@ -83,10 +108,30 @@ def test_front_panel_starts_after_the_back_cover_and_spine():
     )
 
 
-def test_spine_text_is_withheld_on_thin_books():
+def test_spine_text_is_withheld_at_79_pages():
+    """KDP prints no spine text on 79 pages or fewer.
+
+    An earlier revision used 100 here, a conservative guess taken from
+    disagreeing secondary sources. It silently withheld spine text from every
+    book between 80 and 99 pages.
+    """
     trim, paper = get_trim("8.5x11"), get_paper("bw_white")
-    assert cover_geometry(trim, paper, 60).spine_text_allowed is False
-    assert cover_geometry(trim, paper, 100).spine_text_allowed is True
+    assert cover_geometry(trim, paper, 79).spine_text_allowed is False
+
+
+def test_spine_text_is_permitted_at_80_pages():
+    trim, paper = get_trim("8.5x11"), get_paper("bw_white")
+    assert cover_geometry(trim, paper, 80).spine_text_allowed is True
+
+
+def test_the_spine_text_boundary_is_exactly_79_to_80():
+    trim, paper = get_trim("8.5x11"), get_paper("bw_white")
+    allowed = [
+        pages
+        for pages in range(76, 84)
+        if cover_geometry(trim, paper, pages).spine_text_allowed
+    ]
+    assert allowed == [80, 81, 82, 83]
 
 
 def test_narrow_spine_reports_no_usable_text_width():
@@ -100,6 +145,20 @@ def test_paper_page_count_bounds():
     assert get_paper("bw_white").supports_page_count(23) is False
     assert get_paper("standard_colour").supports_page_count(60) is False
     assert get_paper("premium_colour").supports_page_count(601) is False
+
+
+def test_the_trim_table_is_not_yet_reconciled_against_kdp():
+    """Recorded as machine state, not a comment.
+
+    Which sizes KDP prices as regular rather than large trim has not been
+    checked, so no size carries a cost class and economics refuses to price a
+    book from its trim alone.
+    """
+    from kdp.specs import TRIM_SIZES, trim_table_reconciled, unreconciled_trims
+
+    assert trim_table_reconciled() is False
+    assert len(unreconciled_trims()) == len(TRIM_SIZES)
+    assert all(t.cost_class is None for t in TRIM_SIZES.values())
 
 
 def test_unknown_trim_and_paper_are_rejected_by_name():
