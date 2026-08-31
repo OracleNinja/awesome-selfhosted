@@ -1,0 +1,23 @@
+{
+  "ai_role": "generated",
+  "asset_id": "PAGE-004.a001",
+  "attempt": 1,
+  "content_hash": "sha256:09d98dbc592eba624aafdbe71e0936fb19d63e3bff405893939d72ec74901587",
+  "created_at": "2026-08-31T20:29:06+00:00",
+  "derived_from": [],
+  "failure_reason": null,
+  "file_format": "png",
+  "height": 3360,
+  "kind": "image",
+  "note": "single-page smoke test; not registered against the book",
+  "page_id": "PAGE-004",
+  "parent_asset_id": null,
+  "path": "books/bold-easy-garden/smoke/PAGE-004/assets/PAGE-004.a001.png",
+  "prompt_id": "PROMPT-PAGE-004",
+  "prompt_version": "v1",
+  "provider": "local-vector",
+  "status": "pending",
+  "tool": "claude-svg/chromium",
+  "transformation": "generated",
+  "width": 2520
+}

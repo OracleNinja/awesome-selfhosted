@@ -80,6 +80,14 @@ class GenerationResult:
     reason: str | None = None
     #: Provider-side identifiers useful for support tickets. Never a secret.
     meta: dict = field(default_factory=dict)
+    #: Whether trying this page again could plausibly succeed. False for the
+    #: failures that are settled: a rejected key, billing not enabled, a quota
+    #: of zero, a retired model, a malformed request. The runner stops on those
+    #: instead of spending its attempt budget, because three attempts a page
+    #: across forty pages is a hundred and twenty requests against a wall — and
+    #: on a metered provider, a hundred and twenty chances to be billed for
+    #: nothing. Declared last so no positional call is rebound.
+    retryable: bool = True
 
     def __post_init__(self) -> None:
         if not self.ok and not self.reason:

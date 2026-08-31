@@ -43,6 +43,7 @@ python3 -m kdp providers                                  # what can run, and wh
 python3 -m kdp smoke-test      books/<id>/manifest.json PAGE-004 \
                                --provider google-gemini --confirm-spend
 python3 -m kdp generate        books/<id>/manifest.json --provider mock
+#   free, local, no key:        --provider local-vector   (KDP_VECTOR_ART_DIR=books/<id>/art)
 #   ...or a real one:            --provider google-gemini --confirm-spend
 python3 -m kdp asset           books/<id>/manifest.json approve <asset-id>
 #   ...or, to redo named pages:  --regenerate PAGE-004 PAGE-012

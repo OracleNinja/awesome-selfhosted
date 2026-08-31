@@ -660,3 +660,62 @@ def test_an_ordinary_error_is_passed_through_unchanged():
     ).generate(_request())
 
     assert result.reason == "RuntimeError: connection reset"
+
+
+# --- which failures are worth trying again ----------------------------------
+
+
+@requires_sdk
+@pytest.mark.parametrize(
+    "error, retryable",
+    [
+        ("429 RESOURCE_EXHAUSTED ... limit: 0, model: x", False),   # billing
+        ("429 RESOURCE_EXHAUSTED ... limit: 60, model: x", True),   # a real rate
+        ("400 INVALID_ARGUMENT API key not valid API_KEY_INVALID", False),
+        ("403 PERMISSION_DENIED", False),
+        ("404 NOT_FOUND this model is no longer available", False),
+        ("503 UNAVAILABLE the service is overloaded", True),
+        ("500 INTERNAL", True),
+        ("ConnectionResetError: connection reset by peer", True),
+    ],
+)
+def test_settled_failures_are_not_retried_and_transient_ones_are(error, retryable):
+    result = GoogleGeminiImageProvider(
+        client=StubContentClient(error=RuntimeError(error))
+    ).generate(_request())
+
+    assert result.ok is False
+    assert result.retryable is retryable
+
+
+@requires_sdk
+def test_a_blocked_prompt_is_settled_but_a_refused_drawing_is_not():
+    """The prompt is identical next time; the sampling is not."""
+    blocked = StubContentClient(
+        StubContentResponse(
+            candidates=[], prompt_feedback=StubPromptFeedback(block_reason="SAFETY")
+        )
+    )
+    assert (
+        GoogleGeminiImageProvider(client=blocked).generate(_request()).retryable
+        is False
+    )
+
+    refused = StubContentClient(
+        StubContentResponse(
+            candidates=[
+                StubCandidate(content=StubContent(parts=[]), finish_reason="IMAGE_SAFETY")
+            ]
+        )
+    )
+    assert (
+        GoogleGeminiImageProvider(client=refused).generate(_request()).retryable is True
+    )
+
+
+@requires_sdk
+def test_a_successful_result_is_not_marked_unretryable():
+    result = GoogleGeminiImageProvider(
+        client=gemini_client_returning(_png(64, 80, b"x"))
+    ).generate(_request())
+    assert result.ok and result.retryable is True

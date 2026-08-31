@@ -17,6 +17,7 @@ from .base import (
 from .google_gemini import GoogleGeminiImageProvider
 from .google_imagen import GoogleImagenProvider
 from .higgsfield import HiggsfieldProvider
+from .local_vector import LocalVectorProvider
 from .mock import MockImageProvider
 
 #: Name -> factory. ``mock`` is always available and is what CI uses.
@@ -26,6 +27,7 @@ from .mock import MockImageProvider
 #: see its module docstring, and use ``google-gemini`` instead.
 PROVIDERS = {
     "mock": MockImageProvider,
+    "local-vector": LocalVectorProvider,
     "google-gemini": GoogleGeminiImageProvider,
     "google-imagen": GoogleImagenProvider,
     "higgsfield": HiggsfieldProvider,
@@ -54,6 +56,7 @@ __all__ = [
     "GoogleGeminiImageProvider",
     "GoogleImagenProvider",
     "HiggsfieldProvider",
+    "LocalVectorProvider",
     "ImageProvider",
     "MockImageProvider",
     "ProviderError",

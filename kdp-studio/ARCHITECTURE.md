@@ -406,9 +406,42 @@ Three, behind one interface, chosen with `--provider`:
 | Provider | Metered | State |
 |---|---|---|
 | `mock` | no | Deterministic, offline. What CI runs. |
+| `local-vector` | **no — $0** | Rasterises the book's own SVG source with the local Chromium. Any resolution, no key, no network. |
 | `google-gemini` | **yes** | `models.generate_content` at `image_size="4K"`. The only path that reaches 300 DPI. Needs `KDP_GOOGLE_API_KEY`. |
 | `google-imagen` | **yes** | **Refuses to run.** Its call is disabled on the pinned SDK and its largest size cannot reach print resolution — see below. |
 | `higgsfield` | **yes** | Boundary only — no contract was available. |
+
+### `local-vector`: line art for nothing
+
+A coloring page is closed black outlines of uniform weight on white. That is
+what SVG *is*, and what a raster generator has to be coaxed into approximating.
+So this provider asks no model anything: the artwork for a page is an SVG beside
+the book in `books/<id>/art/<PAGE-ID>.svg`, and generating the page means
+rasterising it at exactly the pixel size the request asks for, using the
+Chromium already installed here for Playwright.
+
+Three of the things that make hosted generation hard fall out of the format:
+
+| | hosted raster model | vector source |
+|---|---|---|
+| 300 DPI | hope the model honours it; 768x768 cost a paid call to discover | a rendering parameter — 2520x3360 is exact |
+| white background, black ink | measured and hoped for | a white `<rect>` under black strokes |
+| closed regions | a hairline gap lets fill leak | a closed `<path>` is closed |
+
+Measured on the first real page: 320 DPI, 10.7% ink, 88.9% pure white, 0.40%
+midtone against a 6% ceiling, no ink within the edge band, 127 closed regions.
+Anti-aliasing, the one thing that might have troubled the midtone check, is two
+orders of magnitude inside it.
+
+**What it does not give you is a model's imagination.** The SVG has to be
+written by something, and that something is the `kdp-asset-generator` agent
+working from the page's own prompt. The artwork is therefore AI-authored:
+`ai_role` stays `GENERATED` and the AI disclosure applies exactly as it would
+for a hosted model. Rasterising is mechanical and changes none of that.
+
+Output size is measured, never assumed. A render that comes back at the wrong
+size is a failure, not something to resample up — an upscaled page passes the
+pixel count and fails the eye.
 
 ### Output size: what the API accepts, and what it cannot reach
 
@@ -521,6 +554,15 @@ people" rule moves into the prohibitions instead, where it is at least stated.
 The same restriction means the output MIME type cannot be requested: whatever
 `inline_data.mime_type` comes back is recorded and drives the file extension,
 and a part that is not an image is refused rather than written to disk.
+
+**Failures are classified.** `GenerationResult.retryable` is False for the
+answers that are settled — a rejected key, billing not enabled, a quota of zero,
+a retired model, a malformed request, a blocked prompt — and the runner stops
+that page instead of spending its attempt budget. Three attempts across forty
+pages is a hundred and twenty requests against a wall, and on a metered provider
+a hundred and twenty chances to be billed for nothing. A zero quota earns its
+own rule: the API reports it as a 429 with a `retryDelay`, which is the shape of
+a transient failure and the substance of a permanent one.
 
 **Failure is explicit at four points**, each its own recorded attempt rather
 than an exception: the prompt blocked before generation

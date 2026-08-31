@@ -250,17 +250,27 @@ class GoogleGeminiImageProvider:
         except Exception as exc:  # noqa: BLE001
             # Every failure becomes a recorded attempt rather than an exception:
             # a page that could not be made must stay visibly missing.
-            return self._failed(request, explain_failure(exc))
+            return self._failed(
+                request, explain_failure(exc), retryable=is_retryable(exc)
+            )
 
         return self._read(request, response)
 
-    def _failed(self, request: GenerationRequest, reason: str, **meta) -> GenerationResult:
+    def _failed(
+        self,
+        request: GenerationRequest,
+        reason: str,
+        *,
+        retryable: bool = True,
+        **meta,
+    ) -> GenerationResult:
         return GenerationResult(
             ok=False,
             page_id=request.page_id,
             provider=self.name,
             model=self.model,
             reason=reason,
+            retryable=retryable,
             meta={k: v for k, v in meta.items() if v},
         )
 
@@ -274,6 +284,10 @@ class GoogleGeminiImageProvider:
             return self._failed(
                 request,
                 f"the prompt was blocked before generation: {blocked}",
+                # The prompt does not change between attempts, so neither does
+                # this. A refusal of the *output* is left retryable: sampling
+                # differs, and a second draw of the same prompt may pass.
+                retryable=False,
                 **provenance,
             )
 
@@ -352,6 +366,36 @@ class GoogleGeminiImageProvider:
                 **provenance,
             },
         )
+
+
+#: Conditions that will hold just as firmly on the third attempt as the first.
+#: Matched against the API's own error text, which carries a status name and a
+#: numeric code for every one of them.
+SETTLED_FAILURES = (
+    "API_KEY_INVALID",
+    "PERMISSION_DENIED",
+    "UNAUTHENTICATED",
+    "INVALID_ARGUMENT",
+    "NOT_FOUND",
+    "FAILED_PRECONDITION",
+    "no longer available",
+)
+
+
+def is_retryable(exc: Exception) -> bool:
+    """Whether trying the same request again could plausibly work.
+
+    The honest default is yes: a transport error, a 5xx, a real rate limit are
+    all worth another go. What is not worth another go is a settled answer —
+    the key is wrong, the model is gone, the request is malformed, or the quota
+    is zero. A quota of zero deserves its own line because the API reports it
+    as 429 with a retryDelay, which is the shape of a transient failure and the
+    substance of a permanent one.
+    """
+    body = str(exc)
+    if "RESOURCE_EXHAUSTED" in body:
+        return "limit: 0" not in body
+    return not any(marker in body for marker in SETTLED_FAILURES)
 
 
 def explain_failure(exc: Exception) -> str:

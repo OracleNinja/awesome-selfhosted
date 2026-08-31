@@ -372,6 +372,11 @@ def _attempt_page(
                     created_at=timestamp,
                 )
             )
+            if not result.retryable:
+                # Settled failures do not improve with repetition. The record is
+                # kept — the page still has to stay visibly missing — but the
+                # attempt budget is not spent proving the same point twice.
+                return new, False
             continue
 
         filename = f"{asset_id_for(page_id, attempt)}.{result.file_format}"
