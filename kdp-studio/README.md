@@ -16,7 +16,7 @@ and fills in the KDP form.
 
 ```bash
 cd kdp-studio
-python3 -m pytest                 # 368 tests; needs only pytest
+python3 -m pytest                 # 395 tests; needs only pytest
 python3 -m kdp stages             # the pipeline
 python3 -m kdp gates              # every gate, its purpose, and what it needs
 python3 -m kdp specs --trim 8.5x11 --pages 60
@@ -39,7 +39,9 @@ python3 -m kdp research        books/<id>/research.json   # G1
 python3 -m kdp strategy        books/<id>/manifest.json   # G7
 python3 -m kdp concept         books/<id>/manifest.json   # G2
 python3 -m kdp planning        books/<id>/manifest.json   # G8
+python3 -m kdp providers                                  # what can run, and why not
 python3 -m kdp generate        books/<id>/manifest.json --provider mock
+#   ...or a real one:            --provider google-imagen --confirm-spend
 python3 -m kdp asset           books/<id>/manifest.json approve <asset-id>
 #   ...or, to redo named pages:  --regenerate PAGE-004 PAGE-012
 python3 -m kdp generation      books/<id>/manifest.json   # G3

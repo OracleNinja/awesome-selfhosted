@@ -399,6 +399,48 @@ unknown — the model computes `rate × price − printing cost` and does not mo
 VAT, delivery or marketplace deductions, so a real payout can be lower. That is
 recorded as an assumption rather than left implied.
 
+## Image generation providers
+
+Three, behind one interface, chosen with `--provider`:
+
+| Provider | Metered | State |
+|---|---|---|
+| `mock` | no | Deterministic, offline. What CI runs. |
+| `google-imagen` | **yes** | Implemented against the official `google-genai` SDK. Needs a key. |
+| `higgsfield` | **yes** | Boundary only — no contract was available. |
+
+### google-imagen
+
+Written against the SDK's own typed surface —
+`Client.models.generate_images(model, prompt, config)` taking a
+`GenerateImagesConfig` and returning `generated_images[].image.image_bytes` —
+read from the installed package rather than recalled. That is the whole
+difference from Higgsfield: there, no contract could be obtained, so no client
+was written.
+
+Three properties worth knowing:
+
+**Credentials are never picked up ambiently.** The key is read by name from
+`KDP_GOOGLE_API_KEY`, `GOOGLE_API_KEY` or `GEMINI_API_KEY`, and `vertexai=False`
+is passed explicitly so that application-default credentials, a gcloud token or
+a stray `GOOGLE_GENAI_USE_VERTEXAI` cannot route generation onto a cloud project
+nobody chose. A provider that spends whatever credentials happen to be in the
+environment is worse than one that does not work.
+
+**Prohibitions go in the negative prompt.** `AssetPrompt.prohibited` is already
+exactly that list, and it is passed as `negative_prompt` rather than appended to
+the positive prompt, where a model tends to draw the thing it was told to avoid.
+`render()` still returns the combined form for providers with no negative
+prompt.
+
+**The returned size is measured, not assumed.** Imagen picks the output
+dimensions, so the provider decodes the bytes and records what actually came
+back. Asset QA compares the provenance record against the file, and a guessed
+size would fail it.
+
+Everything is tested offline against a stub shaped like the real response
+types, so CI never needs a key and never pays for a picture.
+
 ## Higgsfield
 
 Reachable two ways, and they are not interchangeable:

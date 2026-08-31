@@ -66,11 +66,20 @@ class AssetPrompt:
             )
 
     def render(self) -> str:
-        """The prompt text actually sent to a provider.
+        """The full prompt, prohibitions included.
 
         Deterministic: the same prompt object always renders the same string,
-        so its hash is a stable identity.
+        so its hash is a stable identity. Providers that take a negative prompt
+        separately should use ``render_positive`` and ``render_negative``
+        instead — this form is what a provider without one has to send.
         """
+        parts = [self.render_positive()]
+        if self.prohibited:
+            parts.append("Must not contain: " + "; ".join(self.prohibited))
+        return "\n".join(parts)
+
+    def render_positive(self) -> str:
+        """What the image should be, with nothing about what it should not be."""
         parts = [f"Subject: {self.subject}"]
         for label, value in (
             ("Composition", self.composition),
@@ -83,9 +92,11 @@ class AssetPrompt:
             if value:
                 parts.append(f"{label}: {value}")
         parts.append(f"Complexity: {self.complexity}/5")
-        if self.prohibited:
-            parts.append("Must not contain: " + "; ".join(self.prohibited))
         return "\n".join(parts)
+
+    def render_negative(self) -> str:
+        """What must not appear, for providers that take it separately."""
+        return ", ".join(self.prohibited)
 
     @property
     def prompt_hash(self) -> str:

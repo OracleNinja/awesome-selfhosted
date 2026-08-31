@@ -216,14 +216,18 @@ def _attempt_page(
 
     for offset in range(max_attempts):
         attempt = already + offset + 1
+        options = dict(prompt.generation_constraints)
+        options.setdefault("aspect_ratio", prompt.aspect_ratio or None)
         request = GenerationRequest(
             page_id=page_id,
             prompt_id=prompt.prompt_id,
             prompt_version=prompt.version,
             prompt=prompt.render(),
+            prompt_positive=prompt.render_positive(),
+            prompt_negative=prompt.render_negative(),
             width=prompt.width or DEFAULT_WIDTH,
             height=prompt.height or DEFAULT_HEIGHT,
-            options=prompt.generation_constraints,
+            options={k: v for k, v in options.items() if v is not None},
             attempt=attempt,
         )
 

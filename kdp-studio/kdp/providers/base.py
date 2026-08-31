@@ -38,14 +38,29 @@ class GenerationRequest:
     page_id: str
     prompt_id: str
     prompt_version: str
-    #: The rendered prompt text.
+    #: The rendered prompt text, prohibitions included. What a provider with
+    #: no notion of a negative prompt should send.
     prompt: str
     width: int
     height: int
+    #: The prompt with the prohibitions removed, for providers that take a
+    #: negative prompt separately. Listing what to avoid in the *positive*
+    #: prompt is a well-known way to get a model to draw exactly that.
+    #:
+    #: Declared after width/height on purpose: these fields were added later,
+    #: and inserting them earlier would silently rebind every positional call
+    #: that already existed.
+    prompt_positive: str = ""
+    #: The prohibitions on their own.
+    prompt_negative: str = ""
     #: Provider-specific knobs. Never credentials.
     options: dict = field(default_factory=dict)
     #: Attempt number for this page, carried through into provenance.
     attempt: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.prompt_positive:
+            object.__setattr__(self, "prompt_positive", self.prompt)
 
 
 @dataclass(frozen=True, slots=True)

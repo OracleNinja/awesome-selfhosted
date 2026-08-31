@@ -17,6 +17,11 @@ pytest==9.1.1
 pillow==12.3.0
 imagehash==4.3.2
 
+# --- Image generation: the Google Imagen provider ---------------------------
+# Optional. Without it that provider reports itself unavailable and the mock
+# still works, so CI never needs a key and never pays for a picture.
+google-genai==2.20.0
+
 # --- PDF inspection: interior QA (G10) and cover QA (G11) -------------------
 # Note this is a *reader*. PDFs are written by kdp/pdfwrite.py using only the
 # standard library, so the thing that builds a book is not the thing that

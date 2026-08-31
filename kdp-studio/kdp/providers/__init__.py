@@ -14,17 +14,20 @@ from .base import (
     ProviderUnavailable,
     env_credential,
 )
+from .google_imagen import GoogleImagenProvider
 from .higgsfield import HiggsfieldProvider
 from .mock import MockImageProvider
 
 #: Name -> factory. ``mock`` is always available and is what CI uses.
 PROVIDERS = {
     "mock": MockImageProvider,
+    "google-imagen": GoogleImagenProvider,
     "higgsfield": HiggsfieldProvider,
 }
 
-#: Providers that cost money. Never the default.
-METERED = ("higgsfield",)
+#: Providers that cost money. Never the default, and `kdp generate` refuses one
+#: without --confirm-spend.
+METERED = ("google-imagen", "higgsfield")
 
 
 def get_provider(name: str) -> ImageProvider:
@@ -42,6 +45,7 @@ __all__ = [
     "PROVIDERS",
     "GenerationRequest",
     "GenerationResult",
+    "GoogleImagenProvider",
     "HiggsfieldProvider",
     "ImageProvider",
     "MockImageProvider",
