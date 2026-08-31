@@ -58,7 +58,11 @@ CREDENTIAL_ENV_VAR = "KDP_GOOGLE_API_KEY"
 #: default is the model documented to offer 4K output; if it is retired, this is
 #: the one line that changes.
 MODEL_ENV_VAR = "KDP_GEMINI_IMAGE_MODEL"
-DEFAULT_MODEL = "gemini-3-pro-image-preview"
+#: "Nano Banana Pro", version 3.0. The GA id rather than the identical
+#: -preview alias: both resolve to the same model today, and a preview alias is
+#: the one that gets retired without notice. Confirmed present, along with its
+#: generateContent support, by listing models against a real key.
+DEFAULT_MODEL = "gemini-3-pro-image"
 
 #: An image, not a description of one.
 RESPONSE_MODALITIES = ("IMAGE",)
@@ -246,7 +250,7 @@ class GoogleGeminiImageProvider:
         except Exception as exc:  # noqa: BLE001
             # Every failure becomes a recorded attempt rather than an exception:
             # a page that could not be made must stay visibly missing.
-            return self._failed(request, f"{type(exc).__name__}: {exc}")
+            return self._failed(request, explain_failure(exc))
 
         return self._read(request, response)
 
@@ -348,6 +352,35 @@ class GoogleGeminiImageProvider:
                 **provenance,
             },
         )
+
+
+def explain_failure(exc: Exception) -> str:
+    """The provider's error, with the remedy in front of it where there is one.
+
+    The API's own messages are long, JSON-shaped, and in two cases actively
+    misleading about what to do next. A quota error carrying ``limit: 0`` reads
+    as a rate limit and suggests retrying in thirty seconds, but a limit of zero
+    is not a rate — it is an absence, and no amount of waiting produces quota
+    that was never granted. Saying so is the difference between enabling billing
+    and burning a hundred and twenty requests against a wall.
+    """
+    text = f"{type(exc).__name__}: {exc}"
+    body = str(exc)
+
+    if "RESOURCE_EXHAUSTED" in body and "limit: 0" in body:
+        where = "free tier" if "free_tier" in body else "this project"
+        return (
+            f"no image-generation quota on {where} — the limit is 0, not a rate. "
+            "Image models on the Gemini API need a project with billing enabled; "
+            "retrying will not help, whatever the retryDelay says. "
+            f"Original error: {text}"
+        )
+    if "NOT_FOUND" in body and "no longer available" in body:
+        return (
+            "the model has been retired. The API names its replacement in the "
+            f"message below; set {MODEL_ENV_VAR} to it. Original error: {text}"
+        )
+    return text
 
 
 def _first_image_blob(candidate):

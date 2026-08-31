@@ -497,7 +497,7 @@ provider boundary does not know which one ran.
 
 ```python
 client.models.generate_content(
-    model="gemini-3-pro-image-preview",          # KDP_GEMINI_IMAGE_MODEL
+    model="gemini-3-pro-image",                  # KDP_GEMINI_IMAGE_MODEL
     contents="<positive prompt>\n\nDo not include: <prohibitions>",
     config=types.GenerateContentConfig(
         response_modalities=["IMAGE"],

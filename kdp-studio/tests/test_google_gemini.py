@@ -608,3 +608,55 @@ def test_the_serialised_request_is_the_one_the_api_will_receive():
     assert text.startswith("Subject: a fern")
     assert NEGATIVE_HEADING in text
     assert NO_PEOPLE_PROHIBITION in text
+
+
+# --- errors that say what to do ---------------------------------------------
+
+
+@requires_sdk
+def test_a_zero_quota_error_says_billing_not_retry():
+    """`limit: 0` is an absence, not a rate. Waiting produces nothing.
+
+    The API's own message suggests retrying in thirty seconds, which for a
+    forty-page book means a hundred and twenty requests against a wall.
+    """
+    quota = (
+        "429 RESOURCE_EXHAUSTED. Quota exceeded for metric: "
+        "generativelanguage.googleapis.com/generate_content_free_tier_requests, "
+        "limit: 0, model: gemini-3-pro-image. Please retry in 32.5s."
+    )
+    result = GoogleGeminiImageProvider(
+        client=StubContentClient(error=RuntimeError(quota))
+    ).generate(_request())
+
+    assert result.ok is False
+    assert "billing enabled" in result.reason
+    assert "retrying will not help" in result.reason
+    # The original is still there: a support ticket needs the real text.
+    assert "RESOURCE_EXHAUSTED" in result.reason
+
+
+@requires_sdk
+def test_a_retired_model_points_at_the_override():
+    retired = (
+        "404 NOT_FOUND. This model models/gemini-2.5-flash is no longer "
+        "available to new users. Please update your code to use "
+        "models/gemini-3.6-flash"
+    )
+    result = GoogleGeminiImageProvider(
+        client=StubContentClient(error=RuntimeError(retired))
+    ).generate(_request())
+
+    assert result.ok is False
+    assert "retired" in result.reason
+    assert MODEL_ENV_VAR in result.reason
+    assert "gemini-3.6-flash" in result.reason
+
+
+@requires_sdk
+def test_an_ordinary_error_is_passed_through_unchanged():
+    result = GoogleGeminiImageProvider(
+        client=StubContentClient(error=RuntimeError("connection reset"))
+    ).generate(_request())
+
+    assert result.reason == "RuntimeError: connection reset"
