@@ -456,3 +456,22 @@ def test_closed_region_analysis_is_not_a_copyright_judgement():
     for issue in inspection.problems():
         assert "copyright" not in issue.message.lower()
         assert "infring" not in issue.message.lower()
+
+
+# --- the fixture itself has to be clean for every page ----------------------
+
+
+@pytest.mark.parametrize("seed", [f"page {n}".encode() for n in range(40)])
+def test_every_mock_page_is_clean_whatever_its_seed(seed):
+    """The fixture must not depend on lucky prompt wording.
+
+    Shape placement used to be clamped by shrinking, so a centre that landed
+    near a margin collapsed its shape and was skipped. An unlucky digest could
+    skip most of a page, leaving under half a percent of ink — which G9 rejects,
+    correctly, as a page with nothing on it. That made the end-to-end fixture
+    fail whenever a prompt's wording changed, for a reason that had nothing to
+    do with the book. Sweeping the seed is what catches it.
+    """
+    inspection = inspect_image(_png(300, 400, seed))
+    assert [f for f in inspection.problems() if f.blocking] == []
+    assert 0.005 < inspection.ink_fraction < 0.60

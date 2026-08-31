@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Final
 
 from .models.manifest import BookManifest
 from .models.prompts import AssetPrompt
@@ -45,9 +46,90 @@ from .providers.base import (
 #: How many times one page may be attempted before the runner gives up on it.
 DEFAULT_MAX_ATTEMPTS = 3
 
-#: Requested pixel size. 300 DPI over an 8.5x11 live area, rounded.
-DEFAULT_WIDTH = 2400
-DEFAULT_HEIGHT = 3000
+#: Requested pixel size when a prompt does not state one: the live area of an
+#: 8.5x11 interior with no bleed, 7.875 x 10.5 in, at 320 DPI. It has to be a
+#: shape the image API can actually be asked for — the previous 2400x3000 was
+#: 4:5, which is not in either accepted set, so a prompt that fell back to it
+#: would have been refused by ``build_request`` below.
+DEFAULT_WIDTH = 2520
+DEFAULT_HEIGHT = 3360
+
+#: The aspect ratios a Google image request may name, and what each one means
+#: as width/height. Deliberately the *intersection* of the two sets documented
+#: in google-genai 2.20.0: ``GenerateImagesConfig.aspect_ratio`` lists "1:1",
+#: "3:4", "4:3", "9:16" and "16:9", while ``ImageConfig.aspect_ratio`` adds
+#: "2:3", "3:2" and "21:9". Taking the intersection means the value is legal
+#: whichever of those two request shapes the provider ends up sending.
+#:
+#: This is checked rather than passed through because an unrecognised ratio is
+#: not an error you get to see. The server ignores it, returns its default
+#: square, and bills for it — which is what a page requested at 2520x3360
+#: coming back square is consistent with.
+SUPPORTED_ASPECT_RATIOS: Final[tuple[tuple[str, float], ...]] = (
+    ("1:1", 1.0),
+    ("3:4", 3 / 4),
+    ("4:3", 4 / 3),
+    ("9:16", 9 / 16),
+    ("16:9", 16 / 9),
+)
+
+#: How far a page's own proportions may sit from the nearest supported ratio,
+#: as a fraction of that ratio. A live area is trim minus margins, so it rarely
+#: lands on a clean ratio; 2% is about the most that can be absorbed without the
+#: art being visibly cropped or stretched on the page.
+ASPECT_RATIO_TOLERANCE: Final[float] = 0.02
+
+#: Named output sizes and the longest edge each one produces, in pixels.
+#: ``image_size`` in both configs is documented as *the size of the largest
+#: dimension of the generated image* — it is a bucket name, not a pixel count,
+#: and the short edge follows from the aspect ratio.
+#:
+#: 1K and 2K are accepted by both request shapes. 4K appears only on
+#: ``ImageConfig`` — the Gemini image-model path — so asking for it commits the
+#: run to that path. See "Image generation providers" in ARCHITECTURE.md.
+NAMED_OUTPUT_SIZES: Final[tuple[tuple[str, int], ...]] = (
+    ("1K", 1024),
+    ("2K", 2048),
+    ("4K", 4096),
+)
+
+
+def supported_aspect_ratio(width: int, height: int) -> str:
+    """The ratio label to send for a page of ``width`` x ``height`` pixels.
+
+    Raises when the page's proportions are not within
+    :data:`ASPECT_RATIO_TOLERANCE` of anything the API accepts, because there is
+    no honest thing to send in that case: naming a ratio the page is not returns
+    art that has to be cropped, and naming none returns a square.
+    """
+    if width <= 0 or height <= 0:
+        raise ValueError(f"cannot request a {width}x{height} px image")
+    wanted = width / height
+    label, ratio = min(
+        SUPPORTED_ASPECT_RATIOS, key=lambda pair: abs(pair[1] - wanted)
+    )
+    if abs(ratio - wanted) > ASPECT_RATIO_TOLERANCE * ratio:
+        raise ValueError(
+            f"{width}x{height} px is {wanted:.4f} wide-to-tall; the closest "
+            f"aspect ratio the image API accepts is {label} ({ratio:.4f}), "
+            "which is outside tolerance. Change the trim size or the margins "
+            "rather than sending a ratio the page is not."
+        )
+    return label
+
+
+def named_output_size(longest_edge: int) -> tuple[str, int]:
+    """The smallest named size whose longest edge covers ``longest_edge``.
+
+    Falls back to the largest size available when nothing covers it, so the
+    request still asks for the most the API can give. It does **not** quietly
+    lower the requirement: the shortfall shows up as effective DPI, and G9
+    fails the page on it.
+    """
+    for label, pixels in NAMED_OUTPUT_SIZES:
+        if pixels >= longest_edge:
+            return label, pixels
+    return NAMED_OUTPUT_SIZES[-1]
 
 
 def _now() -> str:
@@ -169,7 +251,30 @@ def build_request(prompt: AssetPrompt, attempt: int = 1) -> GenerationRequest:
     and pass while the real run fails on the difference.
     """
     options = dict(prompt.generation_constraints)
-    options.setdefault("aspect_ratio", prompt.aspect_ratio or None)
+    width = prompt.width or DEFAULT_WIDTH
+    height = prompt.height or DEFAULT_HEIGHT
+
+    # The pixels are the requirement — they come from the live area at 300 DPI —
+    # so the ratio is derived from them rather than trusted from the plan. A
+    # stated ratio still has to agree: a plan that says one shape and asks for
+    # another is a planning bug, and finding it here costs nothing, whereas
+    # finding it after the run costs forty pictures.
+    ratio = supported_aspect_ratio(width, height)
+    stated = str(options.get("aspect_ratio") or prompt.aspect_ratio or "").strip()
+    if stated and stated != ratio:
+        raise ValueError(
+            f"{prompt.page_id}: the plan asks for aspect ratio {stated!r}, but "
+            f"{width}x{height} px is {ratio}. Fix the prompt plan; do not send "
+            "a ratio the page is not."
+        )
+    options["aspect_ratio"] = ratio
+
+    # Output size is a bucket name, not a pixel count, and omitting it gets the
+    # model's default — which is smaller than any print page needs. Ask for the
+    # smallest bucket that still covers the longest edge. A plan may pin its own
+    # value, and does not get overridden here.
+    options.setdefault("image_size", named_output_size(max(width, height))[0])
+
     return GenerationRequest(
         page_id=prompt.page_id,
         prompt_id=prompt.prompt_id,
@@ -177,8 +282,8 @@ def build_request(prompt: AssetPrompt, attempt: int = 1) -> GenerationRequest:
         prompt=prompt.render(),
         prompt_positive=prompt.render_positive(),
         prompt_negative=prompt.render_negative(),
-        width=prompt.width or DEFAULT_WIDTH,
-        height=prompt.height or DEFAULT_HEIGHT,
+        width=width,
+        height=height,
         options={k: v for k, v in options.items() if v is not None},
         attempt=attempt,
     )

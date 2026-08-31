@@ -207,7 +207,13 @@ def required_pixels(spec: BookSpec) -> tuple[int, int]:
 
 
 def build_prompt_plan(spec: BookSpec) -> PromptPlan:
+    from kdp.generation import supported_aspect_ratio
+
     width, height = required_pixels(spec)
+    # Derived from the same pixels the plan asks for, not written out by hand.
+    # A hand-written ratio is one edit away from disagreeing with the geometry,
+    # and the fixture would then be testing a request no real book sends.
+    aspect_ratio = supported_aspect_ratio(width, height)
     return PromptPlan(
         plan_id="plan-001",
         house_style=(
@@ -238,7 +244,7 @@ def build_prompt_plan(spec: BookSpec) -> PromptPlan:
                     "watermarks, logos or signatures",
                     "recognisable characters or trademarks",
                 ),
-                aspect_ratio="4:5",
+                aspect_ratio=aspect_ratio,
                 width=width,
                 height=height,
             )

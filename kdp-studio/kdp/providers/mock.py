@@ -143,7 +143,12 @@ def _line_art(
     other, which is a defect in the fixture rather than in the book.
     """
     rows = [bytearray([PAPER]) * width for _ in range(height)]
-    digest = hashlib.sha256(seed).digest()
+    # sha512, not sha256, so that each shape can be built from its own
+    # six bytes with none left over to wrap around. Overlapping slices of a
+    # short digest gave neighbouring shapes correlated positions, and two
+    # pages sharing a few bytes could land within the duplication
+    # threshold of each other while looking nothing alike to a person.
+    digest = hashlib.sha512(seed).digest()
 
     stroke = max(2, int(min(width, height) * STROKE_FRACTION))
     margin = int(min(width, height) * MARGIN_FRACTION)
@@ -152,17 +157,21 @@ def _line_art(
     if usable_w <= 0 or usable_h <= 0:
         return rows
 
-    # Tuned so the 24 fixture pages sit at least 14 bits apart under the
-    # perceptual hash — comfortably clear of G4's threshold of 10 — while a
-    # genuine rescaled repeat still lands within 1 bit.
-    shape_count = 3 + (digest[0] % 6)
+    # Tuned on two measurements, both of which the fixture depends on: the 24
+    # fixture pages sit at least 14 bits apart under the perceptual hash —
+    # comfortably clear of G4's threshold of 10, while a genuine rescaled repeat
+    # still lands within 1 bit — and the emptiest page carries 0.76% ink against
+    # G9's 0.5% floor. Thin outlines cover very little of a print-resolution
+    # page, so the shape budget is what keeps a clean page from reading as an
+    # empty one.
+    shape_count = 5 + (digest[-1] % 5)
     span = min(usable_w, usable_h)
 
     for index in range(shape_count):
-        base = (index * 5 + 1) % (len(digest) - 5)
+        base = index * 6
         cx = margin + (digest[base] * usable_w) // 255
         cy = margin + (digest[base + 1] * usable_h) // 255
-        size = max(stroke * 4, (span // 12) + (digest[base + 2] * span) // 420)
+        size = max(stroke * 4, (span // 8) + (digest[base + 2] * span) // 480)
 
         # Clamp so the whole shape stays inside the margin: nothing may touch
         # the page edge, or the clipping check would fire on a clean page.
@@ -170,7 +179,23 @@ def _line_art(
             size, cx - margin, cy - margin, width - margin - cx, height - margin - cy
         )
         if size <= stroke * 2:
-            continue
+            # A centre that lands near a margin used to lose its shape here.
+            # With a handful of shapes on a page, an unlucky digest could lose
+            # most of them and leave under half a percent of ink — which G9
+            # rejects, correctly, as a page with nothing on it. That made the
+            # fixture depend on prompt wording: rewording a prompt reseeded the
+            # page and could empty it, failing the end-to-end run for a reason
+            # that had nothing to do with the book.
+            #
+            # So a shape that will not fit is moved inward rather than dropped.
+            # Only the shapes that would have vanished move, which leaves the
+            # spread of the rest — and with it the overlap behaviour the region
+            # and duplication checks are measured against — as it was.
+            size = max(stroke * 4, span // 12)
+            if 2 * size >= min(usable_w, usable_h):
+                continue
+            cx = min(max(cx, margin + size), width - margin - size)
+            cy = min(max(cy, margin + size), height - margin - size)
 
         if digest[base + 3] % 2 or open_outlines:
             # Under open_outlines every shape is a circle, so every one of them

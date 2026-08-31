@@ -60,6 +60,11 @@ class SmokeReport:
     prompt_negative: str = ""
     requested_width: int = 0
     requested_height: int = 0
+    #: The generation options the request carried — aspect ratio and
+    #: output size among them. Shown because the first paid run came back
+    #: at the model's default size, and the request that asked for it was
+    #: the one thing the report did not show.
+    requested_options: dict = field(default_factory=dict)
     width: int | None = None
     height: int | None = None
     mime_type: str | None = None
@@ -112,6 +117,7 @@ class SmokeReport:
                 "positive": self.prompt_positive,
                 "negative": self.prompt_negative,
                 "requested_size": [self.requested_width, self.requested_height],
+                "requested_options": dict(self.requested_options),
             },
             "image": {
                 "width": self.width,
@@ -159,7 +165,14 @@ class SmokeReport:
             "",
             f"image      {self.width} x {self.height} px, {self.mime_type}, "
             f"{self.bytes_size:,} bytes",
-            f"requested  {self.requested_width} x {self.requested_height} px",
+            f"requested  {self.requested_width} x {self.requested_height} px"
+            + (
+                "  ["
+                + ", ".join(f"{k}={v}" for k, v in sorted(self.requested_options.items()))
+                + "]"
+                if self.requested_options
+                else ""
+            ),
             f"live area  {self.live_width_in} x {self.live_height_in} in",
             f"effective  {dpi} DPI against a required {self.required_dpi} — {verdict}",
             "",
@@ -243,6 +256,7 @@ def run_smoke_test(
             call_reason=f"{type(exc).__name__}: {exc}",
             prompt_id=prompt.prompt_id, prompt_version=prompt.version,
             requested_width=request.width, requested_height=request.height,
+            requested_options=dict(request.options),
         )
 
     common = dict(
@@ -252,6 +266,7 @@ def run_smoke_test(
         prompt_positive=request.prompt_positive,
         prompt_negative=request.prompt_negative,
         requested_width=request.width, requested_height=request.height,
+        requested_options=dict(request.options),
     )
 
     if not result.ok or not result.data:

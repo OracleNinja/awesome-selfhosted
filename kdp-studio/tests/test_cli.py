@@ -287,7 +287,17 @@ def test_smoke_test_refuses_a_metered_provider_without_a_credential(
     assert main([
         "smoke-test", path, page, "--provider", "google-imagen", "--confirm-spend",
     ]) == EXIT_STOP
-    assert "No API key" in capsys.readouterr().err
+
+    # The property is that a metered provider which cannot run stops the command
+    # and says why. Which reason comes back depends on the environment: with the
+    # generation extra installed the missing key is the blocker, and in the
+    # stdlib-only CI job the missing SDK is reached first. Asserting only the
+    # key wording made that job fail for being configured exactly as intended.
+    from kdp.providers.google_imagen import sdk_available
+
+    stderr = capsys.readouterr().err
+    assert "unavailable" in stderr
+    assert ("No API key" if sdk_available() else "SDK is not installed") in stderr
 
 
 def test_smoke_test_runs_one_page_and_leaves_the_manifest_alone(tmp_path, capsys):

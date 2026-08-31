@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from kdp.providers.google_imagen import GoogleImagenProvider
+from kdp.providers.google_imagen import GoogleImagenProvider, sdk_available
 from kdp.providers.mock import MockImageProvider, _png
 from kdp.smoke import SmokeTestError, run_smoke_test
 from conftest import StubClient, StubGenerated, StubImage, StubResponse, stub_client_returning
@@ -26,8 +26,21 @@ def book():
     return build_manifest()
 
 
+def _provider(*, client) -> GoogleImagenProvider:
+    """The real provider over a stub transport.
+
+    Skipped without the generation extra: the provider builds a genuine
+    ``GenerateImagesConfig``, so a stub client is not enough to run it. The
+    stdlib-only CI job has no SDK, and a test that quietly degraded to a failed
+    call there would assert nothing while still reporting green.
+    """
+    if not sdk_available():
+        pytest.skip("the generation extra is not installed")
+    return GoogleImagenProvider(client=client)
+
+
 def _imagen(data: bytes) -> GoogleImagenProvider:
-    return GoogleImagenProvider(client=stub_client_returning(data))
+    return _provider(client=stub_client_returning(data))
 
 
 def _page(book) -> str:
@@ -40,7 +53,7 @@ def _page(book) -> str:
 def test_it_makes_exactly_one_provider_call(book, tmp_path):
     """The whole point: one image, not forty."""
     client = stub_client_returning(_png(2520, 3360, b"x"))
-    provider = GoogleImagenProvider(client=client)
+    provider = _provider(client=client)
 
     run_smoke_test(book, _page(book), provider, tmp_path)
 
@@ -52,7 +65,7 @@ def test_it_generates_the_page_it_was_asked_for(book, tmp_path):
     client = stub_client_returning(_png(600, 800, b"x"))
     target = book.spec.art_pages[5].page_id
 
-    report = run_smoke_test(book, target, GoogleImagenProvider(client=client), tmp_path)
+    report = run_smoke_test(book, target, _provider(client=client), tmp_path)
 
     assert report.page_id == target
     prompt = book.prompt_plan.for_page(target)
@@ -85,7 +98,7 @@ def test_it_sends_the_same_request_the_batch_would(book, tmp_path):
 
     client = stub_client_returning(_png(600, 800, b"x"))
     page = _page(book)
-    run_smoke_test(book, page, GoogleImagenProvider(client=client), tmp_path)
+    run_smoke_test(book, page, _provider(client=client), tmp_path)
 
     expected = build_request(book.prompt_plan.for_page(page), attempt=1)
     call = client.models.calls[0]
@@ -95,7 +108,7 @@ def test_it_sends_the_same_request_the_batch_would(book, tmp_path):
 
 def test_prohibitions_still_go_in_the_negative_prompt(book, tmp_path):
     client = stub_client_returning(_png(600, 800, b"x"))
-    run_smoke_test(book, _page(book), GoogleImagenProvider(client=client), tmp_path)
+    run_smoke_test(book, _page(book), _provider(client=client), tmp_path)
     call = client.models.calls[0]
     assert "Must not contain" not in call["prompt"]
     assert "colour" in call["config"].negative_prompt
@@ -208,7 +221,7 @@ def test_a_filtered_image_is_reported_and_nothing_is_written(book, tmp_path):
     client = StubClient(
         StubResponse([StubGenerated(image=None, rai_filtered_reason="blocked: policy")])
     )
-    report = run_smoke_test(book, _page(book), GoogleImagenProvider(client=client), tmp_path)
+    report = run_smoke_test(book, _page(book), _provider(client=client), tmp_path)
 
     assert report.call_status == "failed"
     assert "blocked: policy" in report.call_reason
@@ -218,7 +231,7 @@ def test_a_filtered_image_is_reported_and_nothing_is_written(book, tmp_path):
 
 def test_a_transport_failure_is_reported_not_raised(book, tmp_path):
     client = StubClient(error=RuntimeError("connection reset"))
-    report = run_smoke_test(book, _page(book), GoogleImagenProvider(client=client), tmp_path)
+    report = run_smoke_test(book, _page(book), _provider(client=client), tmp_path)
 
     assert report.call_status == "failed"
     assert "connection reset" in report.call_reason
@@ -228,7 +241,7 @@ def test_a_transport_failure_is_reported_not_raised(book, tmp_path):
 def test_an_unknown_page_is_refused_before_any_call(book, tmp_path):
     client = stub_client_returning(_png(600, 800, b"x"))
     with pytest.raises(SmokeTestError, match="not an art page"):
-        run_smoke_test(book, "PAGE-999", GoogleImagenProvider(client=client), tmp_path)
+        run_smoke_test(book, "PAGE-999", _provider(client=client), tmp_path)
     assert client.models.calls == []
 
 
@@ -237,7 +250,7 @@ def test_a_blank_page_is_refused_before_any_call(book, tmp_path):
     blank = next(p for p in book.spec.pages if p.role == "blank")
     client = stub_client_returning(_png(600, 800, b"x"))
     with pytest.raises(SmokeTestError, match="not an art page"):
-        run_smoke_test(book, blank.page_id, GoogleImagenProvider(client=client), tmp_path)
+        run_smoke_test(book, blank.page_id, _provider(client=client), tmp_path)
     assert client.models.calls == []
 
 
@@ -287,3 +300,26 @@ def test_it_works_with_the_mock_provider_too(book, tmp_path):
     report = run_smoke_test(book, _page(book), MockImageProvider(), tmp_path)
     assert report.call_status == "ok"
     assert report.provider == "mock"
+
+
+# --- the report shows what was asked for ------------------------------------
+
+
+def test_the_report_shows_the_size_and_ratio_that_were_requested(book, tmp_path):
+    """The 768x768 result was unreadable because the request was invisible.
+
+    Dimensions coming back smaller than asked for is only diagnosable if the
+    report says what was asked for — not just in pixels, but in the vocabulary
+    the API actually reads: the ratio and the output-size bucket.
+    """
+    report = run_smoke_test(book, _page(book), _imagen(_png(600, 800, b"x")), tmp_path)
+
+    assert report.requested_options["aspect_ratio"] == "3:4"
+    assert report.requested_options["image_size"] == "4K"
+
+    rendered = report.render()
+    assert "aspect_ratio=3:4" in rendered
+    assert "image_size=4K" in rendered
+
+    written = report.to_dict()["prompt"]["requested_options"]
+    assert written == report.requested_options

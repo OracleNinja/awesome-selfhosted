@@ -406,8 +406,84 @@ Three, behind one interface, chosen with `--provider`:
 | Provider | Metered | State |
 |---|---|---|
 | `mock` | no | Deterministic, offline. What CI runs. |
-| `google-imagen` | **yes** | Implemented against the official `google-genai` SDK. Needs a key. |
+| `google-imagen` | **yes** | Written against the official `google-genai` SDK. Needs a key, and **blocked on the pinned SDK** — see below. |
 | `higgsfield` | **yes** | Boundary only — no contract was available. |
+
+### Output size: what the API accepts, and what it cannot reach
+
+The first paid smoke test came back at 768x768 for a page planned at 2520x3360
+— about 73 DPI against the live area, correctly failed by G9. The request named
+**no output size at all**, so the model returned its default; 768 is the short
+edge of the smallest bucket at 3:4, and a square result says the ratio did not
+take effect either. Neither is reported as an error: an unrecognised ratio is
+ignored, a missing size takes the default, and the call is billed all the same.
+
+Nothing checked either value. The book's own plan happened to name a valid
+ratio, but the test fixture carried `4:5` — which is in neither accepted set —
+and would have been sent as readily. Both are now settled in
+`generation.build_request`, which the batch and the smoke test share, and both
+are asserted in `tests/test_request_geometry.py`.
+
+**Aspect ratio** is derived from the page's own pixels and checked against the
+set the API accepts, and a plan that states a different one stops the run before
+it spends anything. The accepted values are the intersection of the two sets
+`google-genai` 2.20.0 documents — `1:1`, `3:4`, `4:3`, `9:16`, `16:9` — so the
+value is legal whichever request shape a provider sends. A 7.875 x 10.5 in live
+area is 0.750; with bleed it is 0.756. Both are `3:4`, inside the 2% tolerance.
+
+**Output size** is a bucket name, not a pixel count. Both configs describe
+`image_size` as *the size of the largest dimension of the generated image*; the
+short edge follows from the aspect ratio. The request asks for the smallest
+bucket that covers the page's long edge.
+
+The two request shapes do not offer the same buckets, and for a full-page
+interior that difference decides everything:
+
+| Request shape | Method | `image_size` | `4K`? |
+|---|---|---|---|
+| `GenerateImagesConfig` | `models.generate_images` (Imagen `:predict`) | `1K`, `2K` | no |
+| `ImageConfig` inside `GenerateContentConfig` | `models.generate_content` (Gemini image models) | `1K`, `2K`, `4K` | yes |
+
+An 8.5x11 interior with no bleed has a 7.875 x 10.5 in live area, so KDP's 300
+DPI floor needs **3150 px on the long edge**. Against that:
+
+| Bucket | Long edge | Page at 3:4 | Effective DPI | G9 |
+|---|---|---|---|---|
+| `1K` | ~1024 | ~768 x 1024 | ~98 | fail |
+| `2K` | ~2048 | ~1536 x 2048 | ~195 | fail |
+| `4K` | ~4096 | ~3072 x 4096 | ~390 | pass |
+
+**Imagen's largest bucket cannot reach print resolution for this page.** 2K is
+35% short of the pixels the trim needs, and no configuration of the `:predict`
+path closes that gap — the requirement is not the thing that is wrong. Only
+`4K`, which exists only on the `generate_content` path, clears it, and it clears
+it with about 30% to spare. That conclusion does not depend on the buckets being
+exactly 1024/2048/4096: even read as 3840, `4K` still covers 3150.
+
+The exact pixel counts are unconfirmed here. Every Google image API host is
+blocked by this environment's network policy, so the numbers above are the
+SDK's documented semantics plus arithmetic, not a measured response. What the
+next paid smoke test measures is the pixel count; what it should not have to
+discover is the vocabulary.
+
+### The provider cannot currently make the call at all
+
+`google-genai` 2.20.0 — the pinned version — deprecated `generate_images` and
+disabled it for the Gemini Developer API. With an API key,
+`client.models.generate_images(...)` raises before any request is built:
+
+> This method is only supported in Gemini Enterprise Agent Platform mode, not in
+> Gemini Developer API mode.
+
+`GoogleImagenProvider` calls exactly that method, and passes `vertexai=False`
+deliberately so ambient cloud credentials cannot be spent. The two are now
+mutually exclusive. `tests/test_google_imagen.py` asserts the restriction
+offline so a version bump has to confront it rather than rediscover it.
+
+Reaching 300 DPI therefore needs the provider moved to `generate_content` with a
+Gemini image model and `ImageConfig(image_size="4K")`. That is a change of model
+and a change of price, so it is not made here: `build_request` asks for the size
+the page needs, and choosing what to spend it on stays a human decision.
 
 ### Validating one page before buying forty
 
