@@ -16,7 +16,7 @@ and fills in the KDP form.
 
 ```bash
 cd kdp-studio
-python3 -m pytest                 # 395 tests; needs only pytest
+python3 -m pytest                 # 426 tests; needs only pytest
 python3 -m kdp stages             # the pipeline
 python3 -m kdp gates              # every gate, its purpose, and what it needs
 python3 -m kdp specs --trim 8.5x11 --pages 60
@@ -40,6 +40,8 @@ python3 -m kdp strategy        books/<id>/manifest.json   # G7
 python3 -m kdp concept         books/<id>/manifest.json   # G2
 python3 -m kdp planning        books/<id>/manifest.json   # G8
 python3 -m kdp providers                                  # what can run, and why not
+python3 -m kdp smoke-test      books/<id>/manifest.json PAGE-004 \
+                               --provider google-imagen --confirm-spend
 python3 -m kdp generate        books/<id>/manifest.json --provider mock
 #   ...or a real one:            --provider google-imagen --confirm-spend
 python3 -m kdp asset           books/<id>/manifest.json approve <asset-id>
@@ -81,6 +83,23 @@ Two things it does not claim: **text detection** needs OCR, which is not
 installed, so the report says it did not look rather than that it found
 nothing; and **similarity is not a copyright judgement** — the hash flags pages
 for a human, and says so.
+
+## Before a metered run
+
+```bash
+python3 -m kdp smoke-test <manifest> <page-id> --provider google-imagen --confirm-spend
+```
+
+Buys **one** image and puts it through the same request construction, the same
+pixel inspection and the same resolution arithmetic the batch would use, then
+reports provider, model, dimensions, MIME type, effective DPI against the
+book's live area, the inspection findings and the full prompt provenance.
+
+It never writes to the manifest — the image and its `AssetProvenance` land in
+`<book>/smoke/<page>/`, and `kdp register-asset` promotes one if you want it.
+Exit code is non-zero when the page would not clear the pixel checks G9
+applies, so it cannot be mistaken for a green light. It is not a gate and does
+not stand in for one: G9 still judges the whole book.
 
 ## Three properties worth knowing
 

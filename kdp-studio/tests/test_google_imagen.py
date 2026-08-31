@@ -9,8 +9,6 @@ CI never pays for a picture.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
 
 from kdp.providers import METERED, get_provider
@@ -22,44 +20,13 @@ from kdp.providers.google_imagen import (
     sdk_available,
 )
 from kdp.providers.mock import _png
-
-
-# --- a stub with the SDK's own shape ---------------------------------------
-
-
-@dataclass
-class _Image:
-    image_bytes: bytes | None
-    mime_type: str = "image/png"
-
-
-@dataclass
-class _Generated:
-    image: _Image | None = None
-    rai_filtered_reason: str | None = None
-    enhanced_prompt: str | None = None
-
-
-@dataclass
-class _Response:
-    generated_images: list[_Generated] | None
-
-
-class _Models:
-    def __init__(self, response=None, error=None):
-        self.response, self.error = response, error
-        self.calls: list[dict] = []
-
-    def generate_images(self, *, model, prompt, config):
-        self.calls.append({"model": model, "prompt": prompt, "config": config})
-        if self.error:
-            raise self.error
-        return self.response
-
-
-class _Client:
-    def __init__(self, response=None, error=None):
-        self.models = _Models(response, error)
+from conftest import (
+    StubClient,
+    StubGenerated,
+    StubImage,
+    StubResponse,
+    stub_client_returning,
+)
 
 
 def _request(**overrides) -> GenerationRequest:
@@ -78,8 +45,8 @@ def _request(**overrides) -> GenerationRequest:
     return GenerationRequest(**fields)
 
 
-def _ok_client(data: bytes | None = None) -> _Client:
-    return _Client(_Response([_Generated(image=_Image(data or _png(64, 80, b"x")))]))
+def _ok_client(data: bytes | None = None) -> StubClient:
+    return stub_client_returning(data or _png(64, 80, b"x"))
 
 
 # --- availability -----------------------------------------------------------
@@ -203,21 +170,21 @@ def test_the_actual_returned_size_is_recorded_not_the_requested_one():
 
 
 def test_a_safety_filtered_image_is_a_failure_with_the_reason():
-    client = _Client(_Response([_Generated(image=None, rai_filtered_reason="blocked: policy")]))
+    client = StubClient(StubResponse([StubGenerated(image=None, rai_filtered_reason="blocked: policy")]))
     result = GoogleImagenProvider(client=client).generate(_request())
     assert result.ok is False
     assert "blocked: policy" in result.reason
 
 
 def test_an_empty_response_is_a_failure_not_a_crash():
-    result = GoogleImagenProvider(client=_Client(_Response([]))).generate(_request())
+    result = GoogleImagenProvider(client=StubClient(StubResponse([]))).generate(_request())
     assert result.ok is False
     assert "no images" in result.reason
 
 
 def test_a_transport_error_becomes_a_recorded_failure():
     """A page that could not be made must stay visibly missing."""
-    client = _Client(error=RuntimeError("connection reset"))
+    client = StubClient(error=RuntimeError("connection reset"))
     result = GoogleImagenProvider(client=client).generate(_request())
     assert result.ok is False
     assert "RuntimeError" in result.reason and "connection reset" in result.reason

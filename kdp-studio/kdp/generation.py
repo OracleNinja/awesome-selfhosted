@@ -161,6 +161,29 @@ def generate_book(
     )
 
 
+def build_request(prompt: AssetPrompt, attempt: int = 1) -> GenerationRequest:
+    """Turn one planned prompt into the request a provider receives.
+
+    Shared with the single-page smoke test on purpose. A smoke test that
+    assembled its own request would validate a message the batch never sends,
+    and pass while the real run fails on the difference.
+    """
+    options = dict(prompt.generation_constraints)
+    options.setdefault("aspect_ratio", prompt.aspect_ratio or None)
+    return GenerationRequest(
+        page_id=prompt.page_id,
+        prompt_id=prompt.prompt_id,
+        prompt_version=prompt.version,
+        prompt=prompt.render(),
+        prompt_positive=prompt.render_positive(),
+        prompt_negative=prompt.render_negative(),
+        width=prompt.width or DEFAULT_WIDTH,
+        height=prompt.height or DEFAULT_HEIGHT,
+        options={k: v for k, v in options.items() if v is not None},
+        attempt=attempt,
+    )
+
+
 def _needs_work(manifest: BookManifest, page_id: str) -> bool:
     """True when this page has nothing usable and nothing awaiting judgement.
 
@@ -216,20 +239,7 @@ def _attempt_page(
 
     for offset in range(max_attempts):
         attempt = already + offset + 1
-        options = dict(prompt.generation_constraints)
-        options.setdefault("aspect_ratio", prompt.aspect_ratio or None)
-        request = GenerationRequest(
-            page_id=page_id,
-            prompt_id=prompt.prompt_id,
-            prompt_version=prompt.version,
-            prompt=prompt.render(),
-            prompt_positive=prompt.render_positive(),
-            prompt_negative=prompt.render_negative(),
-            width=prompt.width or DEFAULT_WIDTH,
-            height=prompt.height or DEFAULT_HEIGHT,
-            options={k: v for k, v in options.items() if v is not None},
-            attempt=attempt,
-        )
+        request = build_request(prompt, attempt)
 
         try:
             result = provider.generate(request)

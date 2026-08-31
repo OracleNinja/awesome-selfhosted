@@ -287,6 +287,52 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return EXIT_OK if outcome.ok else EXIT_STOP
 
 
+def cmd_smoke_test(args: argparse.Namespace) -> int:
+    """Buy exactly one page and measure it, before authorising the whole book."""
+    from .providers import METERED, get_provider
+    from .smoke import SmokeTestError, run_smoke_test
+
+    manifest = BookManifest.read(args.manifest)
+    provider = get_provider(args.provider)
+
+    # Both guards fire before anything is sent, and in the order that costs
+    # least to get wrong: intent first, then capability.
+    if args.provider in METERED and not args.confirm_spend:
+        sys.stderr.write(
+            f"{args.provider!r} is metered. This buys exactly one image for "
+            f"{args.page_id}, and no others. Re-run with --confirm-spend if "
+            "that is intended.\n"
+        )
+        return EXIT_STOP
+
+    if not provider.available():
+        reason = getattr(provider, "unavailable_reason", lambda: "not available")()
+        sys.stderr.write(f"provider {args.provider!r} is unavailable: {reason}\n")
+        return EXIT_STOP
+
+    out = Path(args.out or (Path(args.manifest).parent / "smoke" / args.page_id))
+    before = Path(args.manifest).read_bytes()
+
+    try:
+        report = run_smoke_test(manifest, args.page_id, provider, out)
+    except SmokeTestError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return EXIT_USAGE
+
+    # The manifest is read-only here by construction; this asserts it rather
+    # than trusting it, because "did not touch the book" is the promise that
+    # makes running this safe.
+    if Path(args.manifest).read_bytes() != before:
+        sys.stderr.write("error: the smoke test modified the manifest; aborting\n")
+        return EXIT_USAGE
+
+    if args.json:
+        sys.stdout.write(json.dumps(report.to_dict(), sort_keys=True, indent=2) + "\n")
+    else:
+        sys.stdout.write(report.render() + "\n")
+    return EXIT_OK if report.would_pass_asset_qa else EXIT_STOP
+
+
 def cmd_register_asset(args: argparse.Namespace) -> int:
     """Bring an externally produced image into the pipeline with provenance.
 
@@ -693,6 +739,21 @@ def build_parser() -> argparse.ArgumentParser:
         "switch, because naming them is what makes the spend deliberate.",
     )
     p.set_defaults(func=cmd_generate)
+
+    p = sub.add_parser(
+        "smoke-test",
+        help="generate ONE page and inspect it, before authorising a full run",
+    )
+    p.add_argument("manifest")
+    p.add_argument("page_id", help="the single art page to generate")
+    p.add_argument("--provider", default="mock")
+    p.add_argument(
+        "--confirm-spend",
+        action="store_true",
+        help="required for a metered provider, even for one image",
+    )
+    p.add_argument("--out", help="where to write it (default: <book>/smoke/<page>)")
+    p.set_defaults(func=cmd_smoke_test)
 
     p = sub.add_parser(
         "register-asset",

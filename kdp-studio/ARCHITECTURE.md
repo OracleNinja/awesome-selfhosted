@@ -409,6 +409,31 @@ Three, behind one interface, chosen with `--provider`:
 | `google-imagen` | **yes** | Implemented against the official `google-genai` SDK. Needs a key. |
 | `higgsfield` | **yes** | Boundary only — no contract was available. |
 
+### Validating one page before buying forty
+
+`kdp smoke-test <manifest> <page-id>` generates a single named page. It exists
+because a metered run over a whole book is the point of no return for the
+money, and the failure it is designed to catch is real: a model picks its own
+output size, and an image below 300 DPI over the live area fails G9 — after
+forty images have been paid for.
+
+Three properties make it worth trusting:
+
+**It sends what the batch sends.** `generation.build_request` is shared, so the
+request is byte-identical to the one a full run would issue. A smoke test that
+assembled its own would validate a message that never gets sent.
+
+**It touches nothing.** The manifest is read and never written; the image and a
+real `AssetProvenance` land in `<book>/smoke/<page>/` in the normal layout. The
+CLI re-reads the manifest afterwards and aborts if a byte changed, because "did
+not touch the book" is the promise that makes running it safe. `register-asset`
+promotes a page if you want it — there is no automatic path.
+
+**It reports rather than decides.** It runs the same inspection and the same
+DPI arithmetic G9 applies and prints the findings, but it is not a gate, does
+not stand in for one, and says so. Exit code is non-zero when the page would
+not clear those checks, so a bad page cannot read as a green light.
+
 ### google-imagen
 
 Written against the SDK's own typed surface —

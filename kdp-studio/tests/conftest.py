@@ -8,6 +8,7 @@ start from a broken fixture tend to pass for the wrong reason.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -219,3 +220,54 @@ def brief() -> ResearchBrief:
         recommended_trim="8.5x11",
         recommended_page_count=60,
     )
+
+
+# --- a stub shaped like the google-genai response types --------------------
+#
+# Mirrors the attribute names the installed SDK actually carries, so a test
+# that passes here is testing the real shape:
+#   GenerateImagesResponse.generated_images[].image.image_bytes / .mime_type
+#                                            .rai_filtered_reason
+# Shared by the provider tests and the smoke-test tests. Nothing touches a
+# network, so neither needs a key and neither ever pays for a picture.
+
+
+@dataclass
+class StubImage:
+    image_bytes: bytes | None
+    mime_type: str = "image/png"
+
+
+@dataclass
+class StubGenerated:
+    image: StubImage | None = None
+    rai_filtered_reason: str | None = None
+    enhanced_prompt: str | None = None
+
+
+@dataclass
+class StubResponse:
+    generated_images: list | None
+
+
+class StubModels:
+    def __init__(self, response=None, error=None):
+        self.response, self.error = response, error
+        self.calls: list[dict] = []
+
+    def generate_images(self, *, model, prompt, config):
+        self.calls.append({"model": model, "prompt": prompt, "config": config})
+        if self.error:
+            raise self.error
+        return self.response
+
+
+class StubClient:
+    """Stands in for google.genai.Client."""
+
+    def __init__(self, response=None, error=None):
+        self.models = StubModels(response, error)
+
+
+def stub_client_returning(data: bytes) -> StubClient:
+    return StubClient(StubResponse([StubGenerated(image=StubImage(data))]))

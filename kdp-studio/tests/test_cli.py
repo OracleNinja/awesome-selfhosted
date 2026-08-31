@@ -7,6 +7,7 @@ thing under test: 0 passed, 1 stopped, 2 misused.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -252,3 +253,83 @@ def test_providers_reports_higgsfield_as_unavailable(capsys):
     assert "mock: available" in out
     assert "higgsfield (metered): UNAVAILABLE" in out
     assert "credential_present" in out
+
+
+# --- the single-page smoke test ---------------------------------------------
+
+
+def _planned_book(tmp_path):
+    """A book with a prompt plan, written to disk."""
+    from fixtures import build_manifest
+
+    book = tmp_path / "book"
+    book.mkdir()
+    manifest = build_manifest()
+    return manifest, str(manifest.write(book / "manifest.json"))
+
+
+def test_smoke_test_refuses_a_metered_provider_without_confirm_spend(tmp_path):
+    manifest, path = _planned_book(tmp_path)
+    page = manifest.spec.art_pages[0].page_id
+    assert main(["smoke-test", path, page, "--provider", "google-imagen"]) == EXIT_STOP
+
+
+def test_smoke_test_refuses_a_metered_provider_without_a_credential(
+    tmp_path, monkeypatch, capsys
+):
+    from kdp.providers.google_imagen import CREDENTIAL_ENV_VARS
+
+    for name in CREDENTIAL_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    manifest, path = _planned_book(tmp_path)
+    page = manifest.spec.art_pages[0].page_id
+
+    assert main([
+        "smoke-test", path, page, "--provider", "google-imagen", "--confirm-spend",
+    ]) == EXIT_STOP
+    assert "No API key" in capsys.readouterr().err
+
+
+def test_smoke_test_runs_one_page_and_leaves_the_manifest_alone(tmp_path, capsys):
+    manifest, path = _planned_book(tmp_path)
+    page = manifest.spec.art_pages[0].page_id
+    before = Path(path).read_bytes()
+
+    assert main(["smoke-test", path, page, "--provider", "mock"]) == EXIT_OK
+
+    assert Path(path).read_bytes() == before
+    out = capsys.readouterr().out
+    assert page in out and "mock" in out and "DPI" in out
+
+
+def test_smoke_test_exits_nonzero_when_the_page_would_fail_qa(tmp_path, monkeypatch):
+    """A page that would not clear QA must not read as a green light."""
+    import kdp.providers as providers
+    from kdp.providers.mock import MockImageProvider
+
+    manifest, path = _planned_book(tmp_path)
+    page = manifest.spec.art_pages[0].page_id
+    # Force an undersized image: the exact risk with a model that picks its
+    # own output size.
+    monkeypatch.setitem(
+        providers.PROVIDERS, "mock", lambda: MockImageProvider(max_dimension=64)
+    )
+    assert main(["smoke-test", path, page, "--provider", "mock"]) == EXIT_STOP
+
+
+def test_smoke_test_json_carries_the_full_report(tmp_path, capsys):
+    manifest, path = _planned_book(tmp_path)
+    page = manifest.spec.art_pages[0].page_id
+
+    main(["--json", "smoke-test", path, page, "--provider", "mock"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["page_id"] == page
+    assert payload["resolution"]["required_dpi"] == 300
+    assert payload["prompt"]["negative"]
+    assert payload["image"]["content_hash"].startswith("sha256:")
+
+
+def test_smoke_test_rejects_a_page_the_book_does_not_have(tmp_path):
+    _, path = _planned_book(tmp_path)
+    assert main(["smoke-test", path, "PAGE-999", "--provider", "mock"]) == EXIT_USAGE
