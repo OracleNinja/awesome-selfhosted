@@ -101,9 +101,24 @@ def test_valid_spec_passes_when_tables_are_trusted():
     assert result.status is Status.PASS, result.to_json()
 
 
-def test_unverified_spec_tables_stop_the_book_by_default():
+def test_verified_spec_tables_no_longer_stop_the_book():
+    """The geometry tables were verified against KDP on 2026-08-31."""
     spec = make_spec(art_count=12, page_count=26)
     result = spec_legality.run(spec)
+    assert "spec.tables_unverified" not in codes(result)
+    assert result.status is Status.PASS, result.to_json()
+
+
+def test_an_unverified_geometry_table_would_still_stop_the_book(monkeypatch):
+    """The mechanism still bites; it is the data that changed, not the rule."""
+    from kdp.specs import revision
+
+    monkeypatch.setattr(
+        revision,
+        "SOURCES",
+        {**revision.SOURCES, "cover": revision.SourceRecord("cover")},
+    )
+    result = spec_legality.run(make_spec(art_count=12, page_count=26))
     assert result.status is Status.FAIL
     assert "spec.tables_unverified" in codes(result)
 

@@ -358,27 +358,46 @@ flat fee with no per-page component; longer ones switch to fixed-plus-rate.
 Applying the long-book formula to a 24-page book understates the cost by a
 dollar, which is most of the margin.
 
-| amazon.com, black ink, regular trim | |
-|---|---|
-| List price ≤ $9.98 | 50% royalty |
-| List price ≥ $9.99 | 60% royalty |
-| 24–110 pages | flat $2.30, no per-page charge |
-| 111–828 pages | $1.00 + $0.012/page |
+**Royalty (amazon.com):** 50% at $9.98 or below, 60% at $9.99 or above.
+Royalty is `(rate × list price) − printing cost`.
 
-Royalty is `(rate × tax-exclusive list price) − printing cost`.
+**Printing cost** is keyed by marketplace, ink, paper stock and trim class —
+KDP prices on all four — and ten tables are recorded:
 
-**Only verified combinations exist.** The tables are keyed by marketplace, ink
-and trim class, and hold exactly one entry. Asking for any other combination
-raises rather than interpolating — a plausible-looking number for an unverified
-combination is worse than no number, because it gets believed. The bands also
-do not tile: KDP's rule covers "$9.98 or below" and "$9.99 or above", so a price
-in the sliver between them raises rather than being rounded into a neighbour.
+| Ink / stock | Regular trim | Large trim |
+|---|---|---|
+| Black, white or cream, 24–110pp | $2.30 flat | $2.84 flat |
+| Black, white or cream, 110–828pp | $1.00 + $0.012/pp | $1.00 + $0.017/pp |
+| Black, groundwood, 24–112pp | $2.23 flat | $2.75 flat |
+| Black, groundwood, 114–828pp | $1.00 + $0.0114/pp | $1.00 + $0.0162/pp |
+| Premium colour, 24–40pp | $3.60 flat | $4.20 flat |
+| Premium colour, 42–828pp | $1.00 + $0.065/pp | $1.00 + $0.08/pp |
+| Standard colour, 72–600pp | $1.00 + $0.0255/pp | $1.00 + $0.0402/pp |
 
-**Projections still report at `UNKNOWN` confidence**, and will until the trim
-table is reconciled. The rate and cost bands are verified; which *trim sizes*
-KDP prices as regular rather than large is not, so no book can be mapped to a
-cost band from its trim alone. Callers state the class explicitly, which keeps
-the assumption visible instead of inferred.
+**Trim class is derived, not transcribed.** KDP's rule is that large trim is
+over 6.12" wide or over 9" high; `TrimSize.cost_class` applies it, and the
+tests assert the derivation against KDP's published regular/large split. That
+way a size added later is classified rather than defaulting to whatever someone
+typed.
+
+**8.5×11 is large trim** — the coloring-book default. Pricing it as regular
+understates printing by 54¢ a copy. On a 60-page book at $5.99 the real margin
+is **$0.155**, where treating it as regular reported $0.695: more than four
+times over.
+
+**Three anomalies in KDP's own table are transcribed faithfully and make the
+model refuse rather than guess.** The black-ink bands are published as 24–110
+*and* 110–828, so exactly 110 pages carries two different prices; groundwood
+jumps 112→114 and premium colour jumps 40→42, leaving 113 and 41 pages with no
+published price at all. Each raises and names what it found. The `royalty`
+table stays UNVERIFIED because of them: a source that contradicts itself has
+been read, not resolved.
+
+**Projections report at `ESTIMATED` confidence.** Rate, cost bands and trim
+class are all verified now; what keeps the roll-up soft is a single declared
+unknown — the model computes `rate × price − printing cost` and does not model
+VAT, delivery or marketplace deductions, so a real payout can be lower. That is
+recorded as an assumption rather than left implied.
 
 ## Higgsfield
 
@@ -446,16 +465,16 @@ Where a URL is recorded it was seen in a search result and is a starting point;
 where only a page title is given, no URL is recorded, because a confidently
 wrong link sends someone to the wrong page and they verify against it.
 
-Two corrections have already come out of a partial verification. KDP prints no
-spine text at 79 pages or fewer, so 80 is the first eligible page count; the
-previous value of 100 was a guess that silently withheld spine text from books
-of 80 to 99 pages. And standard colour shares black ink's 0.002252 caliper, not
-premium colour's 0.002347, which had been over-estimating every standard-colour
-spine.
+Five of the six tables were verified against official KDP pages on 2026-08-31
+for Amazon.com/US, with URLs, dates and a spec version recorded. `royalty` is
+sourced but unresolved — see the three source anomalies above — so the final
+audit still blocks, while the geometry and policy gates no longer need an
+override.
 
-The trim table is a separate outstanding item: it has not been reconciled
-against KDP's current list, so the 15 entries may be incomplete, and no size
-carries the regular/large cost class that economics needs.
+Verification corrected four things, all of which had been silently wrong: the
+spine-text threshold (80 pages, not 100), the trim table (8.25×8.25 was
+missing), the colour spine caliper (one figure for both tiers), and — the
+expensive one — that 8.5×11 is large trim.
 
 **The Higgsfield HTTP client.** See above — a boundary, pending an API
 contract.

@@ -44,12 +44,17 @@ def test_research_stops_on_a_quoted_observation(tmp_path, brief):
     assert main(["research", write(tmp_path / "b.json", payload)]) == EXIT_STOP
 
 
-def test_concept_stops_while_spec_tables_are_unverified(tmp_path, manifest):
+def test_concept_passes_now_that_the_geometry_tables_are_verified(tmp_path, manifest):
+    """G2 blocked on unverified tables for several revisions.
+
+    Trim, paper, interior and cover were verified against KDP on 2026-08-31, so
+    it no longer needs the override.
+    """
     path = str(manifest.write(tmp_path / "m.json"))
-    assert main(["concept", path]) == EXIT_STOP
+    assert main(["concept", path]) == EXIT_OK
 
 
-def test_concept_passes_when_unverified_tables_are_explicitly_allowed(tmp_path, manifest):
+def test_concept_still_accepts_the_override(tmp_path, manifest):
     path = str(manifest.write(tmp_path / "m.json"))
     assert main(["concept", path, "--allow-unverified-specs"]) == EXIT_OK
 
@@ -79,15 +84,14 @@ def test_production_blocks_without_pdfs(tmp_path, manifest):
     assert main(["production", path]) == EXIT_STOP
 
 
-def test_publishing_prep_blocks_on_unverified_policy(tmp_path, manifest):
-    # G12 refuses to certify compliance against policy data nobody checked.
-    path = str(manifest.write(tmp_path / "m.json"))
-    assert main(["publishing-prep", path]) == EXIT_STOP
+def test_publishing_prep_passes_now_that_policy_is_verified(tmp_path, manifest):
+    """G12 refused to certify compliance against unchecked policy data.
 
-
-def test_publishing_prep_passes_complete_metadata(tmp_path, manifest):
+    The policy table was verified on 2026-08-31, so the override is no longer
+    needed to get a clean listing through.
+    """
     path = str(manifest.write(tmp_path / "m.json"))
-    assert main(["publishing-prep", path, "--allow-unverified-policy"]) == EXIT_OK
+    assert main(["publishing-prep", path]) == EXIT_OK
 
 
 def test_disclosure_reports_the_answer(tmp_path, manifest, capsys):
@@ -155,7 +159,7 @@ def test_stages_lists_the_pipeline(capsys):
 
 def test_json_flag_emits_machine_readable_output(tmp_path, manifest, capsys):
     path = str(manifest.write(tmp_path / "m.json"))
-    main(["--json", "publishing-prep", path, "--allow-unverified-policy"])
+    main(["--json", "publishing-prep", path])
     payload = json.loads(capsys.readouterr().out)
     assert payload["stage"] == "publishing_prep"
     assert payload["passed"] is True

@@ -35,11 +35,12 @@ from .revision import (
 )
 from .trim import (
     DEFAULT_TRIM,
+    LARGE_TRIM_MAX_HEIGHT_IN,
+    LARGE_TRIM_MAX_WIDTH_IN,
     TRIM_SIZES,
     TrimSize,
     get_trim,
-    trim_table_reconciled,
-    unreconciled_trims,
+    trims_by_cost_class,
 )
 
 __all__ = [
@@ -48,6 +49,8 @@ __all__ = [
     "DEFAULT_TRIM",
     "GUTTER_BANDS",
     "MIN_IMAGE_DPI",
+    "LARGE_TRIM_MAX_HEIGHT_IN",
+    "LARGE_TRIM_MAX_WIDTH_IN",
     "MIN_PAGES_FOR_SPINE_TEXT",
     "SPINE_TEXT_CUTOFF_PAGES",
     "PAPERS",
@@ -69,8 +72,7 @@ __all__ = [
     "gutter_in",
     "interior_geometry",
     "is_verified",
-    "trim_table_reconciled",
-    "unreconciled_trims",
+    "trims_by_cost_class",
     "source",
     "stale_tables",
     "unverified_tables",

@@ -53,11 +53,40 @@ from kdp.specs.revision import (
 # --- specification verification and staleness -------------------------------
 
 
-def test_tables_ship_unverified():
-    # The shipped state. Flipping this without checking the primary sources is
-    # the mistake the whole mechanism exists to make difficult.
+def test_five_tables_are_verified_and_royalty_is_not():
+    """Verified 2026-08-31 against official KDP pages.
+
+    Royalty is sourced but unresolved: KDP's own printing-cost table publishes
+    the black-ink boundary twice, so 110 pages carries two prices. A source
+    that contradicts itself has been read, not settled.
+    """
+    verified = {t for t in SOURCES if source(t).state == "VERIFIED"}
+    assert verified == {"cover", "interior", "paper", "policy", "trim"}
+    assert source("royalty").state == "UNVERIFIED"
+    assert source("royalty").open_questions
     assert is_verified() is False
-    assert set(unverified_tables()) == set(SOURCES)
+
+
+def test_every_verified_table_cites_an_official_kdp_page():
+    for name in SOURCES:
+        record = source(name)
+        if record.state != "VERIFIED":
+            continue
+        assert record.source_url.startswith("https://kdp.amazon.com/")
+        assert record.verified_on == "2026-08-31"
+        assert record.marketplace == "Amazon.com / United States"
+        assert record.spec_version
+
+
+def test_an_open_question_blocks_however_good_the_citation():
+    """A record can be fully cited and still not be settled."""
+    record = SourceRecord(
+        "x",
+        source_url="https://kdp.amazon.com/example",
+        verified_on="2026-08-31",
+        open_questions=("the source states the boundary twice",),
+    )
+    assert record.state == "UNVERIFIED"
 
 
 def test_a_source_with_url_and_date_is_verified():
@@ -88,10 +117,18 @@ def test_an_unparseable_date_counts_as_stale():
     assert record.is_stale(date(2026, 8, 30)) is True
 
 
-def test_verification_problem_names_the_tables():
-    problem = verification_problem("trim", "paper")
+def test_verification_problem_is_none_for_the_verified_tables():
+    assert verification_problem("trim", "paper", "interior", "cover") is None
+
+
+def test_verification_problem_distinguishes_unsourced_from_unresolved():
+    problem = verification_problem("royalty")
     assert problem is not None
-    assert "trim" in problem and "paper" in problem
+    assert "sourced but unresolved" in problem
+    # "never verified:" is the list prefix. Royalty must not appear under it —
+    # the page was read, and sending someone to re-read it would waste the trip.
+    assert "never verified:" not in problem
+    assert "110" in problem
 
 
 def test_verification_problem_is_none_when_everything_checks_out(monkeypatch):
@@ -163,8 +200,10 @@ def test_cover_qa_blocks_when_the_pdf_reader_is_missing(manifest, monkeypatch, t
     assert cover_qa.run(staged).status is Status.BLOCKED
 
 
-def test_compliance_blocks_on_unverified_policy(manifest):
-    assert kdp_compliance.run(manifest).status is Status.BLOCKED
+def test_compliance_no_longer_blocks_now_that_policy_is_verified(manifest):
+    """G12 blocked for months on an unverified policy table; it is verified now."""
+    result = kdp_compliance.run(manifest)
+    assert result.status is not Status.BLOCKED
 
 
 def test_interior_qa_catches_a_pdf_edited_after_the_build(manifest, tmp_path):
@@ -243,14 +282,19 @@ def test_confidence_is_the_weakest_assumption():
     assert econ.confidence is Confidence.ESTIMATED
 
 
-def test_projections_stay_unknown_while_the_trim_class_is_unreconciled():
-    """The rate and the cost bands are verified; the trim mapping is not."""
+def test_projections_report_as_estimated_not_observed():
+    """Rate, cost bands and trim class are all verified now.
+
+    The projection is still not an observation: it does not model VAT,
+    delivery, or marketplace deductions, so a real payout can be lower. That
+    single unmodelled input is what keeps the roll-up at ESTIMATED.
+    """
     econ = compare([7.99], 60, trim_class=TrimClass.REGULAR)
-    assert econ.confidence is Confidence.UNKNOWN
-    trim = next(a for a in econ.assumptions if a.key == "trim_class")
-    assert trim.confidence is Confidence.UNKNOWN
-    verified = [a for a in econ.assumptions if a.confidence is Confidence.OBSERVED]
-    assert {a.key for a in verified} == {"royalty_bands", "printing_cost_bands"}
+    assert econ.confidence is Confidence.ESTIMATED
+    observed = {a.key for a in econ.assumptions if a.confidence is Confidence.OBSERVED}
+    assert observed == {"royalty_bands", "printing_cost_bands", "trim_class"}
+    soft = next(a for a in econ.assumptions if a.confidence is Confidence.ESTIMATED)
+    assert soft.key == "other_deductions"
 
 
 def test_a_scenario_needs_a_positive_price_and_page_count():

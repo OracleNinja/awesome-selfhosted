@@ -16,7 +16,12 @@ from ..errors import SpecError
 
 @dataclass(frozen=True, slots=True)
 class Paper:
-    """A paper stock offered for KDP paperbacks."""
+    """A paper stock offered for KDP paperbacks.
+
+    ``ink`` and ``stock`` are what the printing-cost tables are keyed on. They
+    live here so that a book's declared paper resolves to a cost band without
+    the caller restating it — restating it is how the two drift apart.
+    """
 
     key: str
     label: str
@@ -26,6 +31,10 @@ class Paper:
     min_pages: int
     max_pages: int
     colour: bool
+    #: "black" | "standard_colour" | "premium_colour"
+    ink: str = "black"
+    #: "white" | "cream" | "groundwood"
+    stock: str = "white"
 
     def spine_width_in(self, page_count: int) -> float:
         """Spine width for ``page_count`` pages on this stock, in inches."""
@@ -37,17 +46,24 @@ class Paper:
         return self.min_pages <= page_count <= self.max_pages
 
 
+#: Spine calipers verified against KDP's paperback submission guidelines
+#: (2026-08-31). The guideline gives one figure for colour paper, so both
+#: colour tiers share it: KDP distinguishes standard from premium in *printing
+#: cost*, not in paper thickness, and inventing a separate caliper for one of
+#: them would put every standard-colour spine at the wrong width.
 PAPERS: Final[dict[str, Paper]] = {
     p.key: p
     for p in (
-        Paper("bw_white", "Black ink on white paper", 0.002252, 24, 828, False),
-        Paper("bw_cream", "Black ink on cream paper", 0.0025, 24, 828, False),
-        Paper("premium_colour", "Premium colour on white paper", 0.002347, 24, 600, True),
-        # Standard colour prints on the same stock as black ink, so it shares
-        # the 0.002252 caliper. An earlier revision carried 0.002347 here — the
-        # premium-colour figure — which over-estimated the spine of every
-        # standard-colour book.
-        Paper("standard_colour", "Standard colour on white paper", 0.002252, 72, 800, True),
+        Paper("bw_white", "Black ink on white paper", 0.002252, 24, 828, False,
+              ink="black", stock="white"),
+        Paper("bw_cream", "Black ink on cream paper", 0.0025, 24, 828, False,
+              ink="black", stock="cream"),
+        Paper("bw_groundwood", "Black ink on groundwood paper", 0.00235, 24, 828, False,
+              ink="black", stock="groundwood"),
+        Paper("premium_colour", "Premium colour on white paper", 0.002347, 24, 828, True,
+              ink="premium_colour", stock="white"),
+        Paper("standard_colour", "Standard colour on white paper", 0.002347, 72, 600, True,
+              ink="standard_colour", stock="white"),
     )
 }
 

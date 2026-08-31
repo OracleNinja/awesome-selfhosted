@@ -16,7 +16,7 @@ and fills in the KDP form.
 
 ```bash
 cd kdp-studio
-python3 -m pytest                 # 340 tests; needs only pytest
+python3 -m pytest                 # 368 tests; needs only pytest
 python3 -m kdp stages             # the pipeline
 python3 -m kdp gates              # every gate, its purpose, and what it needs
 python3 -m kdp specs --trim 8.5x11 --pages 60
@@ -100,15 +100,18 @@ refuses.
 python3 -m kdp verify-specs
 ```
 
-All six specification tables are `UNVERIFIED`. Every `amazon.com` host is
-refused by network policy in the development environment, so no value has been
-confirmed against a primary source, and **G2, G12 and G13 refuse to certify a
-book** while that stands.
+Five of six tables — trim, paper, interior, cover, policy — were verified
+against official KDP pages on 2026-08-31 for Amazon.com/US. G2 and G12 pass
+without an override.
 
-`verify-specs` prints the page to read and what to confirm on it, table by
-table. Record `source_url`, `verified_on` and `spec_version` in
-`kdp/specs/revision.py`; that alone flips a table. Verifications expire after
-180 days. Secondary sources — blogs, calculators, summaries — do not count.
+`royalty` is **sourced but unresolved**, and G13 still blocks. KDP's own
+printing-cost table publishes the black-ink boundary twice (bands 24–110 *and*
+110–828), so a 110-page book has two documented prices; groundwood and premium
+colour each leave a page count with no price at all. The model refuses those
+rather than picking. A source that contradicts itself has been read, not
+settled.
+
+Verifications expire after 180 days.
 
 ## Documentation
 

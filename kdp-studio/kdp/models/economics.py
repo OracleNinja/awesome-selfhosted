@@ -37,12 +37,19 @@ class Ink(str, Enum):
     PREMIUM_COLOUR = "premium_colour"
 
 
+class PaperStock(str, Enum):
+    WHITE = "white"
+    CREAM = "cream"
+    GROUNDWOOD = "groundwood"
+
+
 class TrimClass(str, Enum):
     """KDP prices regular and large trims differently.
 
-    Which *sizes* fall into which class is a separate fact, and one this
-    package does not yet hold — see ``kdp/specs/trim.py``. Callers state the
-    class explicitly so that the assumption is visible rather than inferred.
+    Which sizes fall into which class is derived from KDP's own rule in
+    ``kdp/specs/trim.py``: large is anything over 6.12 inches wide or over 9
+    inches high. For an 8.5x11 book — the coloring-book default — the
+    difference is 54 cents on every copy.
     """
 
     REGULAR = "regular"
@@ -78,58 +85,146 @@ class PrintingCostTable:
 
     marketplace: str
     ink: Ink
+    stock: PaperStock
     trim_class: TrimClass
     currency: str
     bands: tuple[PrintingBand, ...]
 
     def cost(self, pages: int) -> float:
-        for band in self.bands:
-            if band.contains(pages):
-                return band.cost(pages)
+        matches = [band for band in self.bands if band.contains(pages)]
         covered = ", ".join(f"{b.min_pages}-{b.max_pages}" for b in self.bands)
-        raise EconomicsUnavailable(
-            f"no verified printing cost for a {pages}-page book on "
-            f"{self.marketplace} ({self.ink.value}, {self.trim_class.value} "
-            f"trim); verified page ranges are {covered}"
+        where = (
+            f"{self.marketplace} ({self.ink.value} on {self.stock.value}, "
+            f"{self.trim_class.value} trim)"
         )
 
+        if len(matches) > 1:
+            # KDP's own table labels adjacent bands with the same boundary page
+            # count, so at that page count two different prices are documented.
+            # Picking one silently would bury a discrepancy in the source under
+            # an arbitrary tie-break, and the number would be believed.
+            options = ", ".join(f"${b.cost(pages):.4f} (band {b.min_pages}-{b.max_pages})"
+                                for b in matches)
+            raise EconomicsUnavailable(
+                f"KDP's published table is ambiguous at exactly {pages} pages "
+                f"for {where}: {len(matches)} bands claim it, giving {options}. "
+                "The boundary is stated twice in the source rather than once. "
+                "Confirm which band KDP actually applies at this page count "
+                "before pricing a book of this length."
+            )
+        if not matches:
+            raise EconomicsUnavailable(
+                f"no verified printing cost for a {pages}-page book on {where}; "
+                f"verified page ranges are {covered}"
+            )
+        return matches[0].cost(pages)
 
-#: Verified against KDP Help. Only combinations actually checked appear here —
-#: the absence of an entry is a deliberate statement that the figure is unknown,
-#: not an oversight to be filled in by analogy with a neighbouring row.
-PRINTING_COSTS: dict[tuple[str, Ink, TrimClass], PrintingCostTable] = {
-    ("amazon.com", Ink.BLACK, TrimClass.REGULAR): PrintingCostTable(
-        marketplace="amazon.com",
-        ink=Ink.BLACK,
-        trim_class=TrimClass.REGULAR,
+
+#: Verified against KDP's printing cost & royalty page on 2026-08-31 for
+#: amazon.com. Keyed by marketplace, ink, paper stock and trim class, because
+#: KDP prices on all four. Nothing is interpolated: a combination absent from
+#: this table raises, because a plausible number for an unchecked combination
+#: is worse than no number — it gets believed.
+#:
+#: Two anomalies are transcribed faithfully rather than tidied away, and both
+#: make the model refuse rather than guess:
+#:
+#: * Black ink bands are published as 24-110 *and* 110-828, so exactly 110
+#:   pages is claimed by both at two different prices.
+#: * Groundwood jumps 112 to 114, and premium colour jumps 40 to 42, leaving
+#:   113 and 41 pages with no published price at all.
+def _bands(fixed: float, per_page: float, lo: int, hi: int) -> PrintingBand:
+    return PrintingBand(lo, hi, fixed, per_page)
+
+
+PRINTING_COSTS: dict[
+    tuple[str, Ink, PaperStock, TrimClass], PrintingCostTable
+] = {}
+
+
+def _register(
+    marketplace: str,
+    ink: Ink,
+    stock: PaperStock,
+    trim_class: TrimClass,
+    bands: tuple[PrintingBand, ...],
+) -> None:
+    PRINTING_COSTS[(marketplace, ink, stock, trim_class)] = PrintingCostTable(
+        marketplace=marketplace,
+        ink=ink,
+        stock=stock,
+        trim_class=trim_class,
         currency="USD",
-        bands=(
-            # Flat fee, no per-page component.
-            PrintingBand(24, 110, 2.30, 0.0),
-            # Upper bound is the paper table's maximum page count; beyond it a
-            # book is not printable, so no cost is defined.
-            PrintingBand(111, 828, 1.00, 0.012),
-        ),
-    ),
-}
+        bands=bands,
+    )
+
+
+# Black ink on white or cream. KDP publishes one table for both stocks.
+for _stock in (PaperStock.WHITE, PaperStock.CREAM):
+    _register(
+        "amazon.com", Ink.BLACK, _stock, TrimClass.REGULAR,
+        (_bands(2.30, 0.0, 24, 110), _bands(1.00, 0.012, 110, 828)),
+    )
+    _register(
+        "amazon.com", Ink.BLACK, _stock, TrimClass.LARGE,
+        (_bands(2.84, 0.0, 24, 110), _bands(1.00, 0.017, 110, 828)),
+    )
+del _stock
+
+# Black ink on groundwood.
+_register(
+    "amazon.com", Ink.BLACK, PaperStock.GROUNDWOOD, TrimClass.REGULAR,
+    (_bands(2.23, 0.0, 24, 112), _bands(1.00, 0.0114, 114, 828)),
+)
+_register(
+    "amazon.com", Ink.BLACK, PaperStock.GROUNDWOOD, TrimClass.LARGE,
+    (_bands(2.75, 0.0, 24, 112), _bands(1.00, 0.0162, 114, 828)),
+)
+
+# Premium colour on white.
+_register(
+    "amazon.com", Ink.PREMIUM_COLOUR, PaperStock.WHITE, TrimClass.REGULAR,
+    (_bands(3.60, 0.0, 24, 40), _bands(1.00, 0.065, 42, 828)),
+)
+_register(
+    "amazon.com", Ink.PREMIUM_COLOUR, PaperStock.WHITE, TrimClass.LARGE,
+    (_bands(4.20, 0.0, 24, 40), _bands(1.00, 0.08, 42, 828)),
+)
+
+# Standard colour on white. One band, no flat-fee range.
+_register(
+    "amazon.com", Ink.STANDARD_COLOUR, PaperStock.WHITE, TrimClass.REGULAR,
+    (_bands(1.00, 0.0255, 72, 600),),
+)
+_register(
+    "amazon.com", Ink.STANDARD_COLOUR, PaperStock.WHITE, TrimClass.LARGE,
+    (_bands(1.00, 0.0402, 72, 600),),
+)
 
 
 def printing_cost(
-    pages: int, *, marketplace: str, ink: Ink, trim_class: TrimClass
+    pages: int,
+    *,
+    marketplace: str = "amazon.com",
+    ink: Ink = Ink.BLACK,
+    stock: PaperStock = PaperStock.WHITE,
+    trim_class: TrimClass,
 ) -> float:
     """Printing cost per copy, or raise if the combination is not verified."""
-    table = PRINTING_COSTS.get((marketplace, ink, trim_class))
+    table = PRINTING_COSTS.get((marketplace, ink, stock, trim_class))
     if table is None:
         known = ", ".join(
-            f"{m}/{i.value}/{t.value}" for m, i, t in sorted(
-                PRINTING_COSTS, key=lambda k: (k[0], k[1].value, k[2].value)
+            f"{m}/{i.value}/{s.value}/{t.value}"
+            for m, i, s, t in sorted(
+                PRINTING_COSTS,
+                key=lambda k: (k[0], k[1].value, k[2].value, k[3].value),
             )
         )
         raise EconomicsUnavailable(
-            f"no verified printing-cost table for {marketplace} "
-            f"({ink.value}, {trim_class.value} trim). Verified combinations: "
-            f"{known}. KDP's figures differ by marketplace, ink and trim, and "
-            "this one has not been checked — extrapolating from another row "
+            f"no verified printing-cost table for {marketplace} ({ink.value} "
+            f"on {stock.value}, {trim_class.value} trim). Verified "
+            f"combinations: {known}. KDP prices on all four of those, and this "
+            "combination has not been checked — extrapolating from another row "
             "would produce a number that looks authoritative and is not."
         )
     return table.cost(pages)
@@ -238,6 +333,7 @@ class PricingScenario:
     print_cost_usd: float
     marketplace: str = "amazon.com"
     ink: Ink = Ink.BLACK
+    stock: PaperStock = PaperStock.WHITE
     trim_class: TrimClass = TrimClass.REGULAR
     currency: str = "USD"
 
@@ -267,6 +363,7 @@ class PricingScenario:
             "page_count": self.page_count,
             "marketplace": self.marketplace,
             "ink": self.ink.value,
+            "stock": self.stock.value,
             "trim_class": self.trim_class.value,
             "currency": self.currency,
             "royalty_rate": self.royalty_rate,
@@ -287,6 +384,7 @@ class PricingScenario:
                 print_cost_usd=float(data["print_cost_usd"]),
                 marketplace=data.get("marketplace", "amazon.com"),
                 ink=Ink(data.get("ink", Ink.BLACK.value)),
+                stock=PaperStock(data.get("stock", PaperStock.WHITE.value)),
                 trim_class=TrimClass(data.get("trim_class", TrimClass.REGULAR.value)),
                 currency=data.get("currency", "USD"),
             )
@@ -300,6 +398,7 @@ def build_scenario(
     *,
     marketplace: str = "amazon.com",
     ink: Ink = Ink.BLACK,
+    stock: PaperStock = PaperStock.WHITE,
     trim_class: TrimClass,
     label: str | None = None,
 ) -> PricingScenario:
@@ -319,10 +418,15 @@ def build_scenario(
         page_count=page_count,
         royalty_rate=royalty_rate(list_price_usd, marketplace=marketplace),
         print_cost_usd=printing_cost(
-            page_count, marketplace=marketplace, ink=ink, trim_class=trim_class
+            page_count,
+            marketplace=marketplace,
+            ink=ink,
+            stock=stock,
+            trim_class=trim_class,
         ),
         marketplace=marketplace,
         ink=ink,
+        stock=stock,
         trim_class=trim_class,
     )
 
@@ -399,28 +503,39 @@ def default_assumptions(
     trim_class: TrimClass | None = None,
 ) -> tuple[Assumption, ...]:
     """What the model rests on, and how well each part is known."""
-    verified = "Verified against KDP Help; see kdp/specs/revision.py table 'royalty'."
-    assumptions = [
-        Assumption("royalty_bands", f"{marketplace} 50% below $9.99, 60% at or above",
-                   Confidence.OBSERVED, verified),
-        Assumption("printing_cost_bands",
-                   f"{marketplace} {ink.value} regular trim: flat $2.30 to 110pp, "
-                   "then $1.00 + $0.012/page",
-                   Confidence.OBSERVED, verified),
-    ]
-    # The one genuinely unknown input, and the reason a projection still reports
-    # at UNKNOWN confidence: KDP prices regular and large trims differently, and
-    # which sizes fall into which class has not been reconciled.
-    assumptions.append(
+    verified = (
+        "Verified against KDP Help 2026-08-31; see kdp/specs/revision.py "
+        "table 'royalty'."
+    )
+    return (
+        Assumption(
+            "royalty_bands",
+            f"{marketplace}: 50% at $9.98 or below, 60% at $9.99 or above",
+            Confidence.OBSERVED,
+            verified,
+        ),
+        Assumption(
+            "printing_cost_bands",
+            f"{marketplace} {ink.value}, published bands by page count",
+            Confidence.OBSERVED,
+            verified,
+        ),
         Assumption(
             "trim_class",
-            trim_class.value if trim_class else "unknown",
-            Confidence.UNKNOWN,
-            "Which KDP trim sizes count as regular rather than large has not "
-            "been verified; kdp/specs/trim.py carries no cost class.",
-        )
+            trim_class.value if trim_class else "unresolved",
+            Confidence.OBSERVED if trim_class else Confidence.UNKNOWN,
+            "Derived from KDP's rule: large trim is over 6.12in wide or over "
+            "9in high.",
+        ),
+        Assumption(
+            "other_deductions",
+            "not modelled",
+            Confidence.ESTIMATED,
+            "Royalty here is rate x list price minus printing cost. It does "
+            "not model VAT, delivery, or marketplace-specific deductions, so a "
+            "real payout can be lower.",
+        ),
     )
-    return tuple(assumptions)
 
 
 def compare(
@@ -429,6 +544,7 @@ def compare(
     *,
     marketplace: str = "amazon.com",
     ink: Ink = Ink.BLACK,
+    stock: PaperStock = PaperStock.WHITE,
     trim_class: TrimClass | None = None,
     assumptions: tuple[Assumption, ...] | None = None,
 ) -> Economics:
@@ -440,6 +556,7 @@ def compare(
     ``trim_class`` has no default. Omitting it yields an Economics with no
     scenarios and a recorded reason, because KDP's printing cost genuinely
     depends on it and guessing would produce a confident wrong answer.
+    ``for_book`` resolves it from a book's trim and paper instead.
     """
     if trim_class is None:
         return Economics(
@@ -459,7 +576,7 @@ def compare(
             scenarios.append(
                 build_scenario(
                     price, page_count, marketplace=marketplace, ink=ink,
-                    trim_class=trim_class,
+                    stock=stock, trim_class=trim_class,
                 )
             )
         except EconomicsUnavailable as exc:
@@ -470,4 +587,30 @@ def compare(
         assumptions=assumptions
         or default_assumptions(marketplace=marketplace, ink=ink, trim_class=trim_class),
         unavailable=tuple(unavailable),
+    )
+
+
+def for_book(
+    prices: list[float],
+    *,
+    trim: object,
+    paper: object,
+    page_count: int,
+    marketplace: str = "amazon.com",
+) -> Economics:
+    """Price a book from its own trim and paper.
+
+    The single call worth using from the pipeline: it takes the ``TrimSize``
+    and ``Paper`` the book already declares and resolves ink, stock and trim
+    class from them, so the cost table cannot end up describing a different
+    book from the one being built. ``trim`` and ``paper`` are typed loosely
+    only to keep this module independent of ``kdp.specs``.
+    """
+    return compare(
+        prices,
+        page_count,
+        marketplace=marketplace,
+        ink=Ink(paper.ink),
+        stock=PaperStock(paper.stock),
+        trim_class=TrimClass(trim.cost_class),
     )

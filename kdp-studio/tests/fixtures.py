@@ -7,6 +7,8 @@ cannot drift away from what the code actually produces.
 
 from __future__ import annotations
 
+from kdp.models import economics
+from kdp.specs import get_paper, get_trim
 from kdp.models import (
     AssetPrompt,
     BookManifest,
@@ -19,7 +21,6 @@ from kdp.models import (
     PageSpec,
     PromptPlan,
     ResearchBrief,
-    TrimClass,
     compare,
 )
 
@@ -286,13 +287,14 @@ def build_manifest() -> BookManifest:
         strategy=build_strategy(),
         prompt_plan=build_prompt_plan(spec),
         metadata=build_metadata(),
-        # The trim class is stated rather than inferred: KDP prices regular
-        # and large trims differently and kdp/specs/trim.py does not yet
-        # know which 8.5x11 is. The fixture says REGULAR so the pipeline
-        # can be exercised end to end; the resulting Economics reports at
-        # UNKNOWN confidence precisely because of this assumption.
-        economics=compare(
-            [5.99, 7.99, 9.99], spec.page_count, trim_class=TrimClass.REGULAR
+        # Resolved from the book's own trim and paper. 8.5x11 is large trim,
+        # so a 50-page black-ink interior costs $2.84 a copy to print, not the
+        # $2.30 a regular trim would.
+        economics=economics.for_book(
+            [5.99, 7.99, 9.99],
+            trim=get_trim(spec.trim),
+            paper=get_paper(spec.paper),
+            page_count=spec.page_count,
         ),
         stage="research",
     )

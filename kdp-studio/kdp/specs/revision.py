@@ -23,7 +23,7 @@ from typing import Final, Literal
 
 #: Bumped whenever any number in this sub-package changes. Recorded into every
 #: manifest and every gate result, so an old result can always be explained.
-SPEC_REVISION: Final[str] = "2026.08-r3"
+SPEC_REVISION: Final[str] = "2026.08-r4"
 
 VerificationState = Literal["VERIFIED", "UNVERIFIED"]
 
@@ -56,6 +56,14 @@ class SourceRecord:
     #: one. Free text; KDP does not version its help pages consistently, so an
     #: access date is often all there is.
     spec_version: str = ""
+    #: Further official pages supporting the same table, where more than one
+    #: page was needed.
+    supporting_urls: tuple[str, ...] = field(default_factory=tuple)
+    #: Questions the source itself left open. A table with any of these is
+    #: NOT verified however good its citation: a source that contradicts itself
+    #: has been read, not resolved, and the difference matters at the point
+    #: someone relies on the number.
+    open_questions: tuple[str, ...] = field(default_factory=tuple)
     #: Where to go and read, when the exact URL is known. Left empty rather
     #: than guessed: a confidently wrong link sends someone to the wrong page
     #: and they verify against it. ``find`` names the page instead.
@@ -69,6 +77,8 @@ class SourceRecord:
 
     @property
     def state(self) -> VerificationState:
+        if self.open_questions:
+            return "UNVERIFIED"
         return "VERIFIED" if (self.source_url and self.verified_on) else "UNVERIFIED"
 
     def is_stale(self, today: date | None = None) -> bool:
@@ -94,6 +104,8 @@ class SourceRecord:
             "verified_on": self.verified_on,
             "marketplace": self.marketplace,
             "spec_version": self.spec_version,
+            "supporting_urls": list(self.supporting_urls),
+            "open_questions": list(self.open_questions),
             "expected_url": self.expected_url,
             "find": self.find,
             "confirm": list(self.confirm),
@@ -133,97 +145,146 @@ _UNVERIFIED_NOTE = (
 #: One record per table. Fill in ``source_url``, ``verified_on`` and, where the
 #: page shows one, ``spec_version`` after reading the primary page. That alone
 #: flips the table to VERIFIED — ``kdp verify-specs`` prints the checklist.
+#: Verified against official KDP Help pages on 2026-08-31 for Amazon.com/US.
+#:
+#: Five tables are verified. ``royalty`` is not, and deliberately so: KDP's own
+#: printing-cost table labels adjacent page bands with the same boundary, so at
+#: exactly 110 pages two different prices are published. The page was read; the
+#: contradiction was not resolved. Recording that as verified would convert a
+#: known discrepancy into a silent tie-break.
+_VERIFIED_ON: Final[str] = "2026-08-31"
+_MARKETPLACE: Final[str] = "Amazon.com / United States"
+_SPEC_VERSION: Final[str] = "KDP Help en_US, retrieved 2026-08-31"
+
 SOURCES: Final[dict[str, SourceRecord]] = {
     record.table: record
     for record in (
         SourceRecord(
-            "trim",
-            expected_url="https://kdp.amazon.com/en_US/help/topic/G201857950",
+            "interior",
+            source_url="https://kdp.amazon.com/en_US/help/topic/GVBQ3CMEQW3W2VL6",
+            verified_on=_VERIFIED_ON,
+            marketplace=_MARKETPLACE,
+            spec_version=_SPEC_VERSION,
             confirm=(
-                "the complete list of trim sizes offered, and which are "
-                "standard — the 15 entries here are NOT known to be complete",
-                "which sizes are available for expanded distribution",
-                "which sizes KDP prices as regular trim and which as large; "
-                "economics cannot price a book without this",
+                "bleed 0.125in, applied to the outer edge in width and to both "
+                "top and bottom in height",
+                "outside margin at least 0.25in without bleed, 0.375in with",
+                "gutter bands 0.375 / 0.5 / 0.625 / 0.75 / 0.875in by page count",
             ),
-            notes=_UNVERIFIED_NOTE
-            + " Values live in kdp/specs/trim.py. This table has NOT been "
-            "reconciled against KDP's current trim-size list — the list was not "
-            "supplied — so the 15 entries may be incomplete or out of date. It "
-            "also carries no cost class per size (regular vs large trim), which "
-            "is what economics needs to price a book from its trim alone.",
+            notes="All values confirmed unchanged. Live in kdp/specs/interior.py.",
+        ),
+        SourceRecord(
+            "trim",
+            source_url="https://kdp.amazon.com/en_US/help/topic/G201857950",
+            verified_on=_VERIFIED_ON,
+            marketplace=_MARKETPLACE,
+            spec_version=_SPEC_VERSION,
+            confirm=(
+                "the 16 US paperback trim sizes",
+                "large trim is over 6.12in wide or over 9in high",
+            ),
+            notes=(
+                "Reconciled: 8.25x8.25 was missing and has been added, making "
+                "16 sizes. Cost class is derived from KDP's own rule rather "
+                "than transcribed per size, and the derivation is asserted "
+                "against the published regular/large split in tests. 8.5x11 is "
+                "LARGE. Expanded-distribution eligibility (the 'standard' flag) "
+                "was NOT part of this check and is None for unverified sizes."
+            ),
         ),
         SourceRecord(
             "paper",
-            find="KDP Help > Print Options (paper type, ink, page count limits)",
+            source_url="https://kdp.amazon.com/en_US/help/topic/G201857950",
+            verified_on=_VERIFIED_ON,
+            marketplace=_MARKETPLACE,
+            spec_version=_SPEC_VERSION,
             confirm=(
-                "paper stocks offered and their per-page caliper",
-                "minimum and maximum page count for each stock",
+                "spine caliper per page: white 0.002252, cream 0.0025, "
+                "groundwood 0.00235, colour 0.002347",
             ),
-            notes=_VALUES_SUPPLIED_NOTE
-            + " Spine coefficients corrected: standard colour moved from "
-            "0.002347 to 0.002252, matching black ink. Values live in "
-            "kdp/specs/paper.py. Page-count limits were NOT re-verified.",
-        ),
-        SourceRecord(
-            "interior",
-            expected_url="https://kdp.amazon.com/en_US/help/topic/GVBQ3CMEQW3W2VL6",
-            confirm=(
-                "bleed dimensions, and that a bleed page grows 0.125 in in "
-                "width but 0.25 in in height",
-                "minimum outside/top/bottom margins with and without bleed",
-                "the inside (gutter) margin bands by page count",
+            notes=(
+                "Groundwood added. Both colour tiers share 0.002347: the "
+                "submission guideline gives one colour caliper, and KDP "
+                "separates standard from premium in printing cost, not paper "
+                "thickness. A revision in between briefly carried 0.002252 for "
+                "standard colour on an earlier instruction; that is superseded. "
+                "Per-stock page-count limits were NOT separately verified — "
+                "they are taken from the ranges the printing-cost table prices, "
+                "so a book outside them fails at pricing regardless."
             ),
-            notes=_VALUES_SUPPLIED_NOTE
-            + " Bleed, margins and gutter bands were confirmed unchanged. "
-            "Values live in kdp/specs/interior.py.",
         ),
         SourceRecord(
             "cover",
-            find="KDP Help > Format Your Paperback Cover / Cover Requirements",
+            source_url="https://kdp.amazon.com/en_US/help/topic/G201857950",
+            verified_on=_VERIFIED_ON,
+            marketplace=_MARKETPLACE,
+            spec_version=_SPEC_VERSION,
             confirm=(
-                "the full-wrap cover formula and its bleed allowance",
-                "the spine width calculation",
-                "the page count at or above which spine text is printed",
+                "cover bleed 0.125in and safe margin at least 0.25in",
+                "spine text only above 79 pages",
+                "spine text safety 0.0625in each side",
             ),
-            notes=_VALUES_SUPPLIED_NOTE
-            + " The contested spine-text threshold is resolved: KDP prints no "
-            "spine text at 79 pages or fewer, so 80 is the first eligible page "
-            "count. The previous value of 100 was a conservative guess that "
-            "silently withheld spine text from books of 80 to 99 pages. Values "
-            "live in kdp/specs/interior.py and kdp/specs/cover.py.",
+            notes=(
+                "The contested threshold is settled: spine text requires more "
+                "than 79 pages, so 80 is the first eligible count. An earlier "
+                "revision guessed 100 and silently withheld spine text from "
+                "books of 80 to 99 pages."
+            ),
         ),
         SourceRecord(
             "royalty",
-            find="KDP Help > Printing Cost & Royalty Calculation (paperback)",
-            confirm=(
-                "the paperback royalty rate for this marketplace",
-                "the printing-cost formula: fixed charge plus per-page charge",
+            source_url="https://kdp.amazon.com/en_US/help/topic/G201834330",
+            supporting_urls=(
+                "https://kdp.amazon.com/en_US/help/topic/G201834340",
             ),
-            notes=_VALUES_SUPPLIED_NOTE
-            + " The model is now banded rather than formulaic: royalty is 50% "
-            "below $9.99 and 60% at or above on amazon.com, and black-ink "
-            "regular-trim printing is a flat $2.30 to 110 pages then $1.00 + "
-            "$0.012/page. Only that one marketplace/ink/trim combination is "
-            "held; every other raises rather than extrapolating. Projections "
-            "still report at UNKNOWN confidence because the trim table carries "
-            "no cost class, so no book can be mapped to a cost band from its "
-            "trim alone.",
+            verified_on=_VERIFIED_ON,
+            marketplace=_MARKETPLACE,
+            spec_version=_SPEC_VERSION,
+            confirm=(
+                "royalty 50% at $9.98 or below, 60% at $9.99 or above",
+                "royalty = rate x list price - printing cost",
+                "printing cost bands by ink, paper, trim class and page count",
+            ),
+            open_questions=(
+                "KDP's printing-cost table labels the black-ink bands 24-110 "
+                "AND 110-828, so exactly 110 pages carries two published "
+                "prices ($2.30/$2.84 flat, or $1.00 + per-page). Which band "
+                "KDP actually applies at 110 is unresolved. The model refuses "
+                "to price a 110-page black-ink book rather than choosing.",
+                "Groundwood bands jump 112 to 114 and premium colour jumps 40 "
+                "to 42, leaving 113 and 41 pages with no published price. The "
+                "model refuses those too.",
+            ),
+            notes=(
+                "Ten cost tables recorded, keyed by marketplace, ink, paper "
+                "stock and trim class. Nothing is interpolated. Rate and cost "
+                "bands are otherwise confirmed; this table stays UNVERIFIED "
+                "solely because of the boundary questions above."
+            ),
         ),
         SourceRecord(
             "policy",
-            find="KDP Help > Content Guidelines, and the AI-generated content page",
-            confirm=(
-                "the AI-generated content disclosure wording, and the "
-                "generated/assisted distinction",
-                "the low-content policy, and that coloring books are listed "
-                "under 'Not Generally Low-Content'",
-                "the duplicative-content policy, which applies to every title",
-                "the limit on new titles per 24 hours",
+            source_url="https://kdp.amazon.com/en_US/help/topic/G200672390/",
+            supporting_urls=(
+                "https://kdp.amazon.com/en_US/help/topic/GGE5T76TWKA85DJM",
             ),
-            notes=_UNVERIFIED_NOTE
-            + " Drives G12. Cross-check the disclosure wording quoted in "
-            "COMPLIANCE.md against the live page.",
+            verified_on=_VERIFIED_ON,
+            marketplace=_MARKETPLACE,
+            spec_version=_SPEC_VERSION,
+            confirm=(
+                "AI-generated text, images and translations must be disclosed",
+                "AI-assisted content need not be disclosed",
+                "AI-generated cover and interior images count as AI-generated",
+                "coloring books are listed under 'Not Generally Low-Content'",
+            ),
+            notes=(
+                "The publisher remains responsible for IP and content "
+                "compliance regardless of how content was produced — no "
+                "automated check in this package discharges that. The daily "
+                "new-title limit was NOT part of this check; the submission "
+                "checklist still cites three per 24 hours from a secondary "
+                "source."
+            ),
         ),
     )
 }
@@ -238,24 +299,22 @@ def _wrap(text: str, first: str, rest: str, width: int = 78) -> list[str]:
 
 
 def checklist() -> str:
-    """What a human needs to do to verify the tables, as readable text.
+    """What still needs doing, as readable text.
 
-    Exists because the verification cannot be automated from inside this
-    package — the pages are not reachable here — and a blocker with no
-    instructions is just an obstacle.
+    The verification itself happens outside this package — the pages are not
+    reachable from it — so a blocker with no instructions would just be an
+    obstacle.
     """
     lines = [
         "KDP specification verification checklist",
         "=" * 40,
         "",
-        "Each table below is UNVERIFIED until a human reads the primary KDP",
-        "Help page and confirms the values. Secondary sources — blogs,",
-        "calculators, summaries — do not count and must not be recorded.",
+        "A table is VERIFIED when an official KDP Help page was read, its URL",
+        "and date recorded, and the source left no open questions. Secondary",
+        "sources — blogs, calculators, summaries — do not count.",
         "",
-        "Where a URL is shown it was seen in a search result and is a starting",
-        "point, not a guarantee: confirm the page you land on is the one named.",
-        "Where only a page title is shown, no URL is recorded because none was",
-        "confirmed, and guessing one would send you to the wrong page.",
+        "A table marked UNVERIFIED with a source recorded has been read but not",
+        "settled: the page itself is ambiguous. Those are listed as OPEN below.",
         "",
         f"Verifications expire after {VERIFICATION_TTL_DAYS} days.",
         "",
@@ -263,20 +322,26 @@ def checklist() -> str:
     for name in sorted(SOURCES):
         record = SOURCES[name]
         lines.append(f"[{record.state}] {name}")
-        if record.expected_url:
+        if record.source_url:
+            lines.append(f"  source:  {record.source_url}")
+        elif record.expected_url:
             lines.append(f"  read:    {record.expected_url}")
         else:
-            # No URL is recorded rather than a guessed one: being sent to the
-            # wrong page is worse than being asked to find the right one.
             lines.append(f"  find:    {record.find or '(page not identified)'}")
-        for item in record.confirm:
-            lines.append(f"  confirm: {item}")
-        if record.state == "VERIFIED":
+        for url in record.supporting_urls:
+            lines.append(f"  also:    {url}")
+        if record.verified_on:
             lines.append(f"  checked: {record.verified_on} ({record.marketplace})")
-            if record.spec_version:
-                lines.append(f"  version: {record.spec_version}")
-            if record.is_stale():
-                lines.append("  STALE — re-check; the values may have moved.")
+        if record.spec_version:
+            lines.append(f"  version: {record.spec_version}")
+        if record.is_stale():
+            lines.append("  STALE — re-check; the values may have moved.")
+        for item in record.confirm:
+            for line in _wrap(item, "  confirm: ", "           "):
+                lines.append(line)
+        for question in record.open_questions:
+            for line in _wrap(question, "  OPEN:    ", "           "):
+                lines.append(line)
         if record.notes:
             for line in _wrap(record.notes, "  note:    ", "           "):
                 lines.append(line)
@@ -284,15 +349,13 @@ def checklist() -> str:
 
     lines += [
         "To record a verification, edit kdp/specs/revision.py and set on that",
-        "table's SourceRecord:",
+        "table's SourceRecord: source_url, verified_on, spec_version and",
+        "marketplace. Clear open_questions only once the source's own ambiguity",
+        "has actually been resolved.",
         "",
-        '    source_url="<the page you actually read>",',
-        '    verified_on="YYYY-MM-DD",',
-        '    spec_version="<any revision label the page shows>",',
-        '    marketplace="amazon.com",',
-        "",
-        "Then bump SPEC_REVISION and run the test suite: the geometry tests",
-        "assert the arithmetic, so a changed constant shows up immediately.",
+        "Then bump SPEC_REVISION and run the test suite: the geometry and",
+        "economics tests assert the arithmetic, so a changed constant shows up",
+        "immediately.",
     ]
     return "\n".join(lines)
 
@@ -328,23 +391,37 @@ def verification_problem(*tables: str, today: date | None = None) -> str | None:
     who has never opened this file.
     """
     names = tables or tuple(SOURCES)
-    unverified = [t for t in names if source(t).state == "UNVERIFIED"]
+    unsourced = [
+        t for t in names
+        if source(t).state == "UNVERIFIED" and not source(t).open_questions
+    ]
+    unresolved = [t for t in names if source(t).open_questions]
     stale = [t for t in names if source(t).is_stale(today)]
-    if not unverified and not stale:
+    if not unsourced and not unresolved and not stale:
         return None
 
     parts = []
-    if unverified:
-        parts.append(f"never verified: {', '.join(sorted(unverified))}")
+    if unsourced:
+        parts.append(f"never verified: {', '.join(sorted(unsourced))}")
+    if unresolved:
+        # Read but not settled. Saying "never verified" here would be wrong and
+        # would send someone to re-read a page they have already read.
+        detail = "; ".join(
+            f"{t} — {q}"
+            for t in sorted(unresolved)
+            for q in source(t).open_questions
+        )
+        parts.append(f"sourced but unresolved ({detail})")
     if stale:
         parts.append(
             f"verified more than {VERIFICATION_TTL_DAYS} days ago: "
             f"{', '.join(sorted(stale))}"
         )
     return (
-        f"KDP specification tables cannot be trusted ({'; '.join(parts)}). "
-        "Confirm the values against the primary KDP Help pages and record the "
-        "URL and date in kdp/specs/revision.py before certifying any book."
+        f"KDP specification tables cannot be relied on ({'. '.join(parts)}). "
+        "Record a source URL and date in kdp/specs/revision.py for anything "
+        "never verified, and resolve the open questions for anything sourced "
+        "but unresolved, before certifying a book."
     )
 
 

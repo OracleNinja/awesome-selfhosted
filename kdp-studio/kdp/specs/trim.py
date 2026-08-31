@@ -6,11 +6,14 @@ narrow a book's distribution, so the spec gate reports them rather than
 silently accepting them.
 
 ``cost_class`` says whether KDP prices a size as regular or large trim, which
-changes the printing cost per copy. **Every entry is currently ``None``**: this
-table has not been reconciled against KDP's own trim-size list, so no size can
-be mapped to a cost class. Economics therefore refuses to price any book until
-a class is supplied explicitly — see ``kdp/models/economics.py``. The absence is
-deliberate; a guess here would produce a confident, wrong margin.
+changes the printing cost per copy — for an 8.5x11 book, by 54 cents on every
+single copy.
+
+It is *derived* from KDP's own rule rather than transcribed per size: large
+trim is anything more than 6.12 inches wide or more than 9 inches high. Deriving
+it means a size added later is classified correctly instead of defaulting to
+whatever someone typed, and the test suite asserts the derivation against KDP's
+explicit published list, so the rule and the table have to agree.
 """
 
 from __future__ import annotations
@@ -20,6 +23,11 @@ from typing import Final
 
 from ..errors import SpecError
 
+#: KDP prices a trim as *large* when it exceeds either of these. Both bounds
+#: are exclusive: 6x9 is regular, 6.14x9.21 is large.
+LARGE_TRIM_MAX_WIDTH_IN: Final[float] = 6.12
+LARGE_TRIM_MAX_HEIGHT_IN: Final[float] = 9.0
+
 
 @dataclass(frozen=True, slots=True)
 class TrimSize:
@@ -28,11 +36,21 @@ class TrimSize:
     key: str
     width_in: float
     height_in: float
-    standard: bool
+    #: Whether the size distributes without a surcharge. NOT verified against
+    #: KDP — the 2026-08-31 check covered the trim list and its cost classes,
+    #: not expanded-distribution eligibility. None means unverified.
+    standard: bool | None
     note: str = ""
-    #: "regular" or "large" once verified against KDP's trim-size table.
-    #: None means unreconciled, which is every entry at present.
-    cost_class: str | None = None
+
+    @property
+    def cost_class(self) -> str:
+        """"regular" or "large", by KDP's own definition of large trim."""
+        return (
+            "large"
+            if self.width_in > LARGE_TRIM_MAX_WIDTH_IN
+            or self.height_in > LARGE_TRIM_MAX_HEIGHT_IN
+            else "regular"
+        )
 
     @property
     def label(self) -> str:
@@ -54,9 +72,10 @@ TRIM_SIZES: Final[dict[str, TrimSize]] = {
         TrimSize("7.5x9.25", 7.5, 9.25, True),
         TrimSize("8x10", 8.0, 10.0, True, "Common for children's activity books."),
         TrimSize("8.5x11", 8.5, 11.0, True, "The workhorse trim for coloring books."),
-        TrimSize("8.25x6", 8.25, 6.0, False, "Landscape; non-standard."),
-        TrimSize("8.5x8.5", 8.5, 8.5, False, "Square; non-standard."),
-        TrimSize("8.27x11.69", 8.27, 11.69, False, "A4; non-standard."),
+        TrimSize("8.25x6", 8.25, 6.0, None, "Landscape."),
+        TrimSize("8.25x8.25", 8.25, 8.25, None, "Square."),
+        TrimSize("8.5x8.5", 8.5, 8.5, None, "Square."),
+        TrimSize("8.27x11.69", 8.27, 11.69, None, "A4."),
     )
 }
 
@@ -64,18 +83,8 @@ TRIM_SIZES: Final[dict[str, TrimSize]] = {
 DEFAULT_TRIM: Final[str] = "8.5x11"
 
 
-#: True once every entry carries a verified cost class.
-def trim_table_reconciled() -> bool:
-    """Whether every trim size has been mapped to a printing-cost class.
-
-    False today. Until it is true, economics cannot resolve a printing cost
-    from a book's trim alone.
-    """
-    return all(t.cost_class is not None for t in TRIM_SIZES.values())
-
-
-def unreconciled_trims() -> tuple[str, ...]:
-    return tuple(sorted(k for k, t in TRIM_SIZES.items() if t.cost_class is None))
+def trims_by_cost_class(cost_class: str) -> tuple[str, ...]:
+    return tuple(sorted(k for k, t in TRIM_SIZES.items() if t.cost_class == cost_class))
 
 
 def get_trim(key: str) -> TrimSize:

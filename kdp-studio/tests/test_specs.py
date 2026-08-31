@@ -72,10 +72,10 @@ def test_spine_width_is_page_count_times_caliper():
     [
         ("bw_white", 0.002252),
         ("bw_cream", 0.0025),
-        # Standard colour prints on the same stock as black ink. An earlier
-        # revision carried the premium figure here and over-estimated every
-        # standard-colour spine.
-        ("standard_colour", 0.002252),
+        ("bw_groundwood", 0.00235),
+        # KDP's submission guideline gives one caliper for colour paper. The
+        # tiers differ in printing cost, not in paper thickness.
+        ("standard_colour", 0.002347),
         ("premium_colour", 0.002347),
     ],
 )
@@ -84,12 +84,23 @@ def test_spine_coefficients_are_the_verified_ones(stock, caliper):
     assert get_paper(stock).spine_width_in(200) == pytest.approx(200 * caliper)
 
 
-def test_standard_and_premium_colour_spines_differ():
-    """They are distinct stocks; treating them as one was the original bug."""
-    standard = get_paper("standard_colour").spine_width_in(300)
-    premium = get_paper("premium_colour").spine_width_in(300)
-    assert standard != premium
-    assert standard == pytest.approx(get_paper("bw_white").spine_width_in(300))
+def test_both_colour_tiers_share_one_spine_caliper():
+    """Verified 2026-08-31: the guideline states one figure for colour paper.
+
+    A revision in between carried 0.002252 for standard colour on an earlier
+    instruction. That is superseded — KDP separates the tiers in printing cost,
+    not in thickness.
+    """
+    assert get_paper("standard_colour").spine_width_in(300) == pytest.approx(
+        get_paper("premium_colour").spine_width_in(300)
+    )
+
+
+def test_each_paper_declares_its_ink_and_stock():
+    """The bridge economics uses to find a cost table from a book's paper."""
+    assert (get_paper("bw_white").ink, get_paper("bw_white").stock) == ("black", "white")
+    assert get_paper("bw_groundwood").stock == "groundwood"
+    assert get_paper("premium_colour").ink == "premium_colour"
 
 
 def test_cover_canvas_spans_both_panels_the_spine_and_the_bleed():
@@ -143,22 +154,33 @@ def test_narrow_spine_reports_no_usable_text_width():
 def test_paper_page_count_bounds():
     assert get_paper("bw_white").supports_page_count(24) is True
     assert get_paper("bw_white").supports_page_count(23) is False
+    # Standard colour starts at 72; premium runs the full range.
     assert get_paper("standard_colour").supports_page_count(60) is False
-    assert get_paper("premium_colour").supports_page_count(601) is False
+    assert get_paper("standard_colour").supports_page_count(601) is False
+    assert get_paper("premium_colour").supports_page_count(601) is True
 
 
-def test_the_trim_table_is_not_yet_reconciled_against_kdp():
-    """Recorded as machine state, not a comment.
+def test_the_trim_table_matches_kdp_s_published_list():
+    """Reconciled 2026-08-31: 16 US paperback sizes, 5 regular and 11 large."""
+    from kdp.specs import TRIM_SIZES, trims_by_cost_class
 
-    Which sizes KDP prices as regular rather than large trim has not been
-    checked, so no size carries a cost class and economics refuses to price a
-    book from its trim alone.
-    """
-    from kdp.specs import TRIM_SIZES, trim_table_reconciled, unreconciled_trims
+    assert len(TRIM_SIZES) == 16
+    assert "8.25x8.25" in TRIM_SIZES  # was missing before the reconciliation
+    assert len(trims_by_cost_class("regular")) == 5
+    assert len(trims_by_cost_class("large")) == 11
 
-    assert trim_table_reconciled() is False
-    assert len(unreconciled_trims()) == len(TRIM_SIZES)
-    assert all(t.cost_class is None for t in TRIM_SIZES.values())
+
+def test_large_trim_is_derived_from_kdp_s_rule():
+    from kdp.specs import LARGE_TRIM_MAX_HEIGHT_IN, LARGE_TRIM_MAX_WIDTH_IN, TRIM_SIZES
+
+    for trim in TRIM_SIZES.values():
+        expected = (
+            "large"
+            if trim.width_in > LARGE_TRIM_MAX_WIDTH_IN
+            or trim.height_in > LARGE_TRIM_MAX_HEIGHT_IN
+            else "regular"
+        )
+        assert trim.cost_class == expected, trim.key
 
 
 def test_unknown_trim_and_paper_are_rejected_by_name():
