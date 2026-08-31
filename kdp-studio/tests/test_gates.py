@@ -12,6 +12,7 @@ import pytest
 from kdp.errors import ModelError
 from kdp.gates import (
     metadata_compliance,
+    strategy_differentiation,
     originality,
     print_preflight,
     provenance_complete,
@@ -21,6 +22,9 @@ from kdp.gates import (
 from kdp.gates.base import Status
 from kdp.models import (
     AIRole,
+    BookStrategy,
+    Claim,
+    Confidence,
     AssetKind,
     AssetProvenance,
     BookManifest,
@@ -452,3 +456,39 @@ def test_thin_description_is_flagged(manifest):
 def test_evidence_carries_a_human_readable_disclosure_statement(manifest):
     result = metadata_compliance.run(manifest)
     assert "Disclose to KDP for: image" in result.evidence["disclosure_statement"]
+
+
+def test_a_deliberate_unknown_claim_is_not_reported_as_unlabelled():
+    """UNKNOWN is the enum default *and* a real answer.
+
+    A claim that says "we looked and there is no data", with the basis stating
+    so, is correct usage. Warning about it would fire on every honest strategy
+    and teach people to skim past the warnings that matter.
+    """
+    strategy = BookStrategy(
+        strategy_id="s", brief_id="b", niche="n", audience="a",
+        unique_angle="single-sided pages backed by blanks, verified page by page",
+        purpose="p",
+        differentiators=("printed single-sided", "outlines verified closed"),
+        risks=("segment is crowded",),
+        claims=(
+            Claim("sales volume", "unknown", Confidence.UNKNOWN,
+                  "no sales data available; not used for any decision"),
+        ),
+    )
+    result = strategy_differentiation.run(strategy)
+    assert "strategy.unlabelled_claims" not in codes(result)
+
+
+def test_an_unknown_claim_with_no_basis_is_still_flagged():
+    """A forgotten label and a considered one are told apart by the basis."""
+    strategy = BookStrategy(
+        strategy_id="s", brief_id="b", niche="n", audience="a",
+        unique_angle="single-sided pages backed by blanks, verified page by page",
+        purpose="p",
+        differentiators=("printed single-sided", "outlines verified closed"),
+        risks=("segment is crowded",),
+        claims=(Claim("sales volume", "12000 a month"),),
+    )
+    result = strategy_differentiation.run(strategy)
+    assert "strategy.unlabelled_claims" in codes(result)

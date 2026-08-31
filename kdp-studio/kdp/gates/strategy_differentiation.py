@@ -149,7 +149,17 @@ def run(strategy: BookStrategy | None) -> GateResult:
 
     # Estimated figures presented without a confidence label are how a guess
     # becomes a fact three documents later.
-    unlabelled = [c.label for c in strategy.claims if c.confidence is Confidence.UNKNOWN]
+    #
+    # UNKNOWN is both the enum's default and a deliberate answer, so the two
+    # are indistinguishable from the confidence alone. A stated basis separates
+    # them: "we looked and there is no data" comes with a reason, a forgotten
+    # label does not. Flagging both would fire on correct usage, and a warning
+    # that cries wolf gets ignored — including on the run where it is right.
+    unlabelled = [
+        c.label
+        for c in strategy.claims
+        if c.confidence is Confidence.UNKNOWN and not c.basis.strip()
+    ]
     if unlabelled:
         findings.append(
             Finding(

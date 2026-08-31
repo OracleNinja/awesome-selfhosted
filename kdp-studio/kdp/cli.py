@@ -287,6 +287,133 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return EXIT_OK if outcome.ok else EXIT_STOP
 
 
+def cmd_register_asset(args: argparse.Namespace) -> int:
+    """Bring an externally produced image into the pipeline with provenance.
+
+    The path for a generator this package does not drive itself — an MCP tool
+    an agent calls, or a human-drawn page. The image is inspected on the way in
+    rather than on trust: an unreadable or defective file is rejected here
+    instead of surfacing three stages later as a mystery.
+    """
+    from dataclasses import replace
+
+    from .generation import asset_id_for
+    from .inspection.image import ImageLoadError, inspect_image
+    from .models.provenance import (
+        AIRole,
+        AssetKind,
+        AssetProvenance,
+        AssetStatus,
+        Transformation,
+        content_hash,
+    )
+
+    manifest = BookManifest.read(args.manifest)
+    page = next(
+        (p for p in manifest.spec.art_pages if p.page_id == args.page_id), None
+    )
+    if page is None:
+        sys.stderr.write(
+            f"{args.page_id!r} is not an art page in this book. Art pages: "
+            + ", ".join(p.page_id for p in manifest.spec.art_pages[:10])
+            + "\n"
+        )
+        return EXIT_USAGE
+
+    source = Path(args.image)
+    if not source.is_file():
+        sys.stderr.write(f"no readable file at {args.image}\n")
+        return EXIT_USAGE
+
+    try:
+        inspection = inspect_image(source)
+    except ImageLoadError as exc:
+        sys.stderr.write(f"refusing to register an image that cannot be read: {exc}\n")
+        return EXIT_USAGE
+
+    ai_role = AIRole(args.ai_role)
+    if ai_role in (AIRole.ASSISTED, AIRole.GENERATED) and not args.model:
+        sys.stderr.write(
+            f"--model is required for ai-role {args.ai_role}: an AI claim with "
+            "no record of what produced it is not an audit trail\n"
+        )
+        return EXIT_USAGE
+
+    book_dir = Path(args.manifest).parent
+    assets_dir = book_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    attempt = len(manifest.attempts(args.page_id)) + 1
+    asset_id = asset_id_for(args.page_id, attempt)
+    suffix = source.suffix.lstrip(".").lower() or "png"
+    target = assets_dir / f"{asset_id}.{suffix}"
+    data = source.read_bytes()
+    target.write_bytes(data)
+
+    prompt = (
+        manifest.prompt_plan.for_page(args.page_id) if manifest.prompt_plan else None
+    )
+    record = AssetProvenance(
+        asset_id=asset_id,
+        page_id=args.page_id,
+        kind=AssetKind.IMAGE,
+        ai_role=ai_role,
+        content_hash=content_hash(data),
+        tool=args.model or args.provider,
+        provider=args.provider,
+        prompt_id=args.prompt_id or (prompt.prompt_id if prompt else None),
+        prompt_version=args.prompt_version or (prompt.version if prompt else None),
+        attempt=attempt,
+        # PENDING, never approved: an asset arriving from outside does not get
+        # to skip the QA verdict that a generated one has to pass.
+        status=AssetStatus.PENDING,
+        transformation=Transformation(args.transformation),
+        width=inspection.width,
+        height=inspection.height,
+        file_format=suffix,
+        path=f"assets/{target.name}",
+        created_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        note=args.note or "",
+    )
+    manifest.with_assets(manifest.assets + (record,)).write(args.manifest)
+
+    problems = inspection.problems()
+    sys.stdout.write(
+        f"registered {asset_id} ({inspection.width}x{inspection.height}) as attempt "
+        f"{attempt} for {args.page_id}, status pending\n"
+    )
+    for issue in problems:
+        sys.stdout.write(f"  {'blocker' if issue.blocking else 'warning'}: {issue.message}\n")
+    if problems:
+        sys.stdout.write("  QA will see these. Registered anyway; the verdict is QA's.\n")
+    return EXIT_OK
+
+
+def cmd_providers(args: argparse.Namespace) -> int:
+    """Report which generation providers could run right now, and why not."""
+    from .providers import METERED, PROVIDERS, get_provider
+
+    ready = True
+    for name in sorted(PROVIDERS):
+        provider = get_provider(name)
+        available = provider.available()
+        ready = ready and available
+        metered = " (metered)" if name in METERED else ""
+        sys.stdout.write(
+            f"{name}{metered}: {'available' if available else 'UNAVAILABLE'}\n"
+        )
+        checks = getattr(provider, "readiness", None)
+        if checks:
+            for key, ok in checks().items():
+                sys.stdout.write(f"    [{'x' if ok else ' '}] {key}\n")
+        if not available:
+            reason = getattr(provider, "unavailable_reason", lambda: "not available")()
+            for line in reason.split(". "):
+                if line.strip():
+                    sys.stdout.write(f"    {line.strip().rstrip('.')}.\n")
+    return EXIT_OK
+
+
 def cmd_review_assets(args: argparse.Namespace) -> int:
     """Approve or reject one generated asset version."""
     from .generation import approve_asset, reject_asset
@@ -566,6 +693,34 @@ def build_parser() -> argparse.ArgumentParser:
         "switch, because naming them is what makes the spend deliberate.",
     )
     p.set_defaults(func=cmd_generate)
+
+    p = sub.add_parser(
+        "register-asset",
+        help="record an externally produced image (MCP tool, or hand-drawn)",
+    )
+    p.add_argument("manifest")
+    p.add_argument("page_id")
+    p.add_argument("image", help="path to the image file")
+    p.add_argument("--provider", required=True, help="service or process that made it")
+    p.add_argument("--model", help="model id; required unless --ai-role none")
+    p.add_argument("--prompt-id")
+    p.add_argument("--prompt-version")
+    p.add_argument(
+        "--ai-role",
+        choices=("generated", "assisted", "none"),
+        default="generated",
+        help="drives the KDP disclosure answer; 'generated' is the safe default",
+    )
+    p.add_argument(
+        "--transformation",
+        choices=("generated", "repaired", "human_edited", "imported"),
+        default="generated",
+    )
+    p.add_argument("--note")
+    p.set_defaults(func=cmd_register_asset)
+
+    p = sub.add_parser("providers", help="report which providers can run, and why not")
+    p.set_defaults(func=cmd_providers)
 
     p = sub.add_parser("asset", help="approve or reject one generated asset version")
     p.add_argument("manifest")

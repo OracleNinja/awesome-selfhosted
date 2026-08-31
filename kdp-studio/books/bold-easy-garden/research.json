@@ -1,0 +1,62 @@
+{
+  "brief_id": "brief-bold-easy-01",
+  "segment": "large-print bold-line colouring for low-vision and limited-dexterity adults",
+  "signals": [
+    {
+      "signal_id": "s1",
+      "segment": "bold-and-easy seniors",
+      "price_usd": 9.0,
+      "page_count": 80,
+      "trim": "8.5x11",
+      "demand_band": "high",
+      "observations": [
+        "the bold-and-easy style is repeatedly described as growing faster than the titles serving it",
+        "buyers named are seniors, beginners, and people who find intricate adult designs overwhelming",
+        "forty designs printed single-sided is the common shape, giving about eighty interior pages"
+      ]
+    },
+    {
+      "signal_id": "s2",
+      "segment": "low-vision and accessibility colouring",
+      "price_usd": 10.0,
+      "page_count": 80,
+      "trim": "8.5x11",
+      "demand_band": "high",
+      "observations": [
+        "high contrast and thick outlines are described as the functional requirement, not a style preference",
+        "arthritis, tremor and reduced hand strength are named as distinct buyer needs alongside low vision",
+        "memory care and assisted living are named as institutional buying contexts",
+        "large open areas matter as much as line weight: small regions are unusable with a shaky hand"
+      ]
+    },
+    {
+      "signal_id": "s3",
+      "segment": "colouring buyer complaints across the category",
+      "price_usd": null,
+      "page_count": null,
+      "trim": null,
+      "demand_band": "high",
+      "observations": [
+        "printing on both sides, causing marker bleed-through, is the most consistently repeated complaint",
+        "lines that do not meet, so fills leak across the page, is the second repeated complaint",
+        "inconsistency between pages within one book is a third recurring theme",
+        "some publishers print a note on reverse pages explaining the blank is deliberate"
+      ]
+    },
+    {
+      "signal_id": "s4",
+      "segment": "pricing observed in the bold-and-easy band",
+      "price_usd": 11.0,
+      "page_count": 80,
+      "trim": "8.5x11",
+      "demand_band": "medium",
+      "observations": [
+        "the observed asking range for bold-and-easy senior titles runs roughly nine to thirteen dollars",
+        "the wider colouring category clusters lower, around eight to ten dollars"
+      ]
+    }
+  ],
+  "opportunity": "The two most repeated complaints in this category, bleed-through and lines that do not close, are both mechanically verifiable rather than matters of taste. A book that can demonstrate it has neither, aimed at low-vision and limited-dexterity colourists, competes on the exact axis buyers complain about.",
+  "recommended_trim": "8.5x11",
+  "recommended_page_count": 82
+}

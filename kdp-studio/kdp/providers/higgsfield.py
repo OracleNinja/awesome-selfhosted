@@ -65,15 +65,26 @@ class HiggsfieldProvider:
         # tool and this class must not pretend it can.
         return self.mode == "http" and self.configured()
 
+    def readiness(self) -> dict[str, bool]:
+        """Each precondition, separately, so a report can name what is missing."""
+        return {
+            "http_mode_selected": self.mode == "http",
+            "credential_present": self.configured(),
+            "http_client_implemented": False,
+        }
+
     def unavailable_reason(self) -> str:
         if self.mode == "mcp":
             return (
-                "Higgsfield is configured for MCP mode: images are produced by "
-                "the Claude MCP tool and written into the book's assets "
-                "directory, then registered with `kdp register-asset`. This "
-                "class does not make the call and is not the path in use. Set "
-                f"{MODE_ENV_VAR}=http to use the direct client once it is "
-                "implemented."
+                "Higgsfield is in MCP mode, which is not this class's job. In "
+                "that mode an agent with the Higgsfield MCP tool attached calls "
+                "it, writes the PNG into the book's assets directory, and "
+                "registers it with `kdp register-asset <manifest> <page-id> "
+                "<file> --provider higgsfield --model <model>` — which "
+                "inspects the image, hashes it and records provenance. The "
+                "credential stays in the session and never reaches a manifest. "
+                f"Set {MODE_ENV_VAR}=http to use a direct client instead, once "
+                "one exists."
             )
         if not self.configured():
             return (

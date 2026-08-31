@@ -1,0 +1,41 @@
+{
+  "blocked": [],
+  "failed": [],
+  "gate_count": 1,
+  "passed": true,
+  "results": [
+    {
+      "evidence": {
+        "book_id": "bold-easy-garden",
+        "cover": {
+          "front_panel_origin_x_in": 8.80966,
+          "page_count": 82,
+          "paper": "bw_white",
+          "spine_text_allowed": true,
+          "spine_text_width_in": 0.05966,
+          "spine_width_in": 0.18466,
+          "total_height_in": 11.25,
+          "total_width_in": 17.43466,
+          "trim": "8.5x11"
+        },
+        "interior": {
+          "bleed": false,
+          "gutter_in": 0.375,
+          "live_height_in": 10.5,
+          "live_width_in": 7.875,
+          "outer_margin_in": 0.25,
+          "page_count": 82,
+          "page_height_in": 11.0,
+          "page_width_in": 8.5,
+          "trim": "8.5x11"
+        }
+      },
+      "findings": [],
+      "gate_id": "G2.spec_legality",
+      "spec_revision": "2026.08-r4",
+      "stage": "concept",
+      "status": "pass"
+    }
+  ],
+  "stage": "concept"
+}

@@ -1,0 +1,21 @@
+{
+  "blocked": [],
+  "failed": [],
+  "gate_count": 1,
+  "passed": true,
+  "results": [
+    {
+      "evidence": {
+        "brief_id": "brief-bold-easy-01",
+        "observation_count": 13,
+        "signal_count": 4
+      },
+      "findings": [],
+      "gate_id": "G1.research_hygiene",
+      "spec_revision": "2026.08-r4",
+      "stage": "research",
+      "status": "pass"
+    }
+  ],
+  "stage": "research"
+}

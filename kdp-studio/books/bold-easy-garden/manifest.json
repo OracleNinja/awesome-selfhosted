@@ -1,0 +1,1916 @@
+{
+  "approval": {
+    "approved_artifacts": [],
+    "book_fingerprint": null,
+    "decided_at": null,
+    "notes": "",
+    "reviewer": null,
+    "status": "pending"
+  },
+  "approval_is_current": false,
+  "artifacts": [],
+  "assets": [],
+  "disclosure": {
+    "categories": [],
+    "complete": true,
+    "generated_assets": [],
+    "required": false,
+    "unclassified": []
+  },
+  "economics": {
+    "assumptions": [
+      {
+        "confidence": "observed",
+        "key": "royalty_bands",
+        "source": "Verified against KDP Help 2026-08-31; see kdp/specs/revision.py table 'royalty'.",
+        "value": "amazon.com: 50% at $9.98 or below, 60% at $9.99 or above"
+      },
+      {
+        "confidence": "observed",
+        "key": "printing_cost_bands",
+        "source": "Verified against KDP Help 2026-08-31; see kdp/specs/revision.py table 'royalty'.",
+        "value": "amazon.com black, published bands by page count"
+      },
+      {
+        "confidence": "observed",
+        "key": "trim_class",
+        "source": "Derived from KDP's rule: large trim is over 6.12in wide or over 9in high.",
+        "value": "large"
+      },
+      {
+        "confidence": "estimated",
+        "key": "other_deductions",
+        "source": "Royalty here is rate x list price minus printing cost. It does not model VAT, delivery, or marketplace-specific deductions, so a real payout can be lower.",
+        "value": "not modelled"
+      }
+    ],
+    "confidence": "estimated",
+    "scenarios": [
+      {
+        "currency": "USD",
+        "gross_royalty_usd": 4.495,
+        "ink": "black",
+        "label": "$8.99",
+        "list_price_usd": 8.99,
+        "marketplace": "amazon.com",
+        "net_royalty_usd": 1.655,
+        "page_count": 82,
+        "print_cost_usd": 2.84,
+        "royalty_rate": 0.5,
+        "stock": "white",
+        "trim_class": "large",
+        "viable": true
+      },
+      {
+        "currency": "USD",
+        "gross_royalty_usd": 5.994,
+        "ink": "black",
+        "label": "$9.99",
+        "list_price_usd": 9.99,
+        "marketplace": "amazon.com",
+        "net_royalty_usd": 3.154,
+        "page_count": 82,
+        "print_cost_usd": 2.84,
+        "royalty_rate": 0.6,
+        "stock": "white",
+        "trim_class": "large",
+        "viable": true
+      },
+      {
+        "currency": "USD",
+        "gross_royalty_usd": 6.594,
+        "ink": "black",
+        "label": "$10.99",
+        "list_price_usd": 10.99,
+        "marketplace": "amazon.com",
+        "net_royalty_usd": 3.754,
+        "page_count": 82,
+        "print_cost_usd": 2.84,
+        "royalty_rate": 0.6,
+        "stock": "white",
+        "trim_class": "large",
+        "viable": true
+      },
+      {
+        "currency": "USD",
+        "gross_royalty_usd": 7.794,
+        "ink": "black",
+        "label": "$12.99",
+        "list_price_usd": 12.99,
+        "marketplace": "amazon.com",
+        "net_royalty_usd": 4.954,
+        "page_count": 82,
+        "print_cost_usd": 2.84,
+        "royalty_rate": 0.6,
+        "stock": "white",
+        "trim_class": "large",
+        "viable": true
+      }
+    ],
+    "selected": null,
+    "unavailable": []
+  },
+  "manifest_version": "2",
+  "metadata": {
+    "ai_disclosure_confirmed": false,
+    "author": "Oracle Ninja Press",
+    "book_id": "bold-easy-garden",
+    "categories": [
+      "Crafts, Hobbies & Home > Crafts & Hobbies",
+      "Health, Fitness & Dieting > Aging"
+    ],
+    "description": "Forty large, simple garden pictures to colour, drawn with thick unbroken lines and wide open spaces. Every picture is printed on its own page and backed by a blank one, so felt pens and markers cannot show through onto the next drawing. The outlines are solid and closed all the way round, so colour stays where you put it. Shapes are big and uncomplicated, with no small corners to work into, which makes them comfortable if your eyes are tired or your hands are not steady. Printed single-sided on bright white paper at 8.5 by 11 inches for high contrast.",
+    "keywords": [
+      "large print coloring book",
+      "bold and easy coloring book",
+      "coloring book for seniors",
+      "low vision coloring book",
+      "thick line coloring book",
+      "easy coloring book for adults",
+      "single sided coloring book"
+    ],
+    "language": "english",
+    "subtitle": "40 Large-Print Coloring Pages with Thick, Unbroken Lines",
+    "title": "Big Bold Garden"
+  },
+  "production_fingerprint": "sha256:2f508e96cee29afcf64f2751a9f07f60119b5186be30d982a0b0ce8a2d8af564",
+  "prompt_plan": {
+    "house_style": "Bold-and-easy line art for low-vision and limited-dexterity colourists. Solid black outline of uniform weight on pure white, every stroke unbroken so no fill can escape. Large simple shapes with generous open interiors; no region smaller than a fingertip. No shading, no hatching, no texture, no background.",
+    "plan_id": "plan-bold-easy-01",
+    "prompts": [
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-004",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:3edc4df16c5bc2880cf0ae1628782c71a02ff77407635bd223f745fb97df2e91",
+        "prompt_id": "PROMPT-PAGE-004",
+        "subject": "a single wide-petalled sunflower head",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-006",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:ce384ea97e2097f728ccf3ac97a2398acf27d7adbd0770b0495a8dd13ad50c18",
+        "prompt_id": "PROMPT-PAGE-006",
+        "subject": "one watering can, side on",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-008",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:e06859bd1b2245b8d6bf53ff4f55cb968aaf5dcf095a4c484cb7954294135add",
+        "prompt_id": "PROMPT-PAGE-008",
+        "subject": "a plant pot with three round leaves",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-010",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:1428ccc0ec8e606f68c9b340948d49965fad1b4595ae425bea0530c28a51e9f1",
+        "prompt_id": "PROMPT-PAGE-010",
+        "subject": "a large simple butterfly, wings open",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-012",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:e1f506c749b320338faa313e577231afb6a8832b76cb0344b37370227862d1ce",
+        "prompt_id": "PROMPT-PAGE-012",
+        "subject": "one snail on a broad leaf",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-014",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:6bd8f82c579116f6e88f90f0ba905120bc8aeb59dbf699dd5022e6b61b15957c",
+        "prompt_id": "PROMPT-PAGE-014",
+        "subject": "a garden spade standing in soil",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-016",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:4a5e4f46c317c59cac20c31e8a88cbc117cfd1a6ed52e113d2257ffdcfc25d2c",
+        "prompt_id": "PROMPT-PAGE-016",
+        "subject": "three round pebbles stacked",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-018",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:023cc68ca18aa05927feac4c8d5e7213f748332e3a922aa858c73b9317370f7e",
+        "prompt_id": "PROMPT-PAGE-018",
+        "subject": "a wide teacup on a saucer",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-020",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:8142603a909665a051e8f2c0a45223b5541f84e0632b9fed5cbaa6443f3bc1be",
+        "prompt_id": "PROMPT-PAGE-020",
+        "subject": "one open tulip on a straight stem",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-022",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:41c56866bc83c7a6c66f5fb7b5a47f8094ff252b0f47460fade3b41fe431d113",
+        "prompt_id": "PROMPT-PAGE-022",
+        "subject": "a bird bath seen from the front",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-024",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:9f96c0fa74263c47bcf6188b8801d9f87cb0429a4988e71636845191b5bcce9d",
+        "prompt_id": "PROMPT-PAGE-024",
+        "subject": "a fat bumblebee above a flower",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-026",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:ef8094da3294ce4140d80bf4ede7fac240ccef3cc40ee5957ca9a822e1da19d5",
+        "prompt_id": "PROMPT-PAGE-026",
+        "subject": "one wellington boot with a daisy in it",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-028",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:97453e72711a162e83ae61f2cc49392ad9d16fcf4d4b200253d4fc34b2a7807e",
+        "prompt_id": "PROMPT-PAGE-028",
+        "subject": "a simple wooden birdhouse",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-030",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:85e555d39d8b09b4ee5d6b7687cf56d388ea9608de9522243d286c65774f3699",
+        "prompt_id": "PROMPT-PAGE-030",
+        "subject": "a round pumpkin with a curled stem",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-032",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:f7d3bf66ec4af7dc2e479f0b1ec34e74684b3292fd3c0413b131b6445c49c204",
+        "prompt_id": "PROMPT-PAGE-032",
+        "subject": "one apple with a leaf",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-034",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:26de2ec5b4e8aaf7f0ccdaa93265d8d6859e5ae59da4acc039693132c6746026",
+        "prompt_id": "PROMPT-PAGE-034",
+        "subject": "a broad mushroom cap on a thick stalk",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-036",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:b75641bbe666c964ea779f8db392009c5867271e6f80e13a2ee6cdb7818640a8",
+        "prompt_id": "PROMPT-PAGE-036",
+        "subject": "a watering rose spraying three drops",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-038",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:0f1b9e6e86ce351b787bb752be2202f8b9ea6000ac2aad7fa970dcd74bb435de",
+        "prompt_id": "PROMPT-PAGE-038",
+        "subject": "one ladybird on a wide leaf",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-040",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:00ddb11ef343e6d131ad5290b4793d15889df6350cd81d5bc005493b2a2c6d3e",
+        "prompt_id": "PROMPT-PAGE-040",
+        "subject": "a plain terracotta pot, empty",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 1,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-042",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:1a5f8d6bff54e87f699bc642680b32f35faffb95e9dac78a35a6be2a4bef96ff",
+        "prompt_id": "PROMPT-PAGE-042",
+        "subject": "a large daisy seen face on",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-044",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:abbf775c01010e7f9feee9a372a4844c5f0db714aa5b76abf8163e9cb6217921",
+        "prompt_id": "PROMPT-PAGE-044",
+        "subject": "a garden fork crossed with a trowel",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-046",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:5014f724f3132146e0b1b08f761e9301be1a72ecd66017fe12fa4396f4e0fda6",
+        "prompt_id": "PROMPT-PAGE-046",
+        "subject": "one pear on a branch",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-048",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:b88469181de795f3df58b5e19e76e41a706034abc9210585acef201f2cc0a501",
+        "prompt_id": "PROMPT-PAGE-048",
+        "subject": "a wide-brimmed sun hat",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-050",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:858659060fa11f9261793635775255537d2eea3545e235361f8eb529cf1d2c0e",
+        "prompt_id": "PROMPT-PAGE-050",
+        "subject": "a robin perched on a thick twig",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-052",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:5e532f3722734e38d4f2de4fe627de57afc00c545ca05443e954856c69960fe3",
+        "prompt_id": "PROMPT-PAGE-052",
+        "subject": "one acorn with its cup",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-054",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:ee775f2775c4153be3957bf3c997efa57e929bc13d7ded617d06750214131ec9",
+        "prompt_id": "PROMPT-PAGE-054",
+        "subject": "a simple wheelbarrow, side on",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-056",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:90e70652a835819d34cab4062b8b017fbf960ed9b23a77c47bf2374c6a664bc2",
+        "prompt_id": "PROMPT-PAGE-056",
+        "subject": "a bunch of three carrots",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-058",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:675d93767625223b49fe3accdeae4ef3ee157a3955a02a4e5f65bf699c6f0429",
+        "prompt_id": "PROMPT-PAGE-058",
+        "subject": "one open rose, few petals",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-060",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:fdef21d21fe6b1194b8855397aa09203fe9b49e6a1933545f44225e699c58143",
+        "prompt_id": "PROMPT-PAGE-060",
+        "subject": "a garden gate, closed",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-062",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:ef18a566cd6bf2b470185a7e24a066138540ddca9ad93893b5cabf53907d2b71",
+        "prompt_id": "PROMPT-PAGE-062",
+        "subject": "a fat caterpillar on a stem",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-064",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:1ae98284c2dd4eee7fd3d30f770dab8939cdc3b22fb0d7d582a25896873ae2c5",
+        "prompt_id": "PROMPT-PAGE-064",
+        "subject": "one strawberry with its leaves",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-066",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:99c256a223fc42d92a557bf7089a7a0e25b2f58898fe5a94807e4944ff7158a0",
+        "prompt_id": "PROMPT-PAGE-066",
+        "subject": "a bee hive, simple box shape",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-068",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:135906e433d0936c8493c6cfdc5423e50de511bbaea4cab4621e8dfdd8dfd73d",
+        "prompt_id": "PROMPT-PAGE-068",
+        "subject": "a wide leaf with clear veins",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-070",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:d458cf6db453f6706aa692fa8feeed3960fd467e2175612a933aef2015bbd580",
+        "prompt_id": "PROMPT-PAGE-070",
+        "subject": "one lemon on a small branch",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-072",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:5c507467f0f2ee6578f45a148209b6a40653c7123182b398982bd24bc7226508",
+        "prompt_id": "PROMPT-PAGE-072",
+        "subject": "a plain garden bench, side on",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-074",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:ce9ee2ab527868c83d1455c40cb6295088139933dfa7ff4614dba55fb325e8fa",
+        "prompt_id": "PROMPT-PAGE-074",
+        "subject": "a dragonfly with open wings",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-076",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:67a457e662fc3e795b822350f9436afb7b31650bd36fbe423067688cdc38b350",
+        "prompt_id": "PROMPT-PAGE-076",
+        "subject": "one poppy head on a bent stem",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-078",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:c76d74f706352cd6d3ca8d2272a490dfacad0d2a4add45b0aba706cffb0b520d",
+        "prompt_id": "PROMPT-PAGE-078",
+        "subject": "a stack of three plant pots",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-080",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:57a3ac434204030df8e61bd66e1ceee9f4d315891804cf68d8fae54c72b9836c",
+        "prompt_id": "PROMPT-PAGE-080",
+        "subject": "a simple tree with a round crown",
+        "version": "v1",
+        "width": 2520
+      },
+      {
+        "aspect_ratio": "3:4",
+        "audience": "adults with low vision, arthritis or tremor",
+        "background_requirements": "pure white, completely empty, no frame or border",
+        "complexity": 2,
+        "composition": "one subject only, centred, filling most of the page, seen from a plain front or side view with no overlap or perspective",
+        "consistency_requirements": "identical stroke weight and level of simplification to every other page in the book",
+        "generation_constraints": {},
+        "height": 3360,
+        "line_art_requirements": "single black outline of uniform weight, at least 2.5pt at print size, every contour closed and meeting cleanly at junctions",
+        "page_id": "PAGE-082",
+        "prohibited": [
+          "colour of any kind",
+          "shading, hatching or greyscale fill",
+          "text, lettering or numerals",
+          "watermarks, logos or signatures",
+          "recognisable characters, brands or trademarks",
+          "fine detail, thin strokes or broken outlines",
+          "any stroke touching the edge of the page"
+        ],
+        "prompt_hash": "sha256:f1ad1ded5ddbdc6a78a73c54c715b31a716eaa17b0ee7b3081e473b728f8f928",
+        "prompt_id": "PROMPT-PAGE-082",
+        "subject": "one large seed head, few spokes",
+        "version": "v1",
+        "width": 2520
+      }
+    ]
+  },
+  "research": {
+    "brief_id": "brief-bold-easy-01",
+    "opportunity": "The two most repeated complaints in this category, bleed-through and lines that do not close, are both mechanically verifiable rather than matters of taste. A book that can demonstrate it has neither, aimed at low-vision and limited-dexterity colourists, competes on the exact axis buyers complain about.",
+    "recommended_page_count": 82,
+    "recommended_trim": "8.5x11",
+    "segment": "large-print bold-line colouring for low-vision and limited-dexterity adults",
+    "signals": [
+      {
+        "demand_band": "high",
+        "observations": [
+          "the bold-and-easy style is repeatedly described as growing faster than the titles serving it",
+          "buyers named are seniors, beginners, and people who find intricate adult designs overwhelming",
+          "forty designs printed single-sided is the common shape, giving about eighty interior pages"
+        ],
+        "page_count": 80,
+        "price_usd": 9.0,
+        "segment": "bold-and-easy seniors",
+        "signal_id": "s1",
+        "trim": "8.5x11"
+      },
+      {
+        "demand_band": "high",
+        "observations": [
+          "high contrast and thick outlines are described as the functional requirement, not a style preference",
+          "arthritis, tremor and reduced hand strength are named as distinct buyer needs alongside low vision",
+          "memory care and assisted living are named as institutional buying contexts",
+          "large open areas matter as much as line weight: small regions are unusable with a shaky hand"
+        ],
+        "page_count": 80,
+        "price_usd": 10.0,
+        "segment": "low-vision and accessibility colouring",
+        "signal_id": "s2",
+        "trim": "8.5x11"
+      },
+      {
+        "demand_band": "high",
+        "observations": [
+          "printing on both sides, causing marker bleed-through, is the most consistently repeated complaint",
+          "lines that do not meet, so fills leak across the page, is the second repeated complaint",
+          "inconsistency between pages within one book is a third recurring theme",
+          "some publishers print a note on reverse pages explaining the blank is deliberate"
+        ],
+        "page_count": null,
+        "price_usd": null,
+        "segment": "colouring buyer complaints across the category",
+        "signal_id": "s3",
+        "trim": null
+      },
+      {
+        "demand_band": "medium",
+        "observations": [
+          "the observed asking range for bold-and-easy senior titles runs roughly nine to thirteen dollars",
+          "the wider colouring category clusters lower, around eight to ten dollars"
+        ],
+        "page_count": 80,
+        "price_usd": 11.0,
+        "segment": "pricing observed in the bold-and-easy band",
+        "signal_id": "s4",
+        "trim": "8.5x11"
+      }
+    ]
+  },
+  "runs": [],
+  "spec": {
+    "bleed": false,
+    "book_id": "bold-easy-garden",
+    "derived_from_brief": "brief-bold-easy-01",
+    "page_count": 82,
+    "pages": [
+      {
+        "complexity": 3,
+        "index": 1,
+        "page_id": "PAGE-001",
+        "role": "title",
+        "subject": ""
+      },
+      {
+        "complexity": 3,
+        "index": 2,
+        "page_id": "PAGE-002",
+        "role": "copyright",
+        "subject": ""
+      },
+      {
+        "complexity": 3,
+        "index": 3,
+        "page_id": "PAGE-003",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 4,
+        "page_id": "PAGE-004",
+        "role": "art",
+        "subject": "a single wide-petalled sunflower head"
+      },
+      {
+        "complexity": 3,
+        "index": 5,
+        "page_id": "PAGE-005",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 6,
+        "page_id": "PAGE-006",
+        "role": "art",
+        "subject": "one watering can, side on"
+      },
+      {
+        "complexity": 3,
+        "index": 7,
+        "page_id": "PAGE-007",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 8,
+        "page_id": "PAGE-008",
+        "role": "art",
+        "subject": "a plant pot with three round leaves"
+      },
+      {
+        "complexity": 3,
+        "index": 9,
+        "page_id": "PAGE-009",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 10,
+        "page_id": "PAGE-010",
+        "role": "art",
+        "subject": "a large simple butterfly, wings open"
+      },
+      {
+        "complexity": 3,
+        "index": 11,
+        "page_id": "PAGE-011",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 12,
+        "page_id": "PAGE-012",
+        "role": "art",
+        "subject": "one snail on a broad leaf"
+      },
+      {
+        "complexity": 3,
+        "index": 13,
+        "page_id": "PAGE-013",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 14,
+        "page_id": "PAGE-014",
+        "role": "art",
+        "subject": "a garden spade standing in soil"
+      },
+      {
+        "complexity": 3,
+        "index": 15,
+        "page_id": "PAGE-015",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 16,
+        "page_id": "PAGE-016",
+        "role": "art",
+        "subject": "three round pebbles stacked"
+      },
+      {
+        "complexity": 3,
+        "index": 17,
+        "page_id": "PAGE-017",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 18,
+        "page_id": "PAGE-018",
+        "role": "art",
+        "subject": "a wide teacup on a saucer"
+      },
+      {
+        "complexity": 3,
+        "index": 19,
+        "page_id": "PAGE-019",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 20,
+        "page_id": "PAGE-020",
+        "role": "art",
+        "subject": "one open tulip on a straight stem"
+      },
+      {
+        "complexity": 3,
+        "index": 21,
+        "page_id": "PAGE-021",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 22,
+        "page_id": "PAGE-022",
+        "role": "art",
+        "subject": "a bird bath seen from the front"
+      },
+      {
+        "complexity": 3,
+        "index": 23,
+        "page_id": "PAGE-023",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 24,
+        "page_id": "PAGE-024",
+        "role": "art",
+        "subject": "a fat bumblebee above a flower"
+      },
+      {
+        "complexity": 3,
+        "index": 25,
+        "page_id": "PAGE-025",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 26,
+        "page_id": "PAGE-026",
+        "role": "art",
+        "subject": "one wellington boot with a daisy in it"
+      },
+      {
+        "complexity": 3,
+        "index": 27,
+        "page_id": "PAGE-027",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 28,
+        "page_id": "PAGE-028",
+        "role": "art",
+        "subject": "a simple wooden birdhouse"
+      },
+      {
+        "complexity": 3,
+        "index": 29,
+        "page_id": "PAGE-029",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 30,
+        "page_id": "PAGE-030",
+        "role": "art",
+        "subject": "a round pumpkin with a curled stem"
+      },
+      {
+        "complexity": 3,
+        "index": 31,
+        "page_id": "PAGE-031",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 32,
+        "page_id": "PAGE-032",
+        "role": "art",
+        "subject": "one apple with a leaf"
+      },
+      {
+        "complexity": 3,
+        "index": 33,
+        "page_id": "PAGE-033",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 34,
+        "page_id": "PAGE-034",
+        "role": "art",
+        "subject": "a broad mushroom cap on a thick stalk"
+      },
+      {
+        "complexity": 3,
+        "index": 35,
+        "page_id": "PAGE-035",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 36,
+        "page_id": "PAGE-036",
+        "role": "art",
+        "subject": "a watering rose spraying three drops"
+      },
+      {
+        "complexity": 3,
+        "index": 37,
+        "page_id": "PAGE-037",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 38,
+        "page_id": "PAGE-038",
+        "role": "art",
+        "subject": "one ladybird on a wide leaf"
+      },
+      {
+        "complexity": 3,
+        "index": 39,
+        "page_id": "PAGE-039",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 40,
+        "page_id": "PAGE-040",
+        "role": "art",
+        "subject": "a plain terracotta pot, empty"
+      },
+      {
+        "complexity": 3,
+        "index": 41,
+        "page_id": "PAGE-041",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 1,
+        "index": 42,
+        "page_id": "PAGE-042",
+        "role": "art",
+        "subject": "a large daisy seen face on"
+      },
+      {
+        "complexity": 3,
+        "index": 43,
+        "page_id": "PAGE-043",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 44,
+        "page_id": "PAGE-044",
+        "role": "art",
+        "subject": "a garden fork crossed with a trowel"
+      },
+      {
+        "complexity": 3,
+        "index": 45,
+        "page_id": "PAGE-045",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 46,
+        "page_id": "PAGE-046",
+        "role": "art",
+        "subject": "one pear on a branch"
+      },
+      {
+        "complexity": 3,
+        "index": 47,
+        "page_id": "PAGE-047",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 48,
+        "page_id": "PAGE-048",
+        "role": "art",
+        "subject": "a wide-brimmed sun hat"
+      },
+      {
+        "complexity": 3,
+        "index": 49,
+        "page_id": "PAGE-049",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 50,
+        "page_id": "PAGE-050",
+        "role": "art",
+        "subject": "a robin perched on a thick twig"
+      },
+      {
+        "complexity": 3,
+        "index": 51,
+        "page_id": "PAGE-051",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 52,
+        "page_id": "PAGE-052",
+        "role": "art",
+        "subject": "one acorn with its cup"
+      },
+      {
+        "complexity": 3,
+        "index": 53,
+        "page_id": "PAGE-053",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 54,
+        "page_id": "PAGE-054",
+        "role": "art",
+        "subject": "a simple wheelbarrow, side on"
+      },
+      {
+        "complexity": 3,
+        "index": 55,
+        "page_id": "PAGE-055",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 56,
+        "page_id": "PAGE-056",
+        "role": "art",
+        "subject": "a bunch of three carrots"
+      },
+      {
+        "complexity": 3,
+        "index": 57,
+        "page_id": "PAGE-057",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 58,
+        "page_id": "PAGE-058",
+        "role": "art",
+        "subject": "one open rose, few petals"
+      },
+      {
+        "complexity": 3,
+        "index": 59,
+        "page_id": "PAGE-059",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 60,
+        "page_id": "PAGE-060",
+        "role": "art",
+        "subject": "a garden gate, closed"
+      },
+      {
+        "complexity": 3,
+        "index": 61,
+        "page_id": "PAGE-061",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 62,
+        "page_id": "PAGE-062",
+        "role": "art",
+        "subject": "a fat caterpillar on a stem"
+      },
+      {
+        "complexity": 3,
+        "index": 63,
+        "page_id": "PAGE-063",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 64,
+        "page_id": "PAGE-064",
+        "role": "art",
+        "subject": "one strawberry with its leaves"
+      },
+      {
+        "complexity": 3,
+        "index": 65,
+        "page_id": "PAGE-065",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 66,
+        "page_id": "PAGE-066",
+        "role": "art",
+        "subject": "a bee hive, simple box shape"
+      },
+      {
+        "complexity": 3,
+        "index": 67,
+        "page_id": "PAGE-067",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 68,
+        "page_id": "PAGE-068",
+        "role": "art",
+        "subject": "a wide leaf with clear veins"
+      },
+      {
+        "complexity": 3,
+        "index": 69,
+        "page_id": "PAGE-069",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 70,
+        "page_id": "PAGE-070",
+        "role": "art",
+        "subject": "one lemon on a small branch"
+      },
+      {
+        "complexity": 3,
+        "index": 71,
+        "page_id": "PAGE-071",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 72,
+        "page_id": "PAGE-072",
+        "role": "art",
+        "subject": "a plain garden bench, side on"
+      },
+      {
+        "complexity": 3,
+        "index": 73,
+        "page_id": "PAGE-073",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 74,
+        "page_id": "PAGE-074",
+        "role": "art",
+        "subject": "a dragonfly with open wings"
+      },
+      {
+        "complexity": 3,
+        "index": 75,
+        "page_id": "PAGE-075",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 76,
+        "page_id": "PAGE-076",
+        "role": "art",
+        "subject": "one poppy head on a bent stem"
+      },
+      {
+        "complexity": 3,
+        "index": 77,
+        "page_id": "PAGE-077",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 78,
+        "page_id": "PAGE-078",
+        "role": "art",
+        "subject": "a stack of three plant pots"
+      },
+      {
+        "complexity": 3,
+        "index": 79,
+        "page_id": "PAGE-079",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 80,
+        "page_id": "PAGE-080",
+        "role": "art",
+        "subject": "a simple tree with a round crown"
+      },
+      {
+        "complexity": 3,
+        "index": 81,
+        "page_id": "PAGE-081",
+        "role": "blank",
+        "subject": ""
+      },
+      {
+        "complexity": 2,
+        "index": 82,
+        "page_id": "PAGE-082",
+        "role": "art",
+        "subject": "one large seed head, few spokes"
+      }
+    ],
+    "paper": "bw_white",
+    "single_sided_art": true,
+    "subtitle": "40 Large-Print Coloring Pages with Thick, Unbroken Lines",
+    "title": "Big Bold Garden",
+    "trim": "8.5x11"
+  },
+  "spec_revision": "2026.08-r4",
+  "stage": "generation",
+  "strategy": {
+    "age_range": "",
+    "audience": "adults with low vision, arthritis or tremor, and the care settings buying for them",
+    "brief_id": "brief-bold-easy-01",
+    "category_concepts": [
+      "Crafts, Hobbies & Home > Crafts & Hobbies"
+    ],
+    "claims": [
+      {
+        "basis": "repeated independently across category write-ups",
+        "confidence": "inferred",
+        "label": "bold-and-easy demand",
+        "value": "growing, underserved relative to demand"
+      },
+      {
+        "basis": "prices seen on listings in this segment",
+        "confidence": "observed",
+        "label": "observed asking price band",
+        "value": "9 to 13 USD"
+      },
+      {
+        "basis": "stated as the standard in multiple category guides",
+        "confidence": "observed",
+        "label": "common shape",
+        "value": "40 designs, single-sided, about 80 interior pages"
+      },
+      {
+        "basis": "recurring theme in review summaries",
+        "confidence": "inferred",
+        "label": "top buyer complaint",
+        "value": "bleed-through from double-sided printing"
+      },
+      {
+        "basis": "recurring theme in review summaries",
+        "confidence": "inferred",
+        "label": "second buyer complaint",
+        "value": "outlines that do not close"
+      },
+      {
+        "basis": "no sales data available; not used for any decision here",
+        "confidence": "unknown",
+        "label": "segment sales volume",
+        "value": "unknown"
+      }
+    ],
+    "concept": "Forty large, simple garden and household subjects drawn with thick unbroken outlines and wide open areas, printed one to a page on white stock so that nothing shows through and every region can be filled without precision.",
+    "differentiators": [
+      "every drawing is printed single-sided and backed by a blank page",
+      "outlines are verified closed by pixel inspection, so a fill cannot leak",
+      "stroke weight is held above 2.5pt so the line stays visible at arm's length",
+      "no region is smaller than a fingertip, so a shaky hand can still fill it",
+      "high-contrast black on white stock rather than cream, which lowers contrast",
+      "printed with no bleed, which buys a wider margin than a bleed layout allows"
+    ],
+    "keyword_concepts": [
+      "large print coloring book",
+      "bold and easy coloring book",
+      "coloring book for seniors",
+      "low vision coloring book"
+    ],
+    "niche": "large-print bold-line colouring for accessibility",
+    "purpose": "usable colouring for people whose eyes or hands make ordinary adult colouring books unrewarding",
+    "recommended_page_count": 82,
+    "recommended_trim": "8.5x11",
+    "risks": [
+      "the bold-and-easy segment is growing quickly and is attracting volume publishers",
+      "accessibility claims invite scrutiny; every one made on the cover must be true of the file",
+      "8.5x11 is large trim, so printing costs 2.84 a copy and pricing below 9.99 leaves very little",
+      "institutional buyers may want larger print runs than a single title supports"
+    ],
+    "strategy_id": "strategy-bold-easy-01",
+    "subtitle_concepts": [
+      "40 Large-Print Coloring Pages with Thick, Unbroken Lines"
+    ],
+    "title_concepts": [
+      "Big Bold Garden",
+      "Wide Open Garden"
+    ],
+    "unique_angle": "The two failures buyers complain about most in this category, bleed-through and outlines with gaps in them, are both checked mechanically before the book is built rather than hoped for: single-sided layout is enforced by the specification gate, and every page is measured for enclosed regions.",
+    "visual_direction": "thick unbroken black outlines on white, large simple shapes, generous open interiors, no shading, no texture, no small detail"
+  }
+}

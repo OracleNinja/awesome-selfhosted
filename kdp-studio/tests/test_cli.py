@@ -163,3 +163,92 @@ def test_json_flag_emits_machine_readable_output(tmp_path, manifest, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["stage"] == "publishing_prep"
     assert payload["passed"] is True
+
+
+# --- registering an externally produced image -------------------------------
+
+
+def test_register_asset_brings_an_mcp_image_into_the_pipeline(tmp_path, manifest):
+    """The path for a generator this package does not drive itself.
+
+    An agent with an image-generation MCP tool attached calls it, writes the
+    file, and registers it here. The credential stays in that session and never
+    reaches the manifest.
+    """
+    from kdp.models import BookManifest
+    from kdp.providers.mock import _png
+
+    book = tmp_path / "book"
+    book.mkdir()
+    path = str(manifest.write(book / "manifest.json"))
+    page = manifest.spec.art_pages[0].page_id
+
+    image = tmp_path / "from-mcp.png"
+    image.write_bytes(_png(600, 780, b"a fern"))
+
+    assert main([
+        "register-asset", path, page, str(image),
+        "--provider", "higgsfield", "--model", "some-model-v1",
+    ]) == EXIT_OK
+
+    updated = BookManifest.read(path)
+    record = updated.attempts(page)[-1]
+    assert record.provider == "higgsfield"
+    assert record.tool == "some-model-v1"
+    assert record.width == 600 and record.height == 780
+    # Pending, not approved: an outside asset does not skip the QA verdict.
+    assert record.status.value == "pending"
+    # And it defaults to disclosable, which is the safe direction.
+    assert record.ai_role.value == "generated"
+    assert (book / "assets" / f"{record.asset_id}.png").exists()
+
+
+def test_register_asset_refuses_an_unreadable_image(tmp_path, manifest):
+    book = tmp_path / "book"
+    book.mkdir()
+    path = str(manifest.write(book / "manifest.json"))
+    broken = tmp_path / "broken.png"
+    broken.write_bytes(b"not an image")
+
+    assert main([
+        "register-asset", path, manifest.spec.art_pages[0].page_id, str(broken),
+        "--provider", "higgsfield", "--model", "m",
+    ]) == EXIT_USAGE
+
+
+def test_register_asset_requires_a_model_for_an_ai_claim(tmp_path, manifest):
+    from kdp.providers.mock import _png
+
+    book = tmp_path / "book"
+    book.mkdir()
+    path = str(manifest.write(book / "manifest.json"))
+    image = tmp_path / "x.png"
+    image.write_bytes(_png(400, 500, b"x"))
+
+    assert main([
+        "register-asset", path, manifest.spec.art_pages[0].page_id, str(image),
+        "--provider", "higgsfield",
+    ]) == EXIT_USAGE
+
+
+def test_register_asset_rejects_a_page_the_book_does_not_have(tmp_path, manifest):
+    from kdp.providers.mock import _png
+
+    book = tmp_path / "book"
+    book.mkdir()
+    path = str(manifest.write(book / "manifest.json"))
+    image = tmp_path / "x.png"
+    image.write_bytes(_png(400, 500, b"x"))
+
+    assert main([
+        "register-asset", path, "PAGE-999", str(image),
+        "--provider", "higgsfield", "--model", "m",
+    ]) == EXIT_USAGE
+
+
+def test_providers_reports_higgsfield_as_unavailable(capsys):
+    assert main(["providers"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "mock: available" in out
+    assert "higgsfield (metered): UNAVAILABLE" in out
+    assert "credential_present" in out

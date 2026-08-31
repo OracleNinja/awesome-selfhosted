@@ -1,0 +1,23 @@
+{
+  "blocked": [],
+  "failed": [],
+  "gate_count": 1,
+  "passed": true,
+  "results": [
+    {
+      "evidence": {
+        "concrete_differentiators": 6,
+        "evidence_backed_claims": 5,
+        "risks": 4,
+        "strategy_id": "strategy-bold-easy-01",
+        "validator_version": "1"
+      },
+      "findings": [],
+      "gate_id": "G7.strategy_differentiation",
+      "spec_revision": "2026.08-r4",
+      "stage": "strategy",
+      "status": "pass"
+    }
+  ],
+  "stage": "strategy"
+}

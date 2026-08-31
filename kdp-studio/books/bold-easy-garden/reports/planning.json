@@ -1,0 +1,23 @@
+{
+  "blocked": [],
+  "failed": [],
+  "gate_count": 1,
+  "passed": true,
+  "results": [
+    {
+      "evidence": {
+        "art_pages": 40,
+        "distinct_prompts": 40,
+        "plan_id": "plan-bold-easy-01",
+        "prompts": 40,
+        "validator_version": "1"
+      },
+      "findings": [],
+      "gate_id": "G8.prompt_plan",
+      "spec_revision": "2026.08-r4",
+      "stage": "planning",
+      "status": "pass"
+    }
+  ],
+  "stage": "planning"
+}
