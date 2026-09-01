@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 787.5 1050.0">
+  <rect x="0" y="0" width="787.5" height="1050.0" fill="#ffffff"/>
+  <g fill="none" stroke="#000000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M143.75 885.0L523.75 225.0" fill="none"/>
+    <path d="M125.75 875.0L161.75 895.0L541.75 235.0L505.75 215.0Z" fill="#ffffff"/>
+    <rect x="489.8" y="125.0" width="90.0" height="120.0" rx="32.0" fill="#ffffff"/>
+    <path d="M643.75 885.0L263.75 225.0" fill="none"/>
+    <path d="M661.75 875.0L625.75 895.0L245.75 235.0L281.75 215.0Z" fill="#ffffff"/>
+    <rect x="207.8" y="125.0" width="90.0" height="120.0" rx="32.0" fill="#ffffff"/>
+    <path d="M103.75 825.0L203.75 995.0L333.75 925.0Q243.75 855.0 103.75 825.0Z" fill="#ffffff"/>
+    <path d="M607.75 865.0" fill="none"/>
+    <path d="M607.75 865.0" fill="none"/>
+    <path d="M607.75 865.0" fill="none"/>
+    <path d="M583.75 855.0L583.75 995.0" fill="none"/>
+    <path d="M643.75 865.0L643.75 1005.0" fill="none"/>
+    <path d="M703.75 845.0L703.75 985.0" fill="none"/>
+    <path d="M563.75 825.0L723.75 825.0L713.75 875.0L573.75 875.0Z" fill="#ffffff"/>
+  </g>
+</svg>

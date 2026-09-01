@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 787.5 1050.0">
+  <rect x="0" y="0" width="787.5" height="1050.0" fill="#ffffff"/>
+  <g fill="none" stroke="#000000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="21.8" y="195.0" width="84.0" height="700.0" rx="14.0" fill="#ffffff"/>
+    <rect x="681.8" y="195.0" width="84.0" height="700.0" rx="14.0" fill="#ffffff"/>
+    <rect x="103.8" y="275.0" width="580.0" height="70.0" rx="12.0" fill="#ffffff"/>
+    <rect x="103.8" y="675.0" width="580.0" height="70.0" rx="12.0" fill="#ffffff"/>
+    <path d="M101.75 225.0L185.75 225.0L185.75 855.0L143.75 905.0L101.75 855.0Z" fill="#ffffff"/>
+    <path d="M226.75 225.0L310.75 225.0L310.75 855.0L268.75 905.0L226.75 855.0Z" fill="#ffffff"/>
+    <path d="M351.75 225.0L435.75 225.0L435.75 855.0L393.75 905.0L351.75 855.0Z" fill="#ffffff"/>
+    <path d="M476.75 225.0L560.75 225.0L560.75 855.0L518.75 905.0L476.75 855.0Z" fill="#ffffff"/>
+    <path d="M601.75 225.0L685.75 225.0L685.75 855.0L643.75 905.0L601.75 855.0Z" fill="#ffffff"/>
+    <rect x="103.8" y="275.0" width="580.0" height="70.0" rx="12.0" fill="none"/>
+    <rect x="103.8" y="675.0" width="580.0" height="70.0" rx="12.0" fill="none"/>
+  </g>
+</svg>

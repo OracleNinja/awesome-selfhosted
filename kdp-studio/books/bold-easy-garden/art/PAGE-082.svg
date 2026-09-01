@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 787.5 1050.0">
+  <rect x="0" y="0" width="787.5" height="1050.0" fill="#ffffff"/>
+  <g fill="none" stroke="#000000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="379.8" y="465.0" width="28.0" height="560.0" rx="8.0" fill="#ffffff"/>
+    <path d="M381.2 802.2Q247.3 799.9 146.3 887.8Q280.2 890.1 381.2 802.2Z" fill="#ffffff"/>
+    <line x1="381.2" y1="802.2" x2="146.3" y2="887.8"/>
+    <line x1="393.8" y1="375.0" x2="693.8" y2="375.0"/>
+    <line x1="393.8" y1="375.0" x2="653.6" y2="525.0"/>
+    <line x1="393.8" y1="375.0" x2="543.8" y2="634.8"/>
+    <line x1="393.8" y1="375.0" x2="393.8" y2="675.0"/>
+    <line x1="393.8" y1="375.0" x2="243.8" y2="634.8"/>
+    <line x1="393.8" y1="375.0" x2="133.9" y2="525.0"/>
+    <line x1="393.8" y1="375.0" x2="93.8" y2="375.0"/>
+    <line x1="393.8" y1="375.0" x2="133.9" y2="225.0"/>
+    <line x1="393.8" y1="375.0" x2="243.7" y2="115.2"/>
+    <line x1="393.8" y1="375.0" x2="393.7" y2="75.0"/>
+    <line x1="393.8" y1="375.0" x2="543.8" y2="115.2"/>
+    <line x1="393.8" y1="375.0" x2="653.6" y2="225.0"/>
+    <circle cx="693.8" cy="375.0" r="56.0" fill="#ffffff"/>
+    <circle cx="653.6" cy="525.0" r="56.0" fill="#ffffff"/>
+    <circle cx="543.8" cy="634.8" r="56.0" fill="#ffffff"/>
+    <circle cx="393.8" cy="675.0" r="56.0" fill="#ffffff"/>
+    <circle cx="243.8" cy="634.8" r="56.0" fill="#ffffff"/>
+    <circle cx="133.9" cy="525.0" r="56.0" fill="#ffffff"/>
+    <circle cx="93.8" cy="375.0" r="56.0" fill="#ffffff"/>
+    <circle cx="133.9" cy="225.0" r="56.0" fill="#ffffff"/>
+    <circle cx="243.7" cy="115.2" r="56.0" fill="#ffffff"/>
+    <circle cx="393.7" cy="75.0" r="56.0" fill="#ffffff"/>
+    <circle cx="543.8" cy="115.2" r="56.0" fill="#ffffff"/>
+    <circle cx="653.6" cy="225.0" r="56.0" fill="#ffffff"/>
+    <circle cx="393.8" cy="375.0" r="70.0" fill="#ffffff"/>
+  </g>
+</svg>
