@@ -42,6 +42,7 @@ from __future__ import annotations
 import os
 
 from .base import (
+    Capability,
     GenerationRequest,
     GenerationResult,
     ProviderUnavailable,
@@ -138,6 +139,18 @@ class GoogleGeminiImageProvider:
         self._client = client
 
     # -- availability -------------------------------------------------------
+
+    def capability(self) -> Capability:
+        """4K is the largest bucket ``ImageConfig`` documents.
+
+        The ratios are the intersection of the two documented sets, the same one
+        ``build_request`` picks from.
+        """
+        return Capability(
+            max_edge_px=4096,
+            aspect_ratios=("1:1", "3:4", "4:3", "9:16", "16:9"),
+            note="generate_content at image_size=4K",
+        )
 
     def configured(self) -> bool:
         return env_credential(CREDENTIAL_ENV_VAR) is not None

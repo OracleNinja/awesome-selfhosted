@@ -243,11 +243,29 @@ def cmd_generate(args: argparse.Namespace) -> int:
     from .providers import METERED, get_provider
 
     manifest = BookManifest.read(args.manifest)
-    provider = get_provider(args.provider)
 
-    if args.provider in METERED and not args.confirm_spend:
+    if args.auto:
+        # --auto never spends. The router only ever selects a FREE provider, so
+        # there is no --confirm-spend interaction to get wrong: authorising a
+        # spend means naming the provider, which is the other branch entirely.
+        if args.confirm_spend:
+            sys.stderr.write(
+                "--auto selects only free providers, so --confirm-spend has "
+                "nothing to authorise. Name the provider you want to pay for "
+                "instead: --provider <name> --confirm-spend.\n"
+            )
+            return EXIT_STOP
+        from .providers.router import ProviderRouter
+
+        provider = ProviderRouter()
+        selected = "auto"
+    else:
+        provider = get_provider(args.provider)
+        selected = args.provider
+
+    if selected in METERED and not args.confirm_spend:
         sys.stderr.write(
-            f"{args.provider!r} is a metered provider and this would spend "
+            f"{selected!r} is a metered provider and this would spend "
             f"money on {len(manifest.spec.art_pages)} page(s). Re-run with "
             "--confirm-spend if that is intended.\n"
         )
@@ -255,11 +273,11 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
     if not provider.available():
         reason = getattr(provider, "unavailable_reason", lambda: "not available")()
-        sys.stderr.write(f"provider {args.provider!r} is unavailable: {reason}\n")
+        sys.stderr.write(f"provider {selected!r} is unavailable: {reason}\n")
         return EXIT_STOP
 
     book_dir = Path(args.manifest).parent
-    if args.regenerate and args.provider in METERED and not args.confirm_spend:
+    if args.regenerate and selected in METERED and not args.confirm_spend:
         sys.stderr.write(
             "regenerating named pages on a metered provider still costs money; "
             "re-run with --confirm-spend\n"
@@ -435,29 +453,62 @@ def cmd_register_asset(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _wrap(reason: str) -> list[str]:
+    """One sentence per line, so a long reason stays readable in a table."""
+    parts = [piece.strip() for piece in reason.replace(". ", ".\n").split("\n")]
+    return [piece for piece in parts if piece] or [reason]
+
+
 def cmd_providers(args: argparse.Namespace) -> int:
     """Report which generation providers could run right now, and why not."""
-    from .providers import METERED, PROVIDERS, get_provider
+    from .providers import REGISTRY, get_provider
 
-    ready = True
-    for name in sorted(PROVIDERS):
-        provider = get_provider(name)
+    rows = []
+    for entry in sorted(REGISTRY, key=lambda r: (r.priority, r.id)):
+        provider = get_provider(entry.id)
         available = provider.available()
-        ready = ready and available
-        metered = " (metered)" if name in METERED else ""
-        sys.stdout.write(
-            f"{name}{metered}: {'available' if available else 'UNAVAILABLE'}\n"
-        )
-        checks = getattr(provider, "readiness", None)
-        if checks:
-            for key, ok in checks().items():
-                sys.stdout.write(f"    [{'x' if ok else ' '}] {key}\n")
-        if not available:
+        if available:
+            reason = "ready" if entry.cost.routable else entry.note
+        else:
             reason = getattr(provider, "unavailable_reason", lambda: "not available")()
-            for line in reason.split(". "):
-                if line.strip():
-                    sys.stdout.write(f"    {line.strip().rstrip('.')}.\n")
-    return EXIT_OK
+        rows.append((entry.id, entry.cost.value.upper(), available, entry.priority, reason))
+
+    if args.json:
+        sys.stdout.write(
+            json.dumps(
+                [
+                    {"provider": p, "cost": c, "available": a, "priority": n,
+                     "reason": r}
+                    for p, c, a, n, r in rows
+                ],
+                indent=2,
+            )
+            + "\n"
+        )
+        return 0
+
+    width = max(len(r[0]) for r in rows)
+    sys.stdout.write(
+        f"{'Provider':<{width}}  {'Cost':<8} {'Available':<10} {'Priority':<9} Reason\n"
+    )
+    for name, cost, available, priority, reason in rows:
+        head = f"{name:<{width}}  {cost:<8} {'YES' if available else 'NO':<10} {priority:<9} "
+        first, *rest = _wrap(reason)
+        sys.stdout.write(head + first + "\n")
+        for line in rest:
+            sys.stdout.write(" " * len(head) + line + "\n")
+
+    routable = [r for r in rows if r[1] == "FREE" and r[2]]
+    sys.stdout.write(
+        "\n"
+        + (
+            f"`--auto` would use: {routable[0][0]}\n"
+            if routable
+            else "`--auto` has no free provider to use and would stop without "
+            "spending anything.\n"
+        )
+    )
+    return 0
 
 
 def cmd_review_assets(args: argparse.Namespace) -> int:
@@ -722,6 +773,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_approval)
 
     p = sub.add_parser("generate", help="generate art pages through a provider")
+    p.add_argument(
+        "--auto",
+        action="store_true",
+        help="let the router pick the best available FREE provider; never spends",
+    )
     p.add_argument("manifest")
     p.add_argument("--provider", default="mock")
     p.add_argument("--max-attempts", type=int, default=3)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Protocol
 
 from ..errors import KDPError
@@ -29,6 +30,70 @@ class ProviderError(KDPError):
 
 class ProviderUnavailable(ProviderError):
     """The provider is not configured — no credentials, or not installed."""
+
+
+class CostClass(str, Enum):
+    """What calling a provider costs, as data rather than a hard-coded list.
+
+    ``UNKNOWN`` is not a gap in the record — it is a verdict, and it is
+    deliberately indistinguishable from ``METERED`` everywhere it matters. A
+    provider whose price nobody has established is not free; assuming otherwise
+    is how a bill arrives. Registering a provider without stating its cost gets
+    you ``UNKNOWN``, which means the router will not call it.
+    """
+
+    #: Costs nothing to run. The only class the router will select on its own.
+    FREE = "free"
+    #: Costs nothing but produces synthetic art. Never auto-selected: a mock
+    #: page passes the pixel checks and would ship, which is worse than a page
+    #: that is visibly missing.
+    TEST = "test"
+    #: Costs money per call.
+    METERED = "metered"
+    #: Nobody has established what it costs. Treated as METERED.
+    UNKNOWN = "unknown"
+
+    @property
+    def spends(self) -> bool:
+        """True when calling this provider may cost money."""
+        return self in (CostClass.METERED, CostClass.UNKNOWN)
+
+    @property
+    def routable(self) -> bool:
+        """True when the router may select this provider without being asked."""
+        return self is CostClass.FREE
+
+
+@dataclass(frozen=True, slots=True)
+class Capability:
+    """What a provider can be asked for. Declared, not guessed.
+
+    Kept deliberately small: the router needs to know whether a provider can
+    produce *this page*, not everything about it.
+    """
+
+    #: Largest edge, in pixels, the provider can return. None means no limit.
+    max_edge_px: int | None = None
+    #: Aspect ratio labels the provider accepts. Empty means it does not care.
+    aspect_ratios: tuple[str, ...] = ()
+    #: Free-text note for the providers table.
+    note: str = ""
+
+    def refusal(self, request: "GenerationRequest") -> str | None:
+        """Why this provider cannot serve ``request``, or None if it can."""
+        longest = max(request.width, request.height)
+        if self.max_edge_px is not None and longest > self.max_edge_px:
+            return (
+                f"needs {longest} px on the long edge; this provider tops out "
+                f"at {self.max_edge_px}"
+            )
+        wanted = str((request.options or {}).get("aspect_ratio") or "")
+        if self.aspect_ratios and wanted and wanted not in self.aspect_ratios:
+            return (
+                f"cannot produce aspect ratio {wanted}; it accepts "
+                f"{', '.join(self.aspect_ratios)}"
+            )
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +179,13 @@ class ImageProvider(Protocol):
     def generate(self, request: GenerationRequest) -> GenerationResult:
         """Produce one image, or return a failure result."""
         ...
+
+    # Optional, and read with getattr rather than required, so that adding it
+    # did not break the providers that already existed:
+    #
+    #   capability() -> Capability      what this provider can be asked for
+    #   readiness()  -> dict[str, bool] each precondition, separately
+    #   unavailable_reason() -> str     why available() is False
 
 
 def env_credential(*names: str) -> str | None:

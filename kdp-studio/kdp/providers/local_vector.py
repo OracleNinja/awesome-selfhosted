@@ -41,7 +41,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .base import GenerationRequest, GenerationResult, ProviderUnavailable
+from .base import (
+    Capability,
+    GenerationRequest,
+    GenerationResult,
+    ProviderUnavailable,
+)
 
 #: Where a book keeps its per-page vector source. One SVG per page id.
 #: Set per book, because a provider instance has no idea which book is running:
@@ -132,6 +137,18 @@ class LocalVectorProvider:
     @property
     def chromium(self) -> str | None:
         return self._chromium or find_chromium()
+
+    def capability(self) -> Capability:
+        """Vector art has no native size, so the only real limit is the window.
+
+        Chromium's maximum texture dimension is the binding constraint, not the
+        drawing. No aspect ratio is refused: the viewBox letterboxes rather than
+        distorting, so any page shape can be asked for.
+        """
+        return Capability(
+            max_edge_px=16384,
+            note="renders the page's SVG at whatever size is asked for",
+        )
 
     def readiness(self) -> dict[str, bool]:
         directory = self.directory

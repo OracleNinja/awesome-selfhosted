@@ -411,6 +411,51 @@ Three, behind one interface, chosen with `--provider`:
 | `google-imagen` | **yes** | **Refuses to run.** Its call is disabled on the pinned SDK and its largest size cannot reach print resolution — see below. |
 | `higgsfield` | **yes** | Boundary only — no contract was available. |
 
+### The router: free by construction
+
+`kdp generate <manifest> --auto` picks a provider instead of being told one. It
+selects only from providers registered `FREE`, in priority order, ties broken on
+id so the choice is deterministic.
+
+**It cannot spend money, by construction rather than by rule.** There is no
+branch in `providers/router.py` that calls a metered provider: the candidate
+list is built from `free_registrations()`, which filters on `CostClass.routable`,
+and only `FREE` is routable. Authorising a spend means naming the provider —
+`--provider google-gemini --confirm-spend` — which goes through the ordinary
+single-provider path and never reaches the router. A router that *could* call a
+paid provider under some condition would need that condition to stay correct
+forever; this one does not have the option. `--auto` with `--confirm-spend` is
+refused rather than quietly ignored, because there is nothing for it to
+authorise.
+
+`TEST` providers are excluded too, for a sharper reason than cost: the mock
+draws clean synthetic line art that passes the pixel checks. Falling back to it
+would fill a book with placeholder shapes that QA would wave through — worse
+than a missing page, because nothing downstream would catch it.
+
+| Class | Spends | Router may select | Registered |
+|---|---|---|---|
+| `FREE` | no | **yes** | local-vector |
+| `TEST` | no | no | mock |
+| `METERED` | yes | no | google-gemini, google-imagen |
+| `UNKNOWN` | **yes** | no | higgsfield |
+
+`UNKNOWN` is a verdict, not a gap: a provider whose price nobody has established
+is not free, and it is indistinguishable from `METERED` everywhere it matters.
+Registering a provider without stating a cost gets you `UNKNOWN`.
+
+Selection per page: read the request, ask each free provider whether its
+declared `Capability` covers the size and aspect ratio, drop the unavailable
+ones, then try what remains in order. A provider that fails — refused, crashed,
+out of size, no source — is not a success and never becomes one; the next free
+provider is tried, and when they run out the page comes back with the boundary
+message naming everything considered and everything that *could* have continued.
+The page then stays missing, and G3 and G9 catch it exactly as if nothing had
+been tried.
+
+Adding a genuinely free provider is one `Registration` line plus an
+`ImageProvider` implementation. The router has no per-provider logic to change.
+
 ### `local-vector`: line art for nothing
 
 A coloring page is closed black outlines of uniform weight on white. That is

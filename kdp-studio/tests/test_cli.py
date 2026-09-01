@@ -247,12 +247,14 @@ def test_register_asset_rejects_a_page_the_book_does_not_have(tmp_path, manifest
     ]) == EXIT_USAGE
 
 
-def test_providers_reports_higgsfield_as_unavailable(capsys):
+def test_providers_reports_higgsfield_as_unavailable_and_unpriced(capsys):
+    """Its cost is UNKNOWN, which the router must treat as paid."""
     assert main(["providers"]) == EXIT_OK
     out = capsys.readouterr().out
-    assert "mock: available" in out
-    assert "higgsfield (metered): UNAVAILABLE" in out
-    assert "credential_present" in out
+    row = next(line for line in out.splitlines() if line.startswith("higgsfield"))
+    assert "UNKNOWN" in row
+    assert "NO" in row
+    assert "mock" in out and "TEST" in out
 
 
 # --- the single-page smoke test ---------------------------------------------
@@ -266,6 +268,49 @@ def _planned_book(tmp_path):
     book.mkdir()
     manifest = build_manifest()
     return manifest, str(manifest.write(book / "manifest.json"))
+
+
+def test_auto_never_spends_even_with_every_key_set(tmp_path, monkeypatch, capsys):
+    """The one guarantee --auto makes, attacked with a full environment."""
+    for name in ("KDP_GOOGLE_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.setenv(name, "sk-CANARY-NOT-REAL")
+    monkeypatch.delenv("KDP_VECTOR_ART_DIR", raising=False)
+    _, path = _planned_book(tmp_path)
+
+    assert main(["generate", path, "--auto"]) == EXIT_STOP
+
+    err = capsys.readouterr().err
+    assert "CANARY" not in err
+    assert "unavailable" in err
+
+
+def test_auto_refuses_confirm_spend_rather_than_quietly_ignoring_it(tmp_path, capsys):
+    _, path = _planned_book(tmp_path)
+    assert main(["generate", path, "--auto", "--confirm-spend"]) == EXIT_STOP
+    assert "nothing to authorise" in capsys.readouterr().err
+
+
+def test_a_key_in_the_environment_does_not_authorise_a_metered_run(tmp_path, monkeypatch, capsys):
+    """Having a credential is not the same as agreeing to use it."""
+    monkeypatch.setenv("KDP_GOOGLE_API_KEY", "sk-CANARY-NOT-REAL")
+    _, path = _planned_book(tmp_path)
+
+    assert main(["generate", path, "--provider", "google-gemini"]) == EXIT_STOP
+    assert "metered" in capsys.readouterr().err
+
+
+def test_the_providers_table_names_cost_and_priority(capsys):
+    assert main(["providers"]) == 0
+    out = capsys.readouterr().out
+    assert "Cost" in out and "Priority" in out
+    assert "FREE" in out and "METERED" in out and "UNKNOWN" in out and "TEST" in out
+    assert "local-vector" in out
+
+
+def test_the_providers_table_says_what_auto_would_do(capsys):
+    main(["providers"])
+    out = capsys.readouterr().out
+    assert "`--auto`" in out
 
 
 def test_smoke_test_refuses_the_gemini_provider_without_confirm_spend(tmp_path):
