@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Inventory Exchange">
+  <rect width="512" height="512" rx="112" fill="#0a66ff"/>
+  <g fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M132 196h190"/>
+    <path d="M266 140l56 56-56 56"/>
+    <path d="M380 316H190"/>
+    <path d="M246 260l-56 56 56 56"/>
+  </g>
+</svg>
