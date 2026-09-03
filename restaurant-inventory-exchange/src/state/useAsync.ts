@@ -18,7 +18,6 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[] = []): Asy
   const [nonce, setNonce] = useState(0);
 
   // The caller owns the dependency list; this hook just threads it through.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const run = useCallback(loader, deps);
 
   useEffect(() => {
