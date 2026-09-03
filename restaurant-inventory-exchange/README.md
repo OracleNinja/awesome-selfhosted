@@ -92,6 +92,14 @@ tests/ui/              the take flow, the confirm queue, admin approval
 
 ## Deploying
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). It covers creating the Supabase
-project, running the migrations, configuring auth, deploying the frontend,
-creating the first admin, inviting employees, and installing to a phone.
+**[docs/QUICKSTART.md](docs/QUICKSTART.md)** is the shortest path to a live URL:
+create a Supabase project, paste one file into its SQL editor, import the
+repository into Vercel with two environment variables, and promote yourself to
+admin. About twenty minutes, most of it waiting.
+
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) is the longer reference: email and SMTP,
+migrations with the CLI, other hosts, backups, and troubleshooting.
+
+`supabase/bootstrap.sql` is a generated bundle of every migration, so a new
+project needs one paste instead of seven. Rebuild it with `npm run db:bundle`
+after changing anything in `supabase/migrations/`; a test fails if it drifts.

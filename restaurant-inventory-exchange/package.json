@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "db:bundle": "node scripts/build-bootstrap-sql.mjs",
     "test": "vitest run",
     "test:db": "vitest run tests/db",
     "test:ui": "vitest run tests/ui",
