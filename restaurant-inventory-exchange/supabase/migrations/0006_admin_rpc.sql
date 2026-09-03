@@ -307,6 +307,8 @@ grant execute on function public.is_admin()               to authenticated;
 grant execute on function public.is_manager_or_admin()    to authenticated;
 grant execute on function public.can_see_transfer(uuid)   to authenticated;
 grant execute on function public.touch_presence()         to authenticated;
+grant execute on function public.is_not_disabled()        to authenticated;
+grant execute on function public.set_requested_location(uuid) to authenticated;
 grant execute on function public.create_transfer(public.transfer_kind, uuid, jsonb, text, uuid) to authenticated;
 grant execute on function public.confirm_transfer(uuid, text) to authenticated;
 grant execute on function public.adjust_transfer_item(uuid, numeric, text) to authenticated;

@@ -46,6 +46,21 @@ as $$
   )
 $$;
 
+-- A signed-up account that has not been switched off. Pending accounts pass:
+-- they need to see the list of locations to say where they work.
+create or replace function public.is_not_disabled()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.app_users u
+    where u.id = auth.uid() and u.status <> 'disabled'
+  )
+$$;
+
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -121,6 +136,7 @@ grant execute on function public.current_user_id() to authenticated;
 grant execute on function public.my_role() to authenticated;
 grant execute on function public.my_location() to authenticated;
 grant execute on function public.is_active_user() to authenticated;
+grant execute on function public.is_not_disabled() to authenticated;
 grant execute on function public.is_admin() to authenticated;
 grant execute on function public.is_manager_or_admin() to authenticated;
 grant execute on function public.can_see_transfer(uuid) to authenticated;

@@ -30,11 +30,14 @@ describe('account provisioning', () => {
     expect(row.email).toBe('john@example.com');
     expect(row.location_id).toBe(org.hib2);
 
-    // A pending account can see itself and nothing else.
+    // A pending account can see itself, and the list of locations so it can
+    // say where it works. Nothing else.
     await asUser(org.db, id, async (c) => {
       expect((await c.query('select * from public.app_users')).rows).toHaveLength(1);
-      expect((await c.query('select * from public.locations')).rows).toHaveLength(0);
+      expect((await c.query('select * from public.locations')).rows).toHaveLength(4);
       expect((await c.query('select * from public.inventory_items')).rows).toHaveLength(0);
+      expect((await c.query('select * from public.transfers')).rows).toHaveLength(0);
+      expect((await c.query('select * from public.audit_log')).rows).toHaveLength(0);
     });
   });
 
@@ -145,6 +148,32 @@ describe('account provisioning', () => {
         await expect(c.query(`select * from public.${table}`)).rejects.toThrow(/permission denied/i);
       }
     });
+  });
+
+  it('lets a pending account state where it works, once', async () => {
+    const org = await seedOrg();
+    const id = await signUp(org.db, 'ping@example.com', { full_name: 'Ping Wu' });
+    await asUser(org.db, id, (c) =>
+      c.query('select public.set_requested_location($1)', [org.hib3]),
+    );
+    const loc = (
+      await org.db.query<{ location_id: string }>(
+        'select location_id from public.app_users where id = $1',
+        [id],
+      )
+    ).rows[0]!.location_id;
+    expect(loc).toBe(org.hib3);
+
+    // Once approved, the employee can no longer move themselves.
+    await asUser(org.db, org.adminId, (c) =>
+      c.query(
+        'select public.admin_update_user($1, null, $2, $3::public.user_status)',
+        [id, org.hib3, 'active'],
+      ),
+    );
+    await expect(
+      asUser(org.db, id, (c) => c.query('select public.set_requested_location($1)', [org.hib1])),
+    ).rejects.toThrow(/administrator sets your location/i);
   });
 
   it('a disabled account loses access immediately', async () => {

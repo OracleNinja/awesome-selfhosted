@@ -30,9 +30,11 @@ grant select on public.audit_log              to authenticated;
 grant select on public.app_settings           to authenticated;
 
 -- ------------------------------------------------------------ locations ----
+-- Pending accounts can read this one table and nothing else, because the
+-- first thing they are asked is which restaurant they work at.
 create policy locations_read on public.locations
   for select to authenticated
-  using (public.is_active_user());
+  using (public.is_not_disabled());
 
 -- ------------------------------------------------------------ app_users ----
 -- Always your own row (so a pending user can see they are pending), your

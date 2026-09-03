@@ -111,6 +111,41 @@ begin
 end;
 $$;
 
+-- --------------------------------------------- pending user picks a place ----
+-- The only write a pending account can make. Once an admin has approved the
+-- account, the location is theirs to set, not the employee's.
+create or replace function public.set_requested_location(p_location_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_user public.app_users%rowtype;
+begin
+  select * into v_user from public.app_users where id = auth.uid();
+  if not found then
+    raise exception 'No account for this session' using errcode = '42501';
+  end if;
+  if v_user.status <> 'pending' then
+    raise exception 'An administrator sets your location' using errcode = '42501';
+  end if;
+
+  perform 1 from public.locations where id = p_location_id and active;
+  if not found then
+    raise exception 'Unknown or inactive location' using errcode = '22023';
+  end if;
+
+  update public.app_users set location_id = p_location_id where id = v_user.id;
+
+  perform public.write_audit('user.location_requested', 'app_users', v_user.id::text,
+    jsonb_build_object('location_id', v_user.location_id),
+    jsonb_build_object('location_id', p_location_id));
+
+  return p_location_id;
+end;
+$$;
+
 -- ------------------------------------------------------ create transfer ----
 -- p_items: [{"item_id": "<uuid>", "quantity": 2}, ...]
 create or replace function public.create_transfer(

@@ -12,7 +12,10 @@ export type Ctx = { db: PGlite };
 export async function freshDatabase(): Promise<PGlite> {
   const db = await PGlite.create();
   await db.exec(readFileSync(SHIM, 'utf8'));
-  for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
+  const files = readdirSync(MIGRATIONS)
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
+  for (const file of files) {
     const sql = readFileSync(join(MIGRATIONS, file), 'utf8');
     try {
       await db.exec(sql);
@@ -61,7 +64,7 @@ export async function signUp(
     'insert into auth.users (email, raw_user_meta_data) values ($1, $2::jsonb) returning id',
     [email.toLowerCase(), JSON.stringify(meta)],
   );
-  return res.rows[0].id;
+  return res.rows[0]!.id;
 }
 
 export async function locationId(db: PGlite, name: string): Promise<string> {
