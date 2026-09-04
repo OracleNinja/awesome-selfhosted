@@ -68,6 +68,136 @@ export type ConversationSummary = Omit<Conversation, 'messages'> & {
   messageCount: number;
 };
 
+/**
+ * Conversation export.
+ *
+ * Markdown is for reading and sharing; JSON is for feeding a conversation into
+ * something else, so it stays close to the stored shape rather than being
+ * prettified. Reasoning is excluded by default: it is the model's scratch work,
+ * it is often long, and a transcript someone intends to share is rarely
+ * improved by it.
+ */
+/**
+ * Conversation search.
+ *
+ * Backed by SQLite FTS5, which the shipping runtime provides (Electron 39.8.10,
+ * SQLite 3.51.2 — verified by spike, not assumed). The index covers message
+ * `content` only. Reasoning text is the model's scratch work and searching it
+ * surfaces hits a user cannot see in the transcript; titles are matched in a
+ * later version, so a hit always carries its conversation's title but a query
+ * matching only a title finds nothing today.
+ *
+ * The query is never interpreted as FTS5 syntax. Passing a raw user string to
+ * MATCH raises a SQLite error on completely ordinary typing -- a lone quote,
+ * a trailing "AND", "a-b", "a:b" all throw -- so the store quotes the whole
+ * query as a single FTS5 string literal and appends a prefix wildcard. The
+ * consequence is deliberate: FTS5 boolean operators are not exposed, and a
+ * typed "AND" is searched for literally.
+ */
+export interface SearchRequest {
+  /** Raw text as typed. Never pre-escaped by the caller. */
+  query: string;
+  /** Clamped to 1..MAX_SEARCH_LIMIT; omitted means DEFAULT_SEARCH_LIMIT. */
+  limit?: number;
+}
+
+/**
+ * Which index produced a hit.
+ *
+ * v2 adds title matching. It is a SECOND external-content FTS5 table over
+ * `conversations.title` rather than an extension of the message index, because
+ * external content maps every indexed column to one base table — verified:
+ * adding a `title` column to the messages index makes `rebuild` fail with
+ * `no such column: T.title`.
+ *
+ * A non-FTS title match (LIKE) was measured and rejected: it loses diacritic
+ * folding (`cafe` stops finding `café`), it has no bm25 and no snippet, and it
+ * substring-matches punctuation, so a query of `"` alone would return title
+ * hits — breaking the guarantee that a non-indexable query returns nothing.
+ */
+export type SearchMatchField = 'title' | 'content';
+
+export interface SearchHit {
+  conversationId: string;
+  /** The conversation's title, so a result identifies itself without a second lookup. */
+  title: string;
+  /** Which index matched. Both kinds carry conversationId and title. */
+  matchedIn: SearchMatchField;
+  /**
+   * Present only on a content match. A title match is a property of the
+   * conversation and is not tied to any one message, so these are absent
+   * rather than filled with a placeholder.
+   */
+  messageId?: string;
+  role?: Role;
+  /**
+   * A short excerpt around the match. Matched runs are wrapped in
+   * SNIPPET_MATCH_OPEN/CLOSE, which are private-use code points rather than
+   * markup: the renderer splits on them and renders text nodes, so a snippet
+   * can never inject markup no matter what the conversation contained.
+   */
+  /**
+   * For a content match, an excerpt of the message. For a title match, an
+   * excerpt of the title. Match runs are delimited the same way in both.
+   */
+  snippet: string;
+  /**
+   * When the matched thing was created: the message for a content match, the
+   * conversation for a title match. Deliberately not the conversation's
+   * `updated_at` — a field named `createdAt` fed from an `updated_at` column
+   * is the kind of quiet inconsistency that misleads the next reader.
+   */
+  createdAt: number;
+  /**
+   * FTS5 bm25 relevance. Lower is a better match; hits arrive already sorted.
+   *
+   * Scores from the title and content indexes are computed over different
+   * corpora and are therefore not strictly comparable to each other. Ordering
+   * within one kind of match is meaningful; the relative position of a title
+   * hit against a content hit is approximate, and deliberately not presented
+   * to the user as a precise ranking.
+   */
+  score: number;
+}
+
+export interface SearchResult {
+  /**
+   * Best match first, across both indexes. Empty for an empty or
+   * non-indexable query -- never all conversations.
+   */
+  hits: SearchHit[];
+  /** True when more matches existed than the limit allowed. */
+  truncated: boolean;
+  /** Set only when the search could not be completed; hits is then empty. */
+  error?: AppError;
+}
+
+/** Delimiters around matched runs inside SearchHit.snippet. */
+export const SNIPPET_MATCH_OPEN = '\uE000';
+export const SNIPPET_MATCH_CLOSE = '\uE001';
+
+export const DEFAULT_SEARCH_LIMIT = 50;
+export const MAX_SEARCH_LIMIT = 200;
+
+export type ExportFormat = 'markdown' | 'json';
+
+export interface ExportRequest {
+  /** Conversation to export. */
+  id: string;
+  format: ExportFormat;
+  /** Include the reasoning/thinking text alongside each answer. */
+  includeReasoning: boolean;
+}
+
+/**
+ * Cancelling a save dialog is a normal outcome, not a failure — it is reported
+ * distinctly so the renderer never shows an error for a deliberate action.
+ */
+export type ExportResult =
+  | { status: 'saved'; path: string; bytes: number }
+  | { status: 'cancelled' }
+  | { status: 'error'; message: string };
+
 /** How the active model exposes reasoning, probed once per model per session. */
 export type ThinkingMode = 'structured' | 'inline' | 'none';
 

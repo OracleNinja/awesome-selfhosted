@@ -347,6 +347,80 @@ test('labels an unclosed reasoning block instead of discarding the text', async 
   await expect(page.getByTestId('message-error')).toHaveCount(0);
 });
 
+test('labels an unclosed reasoning block as incomplete even when the done chunk arrives late', async () => {
+  // Same scenario as the test above, but the reasoning chunk and the `done`
+  // chunk are deliberately forced into separate ticks via chunkDelayMs. This
+  // is what a loaded machine makes every stream look like — the previous
+  // test only catches this defect when the two chunks happen to land in the
+  // same React render batch, which is exactly how it was misfiled as flaky
+  // (P2Q-DEFECT-1). chunkDelayMs controls the stub's own timing, not the
+  // assertions below: the `expect` calls still poll for the final state,
+  // they do not sleep and hope.
+  await app.close();
+  await stub.close();
+  stub = await startStubOllama({
+    supportsThink: false,
+    chunkDelayMs: 400,
+    script: [
+      { content: '<think>reasoning that never closes' },
+      { done: true, eval_count: 5, eval_duration: 1_000_000_000 },
+    ],
+  });
+  await launch();
+
+  await page.getByTestId('composer-input').fill('think out loud');
+  await page.getByTestId('send-button').click();
+
+  const toggle = page.getByTestId('thinking-toggle');
+  await expect(toggle).toContainText('Incomplete reasoning');
+  await expect(page.getByTestId('thinking-body')).toContainText('reasoning that never closes');
+  await expect(page.getByTestId('message-error')).toHaveCount(0);
+});
+
+test('keeps reasoning expanded once the answer starts when "Always expand reasoning" is on', async () => {
+  // Regression coverage for a setting that had no test at all: a formula
+  // that looked plausible for the incomplete-reasoning fix above silently
+  // broke this setting by collapsing the panel the moment the answer
+  // started, which is exactly when a user who turned this on would want to
+  // read it.
+  await page.getByTestId('open-settings').click();
+
+  // Not `.check()`: this checkbox is controlled and its value round-trips
+  // through IPC (onChange -> main process -> persisted -> new prop), so the
+  // render that carries the new `checked` value lands a tick after the
+  // click. `.check()` clicks and verifies in the same breath and can observe
+  // the pre-update render, failing intermittently even though the click
+  // worked. Asserting `toBeChecked()` separately checks the same fact but
+  // polls for it instead of sampling once — same shape as the production
+  // bug this file is testing, so it gets the same treatment here.
+  const showThinking = page.getByTestId('settings-show-thinking');
+  await showThinking.click();
+  await expect(showThinking).toBeChecked();
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('settings-dialog')).toHaveCount(0);
+
+  stub.setOptions({
+    script: [
+      { thinking: 'I should greet the user politely.' },
+      { content: 'Hello there!' },
+      { done: true, eval_count: 2, eval_duration: 1_000_000_000 },
+    ],
+  });
+
+  await page.getByTestId('composer-input').fill('hi');
+  await page.getByTestId('send-button').click();
+
+  await expect(page.getByTestId('message-assistant')).toContainText('Hello there!');
+
+  // Still expanded after the answer has fully rendered, unlike the default
+  // (collapsed) behaviour covered by the "shows reasoning in a collapsible
+  // panel" test above.
+  const toggle = page.getByTestId('thinking-toggle');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByTestId('thinking-body')).toContainText('greet the user politely');
+});
+
 test('settings changes apply immediately and survive a restart', async () => {
   await page.getByTestId('open-settings').click();
   await expect(page.getByTestId('settings-dialog')).toBeVisible();

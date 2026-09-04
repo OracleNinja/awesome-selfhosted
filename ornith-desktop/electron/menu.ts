@@ -48,6 +48,17 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
           accelerator: 'CmdOrCtrl+Shift+Backspace',
           click: send('menu:delete-chat'),
         },
+        {
+          // `id` lets the e2e suite trigger this deterministically via
+          // Menu.getApplicationMenu()?.getMenuItemById(...) in the main
+          // process — Playwright's keyboard input reaches the renderer's
+          // web content, not Electron's native accelerator table, so a
+          // synthetic keypress cannot be trusted to fire this reliably.
+          id: 'menu-export-chat',
+          label: 'Export Chat…',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: send('menu:export-chat'),
+        },
         { type: 'separator' },
         ...(isMac
           ? ([{ role: 'close' }] as Electron.MenuItemConstructorOptions[])
@@ -78,6 +89,17 @@ export function buildAppMenu(getWindow: () => BrowserWindow | null): void {
           label: 'Focus Composer',
           accelerator: 'CmdOrCtrl+K',
           click: send('menu:focus-composer'),
+        },
+        { type: 'separator' },
+        {
+          // Same rationale as `menu-export-chat` above: Playwright's synthetic
+          // keypresses reach the renderer's web content, not Electron's native
+          // accelerator table, so the e2e suite triggers this item by id via
+          // Menu.getApplicationMenu() rather than sending Cmd+F.
+          id: 'menu-search',
+          label: 'Find in Conversations…',
+          accelerator: 'CmdOrCtrl+F',
+          click: send('menu:search'),
         },
       ],
     },

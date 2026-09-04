@@ -1,0 +1,203 @@
+# Product verification.
+#
+# This workflow deliberately contains no verification logic of its own. Every
+# command it runs comes from the declarative specs in tools/verify/, executed
+# by tools/verify/run.js — the same path a developer runs locally. A second,
+# CI-only implementation would be free to drift from the local one, and the
+# first thing anybody would notice is a green CI over a broken checkout.
+#
+# Each product is a separate job so one product's failure does not mask
+# another's, and so the matrix shows which product is actually broken.
+#
+# SKIP is not PASS. The runner reports a skipped step as SKIP and never
+# converts it to a pass; jobs below do not paper over that. The Electron E2E
+# suite needs a virtual display and system GTK/NSS libraries, so it stays
+# optional and is reported as SKIP here rather than pretended to have run.
+
+name: verify
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: ornith-cloud
+            needs-python: false
+          - project: ornith-desktop
+            needs-python: false
+          - project: embroidery-genie-backend
+            needs-python: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        if: matrix.needs-python
+        with:
+          python-version: '3.11'
+
+      - name: Verify ${{ matrix.project }}
+        run: |
+          set -o pipefail
+          node tools/verify/run.js ${{ matrix.project }} 2>&1 | tee "$RUNNER_TEMP/verify.log"
+
+      # Presentation only — it runs no verification of its own and never
+      # changes the job's outcome. Without it the evidence exists solely in
+      # the raw log, and a reviewer cannot answer "what actually ran?" from
+      # the checks page.
+      - name: Publish what was verified
+        if: always()
+        run: |
+          {
+            echo "### $JOB_LABEL"
+            echo ''
+            echo '```text'
+            grep -E '^  (PASS|FAIL|SKIP|WARN) |^  steps:|^  tests:|^ +[0-9]+ (executed )?step' \
+              "$RUNNER_TEMP/verify.log" || echo '(no evidence lines captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          JOB_LABEL: Verify ${{ matrix.project }}
+
+      # A verification run must not rewrite tracked files. If it did, the
+      # result is not trustworthy: the thing that was verified is no longer
+      # the thing in the commit.
+      - name: Working tree must be unchanged by verification
+        run: |
+          if [ -n "$(git status --porcelain -uall)" ]; then
+            echo "::error::verification mutated tracked repository content"
+            git status --porcelain -uall
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+  # The runner decides what PASS, FAIL and SKIP mean for every product, so a
+  # defect here misreports all three at once. It needs its own tests, and they
+  # need to run — this suite exists because the runner shipped claiming that a
+  # malformed spec could never crash it, which was not true of malformed steps.
+  harness:
+    name: verification harness self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the runner itself
+        run: node tools/verify/run.test.js
+
+  # The matrix job above runs the backend with no database, so its DB-gated
+  # tests report SKIP. That is honest, but a skip proves nothing about the
+  # code it skipped: 87 of the backend's tests never ran there. This job
+  # supplies a real PostgreSQL and runs the same spec, so the conditional
+  # step flips from SKIP to a graded PASS/FAIL.
+  #
+  # It is required, not advisory. Unlike the Electron E2E suite, nothing here
+  # depends on the runner having a display or system libraries — a database
+  # is something CI can always provide, so a failure here is a real failure.
+  verify-with-database:
+    name: embroidery-genie-backend (with database)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: genie_test
+        ports:
+          - 5432:5432
+        # Without a health gate the verification can start before Postgres is
+        # accepting connections, which fails as a confusing test error rather
+        # than as a clear "the database was not ready".
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify embroidery-genie-backend against PostgreSQL
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/genie_test
+        run: |
+          set -o pipefail
+          node tools/verify/run.js embroidery-genie-backend 2>&1 | tee "$RUNNER_TEMP/verify.log"
+
+      - name: Publish what was verified
+        if: always()
+        run: |
+          {
+            echo '### embroidery-genie-backend (with database)'
+            echo ''
+            echo '```text'
+            grep -E '^  (PASS|FAIL|SKIP|WARN) |^  steps:|^  tests:|^ +[0-9]+ (executed )?step' \
+              "$RUNNER_TEMP/verify.log" || echo '(no evidence lines captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Working tree must be unchanged by verification
+        run: |
+          if [ -n "$(git status --porcelain -uall)" ]; then
+            echo "::error::verification mutated tracked repository content"
+            git status --porcelain -uall
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+  # Reported separately and allowed to fail: this needs a virtual display and
+  # system libraries that the required jobs deliberately do not depend on.
+  # Its result is advisory — a red run here never blocks, and a green run here
+  # is the only thing that lets anyone claim the E2E suite actually passed.
+  verify-optional-e2e:
+    name: ornith-desktop e2e (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install a virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Run optional steps under Xvfb
+        run: |
+          set -o pipefail
+          xvfb-run -a node tools/verify/run.js ornith-desktop --with-optional 2>&1 \
+            | tee "$RUNNER_TEMP/verify.log"
+
+      - name: Publish what was verified
+        if: always()
+        run: |
+          {
+            echo '### ornith-desktop e2e (optional)'
+            echo ''
+            echo '```text'
+            grep -E '^  (PASS|FAIL|SKIP|WARN) |^  steps:|^  tests:|^ +[0-9]+ (executed )?step' \
+              "$RUNNER_TEMP/verify.log" || echo '(no evidence lines captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
