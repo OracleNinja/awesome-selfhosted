@@ -5,6 +5,10 @@ import { openDatabase } from '../../electron/store/db';
 import { createConversationStore, type ConversationStore } from '../../electron/store/conversations';
 import { searchConversations, type ConversationSearcher } from '../../electron/search';
 import type { SearchResult } from '../../shared/types';
+import {
+  seedAppDerivedConversation,
+  seedManuallyTitledConversation,
+} from '../fixtures/derivedTitleCorpus';
 
 /**
  * Real fixtures, not mocks: an in-memory `node:sqlite` conversation store,
@@ -221,6 +225,97 @@ describe('searchConversations', () => {
         // A title hit describes the conversation, not any one message.
         expect(result.hits[0].messageId).toBeUndefined();
         expect(result.hits[0].role).toBeUndefined();
+      });
+    });
+  });
+
+  /**
+   * P2P-DEFECT-2 regression coverage, at this file's own boundary.
+   *
+   * tests/unit/search.test.ts already proves the dedupe itself is correct
+   * against `ConversationStore.search` directly, using the same
+   * `derivedTitleCorpus.ts` fixtures this describe block reuses. What is not
+   * yet covered anywhere is whether `searchConversations` -- the untrusted-
+   * input-validating wrapper this file exists to test -- passes an
+   * overlapping title/content result through unchanged rather than
+   * reshaping, re-sorting, or otherwise disturbing it. Every fixture
+   * elsewhere in this file, including 'title-only search reaches the IPC
+   * boundary' above, deliberately isolates the title term from the content
+   * term; these fixtures deliberately do not, because that overlap is what
+   * `electron/chat/orchestrator.ts`'s `deriveTitle(firstMessage)` produces
+   * for every real first turn (see derivedTitleCorpus.ts's module comment).
+   */
+  describe('title/content overlap reaches the IPC boundary (P2P-DEFECT-2)', () => {
+    it('returns a single content row when the title and the first message share the query term', async () => {
+      await withFixtures(async ({ store }) => {
+        const { conversationId, firstMessageId } = seedAppDerivedConversation(
+          store,
+          'ornith-en',
+          'the kakapo breeding season starts in spring',
+        );
+
+        const result = searchConversations({ query: 'kakapo' }, { store });
+
+        expect(result.error).toBeUndefined();
+        expect(result.hits).toHaveLength(1);
+        expect(result.hits[0]).toMatchObject({
+          matchedIn: 'content',
+          conversationId,
+          messageId: firstMessageId,
+        });
+      });
+    });
+
+    it('returns a title row for a manually-retitled conversation with no matching message', async () => {
+      await withFixtures(async ({ store }) => {
+        const { conversationId, title } = seedManuallyTitledConversation(
+          store,
+          'ornith-en',
+          'Toucan enclosure renovation',
+          ['the contractor arrives next week'],
+        );
+
+        const result = searchConversations({ query: 'toucan' }, { store });
+
+        expect(result.error).toBeUndefined();
+        expect(result.hits).toHaveLength(1);
+        expect(result.hits[0]).toMatchObject({ matchedIn: 'title', conversationId, title });
+        // A title hit describes the conversation, not any one message.
+        expect(result.hits[0].messageId).toBeUndefined();
+      });
+    });
+
+    it('returns one hit of each kind when one conversation matches by title and a different conversation matches by content', async () => {
+      await withFixtures(async ({ store }) => {
+        const titled = seedManuallyTitledConversation(
+          store,
+          'ornith-en',
+          'Peacock feather study',
+          ['unrelated notes about scheduling'],
+        );
+        const contentMatch = seedAppDerivedConversation(
+          store,
+          'ornith-en',
+          'an unrelated opening note',
+          ['the peacock displayed its feathers this morning'],
+        );
+
+        const result = searchConversations({ query: 'peacock' }, { store });
+
+        expect(result.error).toBeUndefined();
+        // Exactly these two, and no more -- rules out a stray extra row for
+        // either conversation, which is what a broken dedupe would produce.
+        expect(result.hits).toHaveLength(2);
+        expect(
+          result.hits.some(
+            (h) => h.matchedIn === 'title' && h.conversationId === titled.conversationId,
+          ),
+        ).toBe(true);
+        expect(
+          result.hits.some(
+            (h) => h.matchedIn === 'content' && h.conversationId === contentMatch.conversationId,
+          ),
+        ).toBe(true);
       });
     });
   });

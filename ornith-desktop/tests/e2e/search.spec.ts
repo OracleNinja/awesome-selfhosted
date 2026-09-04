@@ -154,20 +154,20 @@ test('selecting a result opens the matching conversation and closes the panel', 
   await triggerSearchMenu();
   await page.getByTestId('search-input').fill('unicorn');
 
-  // P2P-DEFECT-2 (recorded, deferred to Phase 2Q -- not fixed here): this
-  // conversation's title is derived verbatim from its first message (see
-  // electron/chat/orchestrator.ts deriveTitle), so a query matching that text
-  // hits both the content and title FTS indexes for the same conversation --
-  // one conversation, two rows. .first() disambiguates which row gets
-  // clicked; it does not matter which of the two, since both carry this same
-  // conversation's conversationId and every assertion below is about where
-  // clicking leads, not about the row count (which is deliberately not
-  // asserted here, so this test does not cement the defect).
-  await page
+  // P2P-DEFECT-2 (fixed): this conversation's title is derived verbatim from
+  // its first message (see electron/chat/orchestrator.ts deriveTitle), so a
+  // query matching that text would once have hit both the content and title
+  // FTS indexes for the same conversation -- one conversation, two rows. The
+  // store now suppresses the title hit whenever a message in the same
+  // conversation also matches (electron/store/conversations.ts SEARCH_SQL),
+  // so this conversation contributes a single content row. The locator below
+  // is strict on purpose -- no .first() -- so resolving to one element is
+  // itself an assertion that there is exactly one.
+  const unicornResult = page
     .getByTestId('search-result')
-    .filter({ hasText: 'The quick unicorn jumps over the fence' })
-    .first()
-    .click();
+    .filter({ hasText: 'The quick unicorn jumps over the fence' });
+  await expect(unicornResult).toHaveCount(1);
+  await unicornResult.click();
 
   // The panel closes and the app actually switches conversations — checked
   // through what a user would see, not internal state.
