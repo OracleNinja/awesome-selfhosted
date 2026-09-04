@@ -8,6 +8,10 @@ import {
   SNIPPET_MATCH_OPEN,
   SNIPPET_MATCH_CLOSE,
 } from '../../shared/types';
+import {
+  seedAppDerivedConversation,
+  seedManuallyTitledConversation,
+} from '../fixtures/derivedTitleCorpus';
 
 describe('conversation search', () => {
   let db: DatabaseSync;
@@ -290,18 +294,30 @@ describe('conversation search', () => {
       });
     });
 
-    it('finds both a title hit and a content hit when the term appears in both', () => {
+    // P2P-DEFECT-2: this test previously asserted the defect itself (both a
+    // title hit and a content hit for one conversation, from one query).
+    // That is a deliberate contract change, not a weakening: the rule is now
+    // "a conversation yields a title hit only if no message in it matches
+    // the same query" -- content wins, since a content row carries
+    // messageId (lets the UI jump to that message) and the title is
+    // rendered on every row regardless, so dropping the title row loses
+    // nothing.
+    it('suppresses the title hit and keeps the content hit when the term appears in both (content wins)', () => {
       const c = store.create('ornith-en', 'Puffin colony notes');
-      store.beginTurn(c.id, 'the puffin returned to the same burrow this year', 'ornith-en');
+      const { userMessage } = store.beginTurn(
+        c.id,
+        'the puffin returned to the same burrow this year',
+        'ornith-en',
+      );
 
       const result = store.search({ query: 'puffin' });
 
-      expect(result.hits.some((h) => h.matchedIn === 'title' && h.conversationId === c.id)).toBe(
-        true,
-      );
-      expect(result.hits.some((h) => h.matchedIn === 'content' && h.conversationId === c.id)).toBe(
-        true,
-      );
+      expect(result.hits).toHaveLength(1);
+      expect(result.hits[0]).toMatchObject({
+        matchedIn: 'content',
+        conversationId: c.id,
+        messageId: userMessage.id,
+      });
     });
 
     it('finds a renamed title and stops finding the old one', () => {
@@ -364,16 +380,30 @@ describe('conversation search', () => {
       expect(titleHit?.createdAt).not.toBe(2_000);
     });
 
+    // P2P-DEFECT-2: previously one conversation whose title and content both
+    // matched (asserting the defect's 2-row shape). After the fix, a single
+    // conversation can no longer produce both kinds of hit for the same
+    // query (see the suppression test above), so this property -- every
+    // hit, of either kind, carries conversationId and title -- is
+    // demonstrated across two conversations instead: one matched by title
+    // only, one by content only. This is a deliberate contract change, not
+    // a weakening of the original assertion.
     it('every hit, of either kind, carries conversationId and title', () => {
-      const c = store.create('ornith-en', 'Dual match dunlin');
-      store.beginTurn(c.id, 'a note about the dunlin', 'ornith-en');
+      const titleOnly = store.create('ornith-en', 'Dunlin colony notes');
+      store.beginTurn(titleOnly.id, 'unrelated content', 'ornith-en');
+      const contentOnly = store.create('ornith-en', 'Generic');
+      store.beginTurn(contentOnly.id, 'a note about the dunlin', 'ornith-en');
 
       const result = store.search({ query: 'dunlin' });
 
       expect(result.hits).toHaveLength(2);
       for (const hit of result.hits) {
-        expect(hit.conversationId).toBe(c.id);
-        expect(hit.title).toBe('Dual match dunlin');
+        if (hit.conversationId === titleOnly.id) {
+          expect(hit.title).toBe('Dunlin colony notes');
+        } else {
+          expect(hit.conversationId).toBe(contentOnly.id);
+          expect(hit.title).toBe('Generic');
+        }
       }
     });
 
@@ -423,6 +453,115 @@ describe('conversation search', () => {
         expect(Array.isArray(result.hits)).toBe(true);
         expect(typeof result.truncated).toBe('boolean');
       });
+    });
+  });
+
+  // P2P-DEFECT-2 regression coverage. Every fixture in `title matching`
+  // above deliberately isolates the title term from the content term, which
+  // is exactly what let the duplicate-row defect ship undetected: in
+  // production a conversation's title IS deriveTitle(firstMessage) (see
+  // electron/chat/orchestrator.ts), so title and content genuinely overlap.
+  // tests/fixtures/derivedTitleCorpus.ts builds conversations that shape.
+  describe('title suppression when a message also matches (P2P-DEFECT-2)', () => {
+    it('returns only the content hit when the auto-derived title and the first message share the query term', () => {
+      const { conversationId, firstMessageId } = seedAppDerivedConversation(
+        store,
+        'ornith-en',
+        'the narwhal migration route this spring',
+      );
+
+      const result = store.search({ query: 'narwhal' });
+
+      expect(result.hits).toHaveLength(1);
+      expect(result.hits[0]).toMatchObject({
+        matchedIn: 'content',
+        conversationId,
+        messageId: firstMessageId,
+      });
+    });
+
+    it('still returns exactly one title row for a manually-retitled conversation with no matching message', () => {
+      const { conversationId, title } = seedManuallyTitledConversation(
+        store,
+        'ornith-en',
+        'Wombat burrow survey',
+        ['notes about soil composition'],
+      );
+
+      const result = store.search({ query: 'wombat' });
+
+      expect(result.hits).toHaveLength(1);
+      expect(result.hits[0]).toMatchObject({ matchedIn: 'title', conversationId, title });
+    });
+
+    it('leaves a content-only match on a later message unaffected', () => {
+      // First message deliberately does not mention the term, so the
+      // derived title stays clean; the term only appears in a later turn.
+      const { conversationId, followUpMessageIds } = seedAppDerivedConversation(
+        store,
+        'ornith-en',
+        'a general check-in about the week',
+        ['the platypus sighting was confirmed at the creek'],
+      );
+
+      const result = store.search({ query: 'platypus' });
+
+      expect(result.hits).toHaveLength(1);
+      expect(result.hits[0]).toMatchObject({
+        matchedIn: 'content',
+        conversationId,
+        messageId: followUpMessageIds[0],
+      });
+    });
+
+    it('suppresses the title row and returns every matching message as its own content row', () => {
+      const { conversationId, firstMessageId, followUpMessageIds } = seedAppDerivedConversation(
+        store,
+        'ornith-en',
+        'the heron count this spring',
+        ['another heron was seen at dawn', 'a third heron near the reeds'],
+      );
+
+      const result = store.search({ query: 'heron' });
+
+      expect(result.hits).toHaveLength(3);
+      expect(result.hits.every((h) => h.matchedIn === 'content')).toBe(true);
+      expect(result.hits.some((h) => h.matchedIn === 'title')).toBe(false);
+      expect(result.hits.map((h) => h.messageId).sort()).toEqual(
+        [firstMessageId, ...followUpMessageIds].sort(),
+      );
+      for (const hit of result.hits) {
+        expect(hit.conversationId).toBe(conversationId);
+      }
+    });
+
+    it('returns one hit of each kind when the query matches one conversation by title and a different conversation by content', () => {
+      const titled = seedManuallyTitledConversation(
+        store,
+        'ornith-en',
+        'Kestrel nesting log',
+        ['unrelated notes about the weekly schedule'],
+      );
+      const contentMatch = seedAppDerivedConversation(
+        store,
+        'ornith-en',
+        'an unrelated first note',
+        ['the kestrel returned to the ledge this morning'],
+      );
+
+      const result = store.search({ query: 'kestrel' });
+
+      expect(result.hits).toHaveLength(2);
+      expect(
+        result.hits.some(
+          (h) => h.matchedIn === 'title' && h.conversationId === titled.conversationId,
+        ),
+      ).toBe(true);
+      expect(
+        result.hits.some(
+          (h) => h.matchedIn === 'content' && h.conversationId === contentMatch.conversationId,
+        ),
+      ).toBe(true);
     });
   });
 

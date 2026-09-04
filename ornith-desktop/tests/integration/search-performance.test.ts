@@ -80,6 +80,13 @@ describe('search performance', () => {
           SNIPPET_MATCH_OPEN,
           SNIPPET_MATCH_CLOSE,
           matchQuery,
+          // P2P-DEFECT-2 suppression subquery's own MATCH bind -- same
+          // escaped value as the title branch's MATCH above it. Mirrors
+          // electron/store/conversations.ts's searchStatement.all() bind
+          // order exactly; this EXPLAIN is run against that exact SQL text,
+          // not a hand-duplicated copy, so the bind list must match it
+          // positionally or this validates the wrong plan.
+          matchQuery,
           50,
         ) as unknown as Array<{ detail: string }>;
 

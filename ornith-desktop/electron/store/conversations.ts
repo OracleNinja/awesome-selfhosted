@@ -203,6 +203,22 @@ export const SEARCH_SQL = `
       FROM conversations_fts
       JOIN conversations c ON c.rowid = conversations_fts.rowid
       WHERE conversations_fts MATCH ?
+        -- P2P-DEFECT-2: a fresh conversation's title is deriveTitle(firstMessage)
+        -- (electron/chat/orchestrator.ts), so a query matching that opening
+        -- message matches both indexes for the same conversation -- one
+        -- conversation, two rows. Content wins: a title hit is suppressed
+        -- whenever any message in this conversation matches too, because the
+        -- content row carries message_id (lets the UI jump to that message)
+        -- while the title is rendered on every row regardless, so dropping
+        -- the title row loses nothing. This is independent of the outer
+        -- LIMIT above -- it asks "does any message in this conversation
+        -- match", never "does one on this page" -- so which page is being
+        -- fetched can never change whether a title hit is suppressed.
+        AND c.id NOT IN (
+          SELECT m2.conversation_id FROM messages_fts
+          JOIN messages m2 ON m2.rowid = messages_fts.rowid
+          WHERE messages_fts MATCH ?
+        )
     )
     ORDER BY score ASC, conversation_id ASC, (matched_in = 'content') ASC, message_id ASC
     LIMIT ?
@@ -437,13 +453,16 @@ export function createConversationStore(db: DatabaseSync): ConversationStore {
         // Ask for one extra row across the combined (title + content) result
         // set so a full page can be distinguished from an exact-fit page
         // without a second COUNT query. The same escaped query is bound to
-        // both MATCH clauses inside searchStatement.
+        // all three MATCH clauses inside searchStatement: the content
+        // branch, the title branch, and the title branch's own suppression
+        // subquery (P2P-DEFECT-2 -- see SEARCH_SQL above).
         const rows = searchStatement.all(
           SNIPPET_MATCH_OPEN,
           SNIPPET_MATCH_CLOSE,
           matchQuery,
           SNIPPET_MATCH_OPEN,
           SNIPPET_MATCH_CLOSE,
+          matchQuery,
           matchQuery,
           limit + 1,
         ) as unknown as SearchRow[];
