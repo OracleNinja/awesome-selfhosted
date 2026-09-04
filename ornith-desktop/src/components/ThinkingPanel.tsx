@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 interface Props {
   thinking: string;
@@ -21,13 +21,21 @@ export default function ThinkingPanel({
   defaultOpen,
   incomplete,
 }: Props) {
-  const [open, setOpen] = useState(defaultOpen || incomplete);
-  const [userToggled, setUserToggled] = useState(false);
+  // null = the user has not taken manual control. While that holds, openness
+  // is derived fresh from props on every render, so a prop that changes after
+  // mount (most notably `incomplete`, which only becomes true at finalise —
+  // see MessageItem/orchestrator) is reflected immediately instead of being
+  // frozen at whatever it was when the panel first mounted (P2Q-DEFECT-1).
+  // Once the user toggles, their choice wins over anything that arrives
+  // afterward, including an `incomplete` flag landing later.
+  const [userOverride, setUserOverride] = useState<boolean | null>(null);
 
-  // Collapse automatically once the answer begins, unless the user has taken over.
-  useEffect(() => {
-    if (!userToggled && answerStarted && !defaultOpen && !incomplete) setOpen(false);
-  }, [answerStarted, userToggled, defaultOpen, incomplete]);
+  // Auto-open whenever the block turned out incomplete (stays open forever,
+  // it never becomes non-incomplete again) or whenever the caller wants
+  // reasoning shown by default — deliberately not gated on `answerStarted`,
+  // since "always expand reasoning" means exactly that.
+  const autoOpen = incomplete || defaultOpen;
+  const open = userOverride ?? autoOpen;
 
   if (!thinking) return null;
 
@@ -44,10 +52,7 @@ export default function ThinkingPanel({
         className="thinking-toggle"
         aria-expanded={open}
         data-testid="thinking-toggle"
-        onClick={() => {
-          setUserToggled(true);
-          setOpen((v) => !v);
-        }}
+        onClick={() => setUserOverride(!open)}
       >
         <span className={`thinking-caret${open ? ' is-open' : ''}`} aria-hidden="true">
           ▸

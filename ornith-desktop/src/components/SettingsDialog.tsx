@@ -205,6 +205,7 @@ export default function SettingsDialog({ settings, status, voice, onUpdate, onCl
               type="checkbox"
               checked={settings.showThinkingByDefault}
               onChange={(e) => onUpdate({ showThinkingByDefault: e.target.checked })}
+              data-testid="settings-show-thinking"
             />
             <span>Always expand reasoning</span>
           </label>
